@@ -33,7 +33,7 @@ if [[ -z "${WORKSPACE_AGENT_RELAY_AUTH_TOKEN:-}" ]]; then
 fi
 
 case "$WORKSPACE_AGENT_RELAY_AUTH_TOKEN" in
-  replace-me|local-mcp-token|change-me|changeme|paste-output-from-openssl-rand-hex-32|"<paste the output of openssl rand -hex 32>")
+  replace-me|local-mcp-token|change-me|changeme|paste-output-from-openssl-rand-hex-32|replace-me-with-openssl-rand-hex-32|"<paste the output of openssl rand -hex 32>")
     echo "WORKSPACE_AGENT_RELAY_AUTH_TOKEN still uses a placeholder value." >&2
     echo "Generate one with: openssl rand -hex 32" >&2
     exit 1

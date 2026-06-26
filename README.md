@@ -39,7 +39,7 @@ cp .env.example .env
 Edit `.env`:
 
 ```bash
-WORKSPACE_AGENT_RELAY_AUTH_TOKEN=<paste the output of openssl rand -hex 32>
+WORKSPACE_AGENT_RELAY_AUTH_TOKEN=replace-me-with-openssl-rand-hex-32
 WORKSPACE_AGENT_RELAY_TRIGGER_URL=https://api.chatgpt.com/v1/workspace_agents/agtch_your_id/trigger
 WORKSPACE_AGENT_RELAY_AGENT_TOKEN=your-workspace-agent-access-token
 ```
