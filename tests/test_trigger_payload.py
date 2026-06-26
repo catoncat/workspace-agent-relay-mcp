@@ -86,6 +86,7 @@ def test_trigger_client_posts_expected_payload() -> None:
     assert opener.request is not None
     assert opener.request.get_method() == "POST"
     assert opener.request.headers["Authorization"] == "Bearer agent-token"
+    assert opener.request.headers["Content-type"] == "application/json"
     assert opener.request.headers["Idempotency-key"] == "relay_123"
     body = json.loads(opener.request.data.decode("utf-8"))
     assert body == {"conversation_key": "research:sherlog", "input": "hello"}
