@@ -76,7 +76,14 @@ def test_server_info_lists_relay_tools(tmp_path: Path, monkeypatch) -> None:
     result = _call(server.server_info)
 
     assert result["success"] is True
-    assert "record_result" in result["tools"]
-    assert "record_progress" in result["tools"]
-    assert "ask_user" in result["tools"]
-    assert "get_run_context" in result["tools"]
+    assert set(result["tools"]) == {
+        "server_info",
+        "record_progress",
+        "record_result",
+        "ask_user",
+        "get_run_context",
+    }
+    rendered = str(result)
+    assert "auth_token" not in rendered
+    assert "default_agent_token" not in rendered
+    assert "callback_token" not in rendered
