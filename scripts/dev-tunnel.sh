@@ -10,7 +10,11 @@ fi
 
 # shellcheck disable=SC1091
 source "$ROOT_DIR/.venv/bin/activate"
-pip install -e ".[dev]"
+env \
+  -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN \
+  -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN \
+  -u WORKSPACE_AGENT_RELAY_OAUTH_LOGIN_TOKEN \
+  pip install -e ".[dev]"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -29,7 +33,7 @@ if [[ -z "${WORKSPACE_AGENT_RELAY_AUTH_TOKEN:-}" ]]; then
 fi
 
 case "$WORKSPACE_AGENT_RELAY_AUTH_TOKEN" in
-  replace-me|local-mcp-token|change-me|changeme)
+  replace-me|local-mcp-token|change-me|changeme|paste-output-from-openssl-rand-hex-32|"<paste the output of openssl rand -hex 32>")
     echo "WORKSPACE_AGENT_RELAY_AUTH_TOKEN still uses a placeholder value." >&2
     echo "Generate one with: openssl rand -hex 32" >&2
     exit 1
@@ -95,14 +99,14 @@ echo "MCP endpoint: ${SERVER_URL}/mcp"
 if command -v cloudflared >/dev/null 2>&1; then
   if [[ -n "${WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG:-}" ]]; then
     if [[ -n "${WORKSPACE_AGENT_RELAY_TUNNEL_NAME:-}" ]]; then
-      env -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN \
+      env -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN -u WORKSPACE_AGENT_RELAY_OAUTH_LOGIN_TOKEN \
         cloudflared tunnel --config "${WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG}" run "${WORKSPACE_AGENT_RELAY_TUNNEL_NAME}" &
     else
-      env -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN \
+      env -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN -u WORKSPACE_AGENT_RELAY_OAUTH_LOGIN_TOKEN \
         cloudflared tunnel --config "${WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG}" run &
     fi
   else
-    env -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN \
+    env -u WORKSPACE_AGENT_RELAY_AUTH_TOKEN -u WORKSPACE_AGENT_RELAY_AGENT_TOKEN -u WORKSPACE_AGENT_RELAY_OAUTH_LOGIN_TOKEN \
       cloudflared tunnel --url "${SERVER_URL}" &
   fi
   CLOUDFLARED_PID=$!
