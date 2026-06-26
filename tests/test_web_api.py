@@ -386,11 +386,16 @@ def test_api_marks_run_failed_when_trigger_client_raises(tmp_path: Path) -> None
     body = response.json()
     assert body["success"] is False
     assert body["error"] == "trigger request failed"
+    # The real exception type+message is surfaced for diagnosis (redacted).
+    assert "RuntimeError" in body["detail"]
+    assert "upstream failed" in body["detail"]
     # Trigger failure is non-terminal (trigger_failed), because the ChatGPT
     # trigger API is async and may still have dispatched the agent even when we
     # got no 202. A live agent's callbacks must still be accepted.
     assert body["run"]["status"] == "trigger_failed"
     assert body["run"]["trigger_http_status"] == 0
+    assert body["run"]["trigger_error"] is not None
+    assert "RuntimeError" in body["run"]["trigger_error"]
     assert "agent-token" not in str(body)
     assert runs_response.json()[0]["status"] == "trigger_failed"
     assert trigger_client.calls[0]["conversation_key"] == "research:sherlog"

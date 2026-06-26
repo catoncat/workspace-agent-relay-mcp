@@ -263,6 +263,13 @@ class RelayStore:
                 );
                 """
             )
+            # Forward-only migrations: add columns to existing databases.
+            # SQLite's ALTER TABLE ADD COLUMN is idempotent-safe when guarded by
+            # a table_info check. New databases get the column via the path below
+            # too (cheaper than branching on fresh-vs-existing).
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+            if "trigger_error" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN trigger_error TEXT")
 
     def upsert_agent(self, *, name: str, trigger_url: str, token_ref: str) -> dict[str, Any]:
         now = _now()
@@ -494,6 +501,7 @@ class RelayStore:
         trigger_http_status: int,
         trigger_x_request_id: str | None,
         conversation_url: str | None,
+        trigger_error: str | None = None,
     ) -> dict[str, Any]:
         trigger_status = "accepted" if 200 <= trigger_http_status < 300 else "failed"
         # On trigger failure, mark the run trigger_failed (non-terminal) instead of
@@ -512,10 +520,10 @@ class RelayStore:
                 """
                 UPDATE runs
                 SET status = ?, trigger_status = ?, trigger_http_status = ?,
-                    trigger_x_request_id = ?, conversation_url = ?, updated_at = ?
+                    trigger_x_request_id = ?, conversation_url = ?, trigger_error = ?, updated_at = ?
                 WHERE request_id = ?
                 """,
-                (status, trigger_status, trigger_http_status, trigger_x_request_id, conversation_url, now, request_id),
+                (status, trigger_status, trigger_http_status, trigger_x_request_id, conversation_url, trigger_error, now, request_id),
             )
         result = self.get_run_by_request_id(request_id)
         self._notify_run(int(result["id"]))

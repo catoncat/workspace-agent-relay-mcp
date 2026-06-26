@@ -11,6 +11,15 @@ from urllib.request import Request, build_opener
 
 REDACTED_SECRET = "[REDACTED]"
 
+# urllib's default User-Agent is "Python-urllib/<version>". The ChatGPT trigger
+# endpoint's edge (Cloudflare) stalls such requests: the TLS+HTTP request is
+# sent, but no response bytes are ever returned, so the call hangs until the
+# read timeout and surfaces as http_status=0. Use an honest, non-Python-urllib
+# User-Agent so the request is treated like any other HTTP client. Confirmed
+# empirically: same URL/token/payload with this UA returns 202 in ~7-10s, while
+# the default Python-urllib UA hangs for the full 60s timeout.
+TRIGGER_USER_AGENT = "workspace-agent-relay-mcp/1.0 (+https://github.com/envvar/workspace-agent-relay-mcp)"
+
 
 def generate_request_id(prefix: str = "relay") -> str:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
@@ -31,6 +40,11 @@ def _redact_secret(value: Any, secret: str) -> Any:
     if isinstance(value, list):
         return [_redact_secret(item, secret) for item in value]
     return value
+
+
+def redact_secret(value: Any, secret: str) -> Any:
+    """Public alias for :func:`_redact_secret` for callers outside this module."""
+    return _redact_secret(value, secret)
 
 
 def build_trigger_input(
@@ -98,6 +112,7 @@ class TriggerClient:
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
                 "Idempotency-Key": idempotency_key,
+                "User-Agent": TRIGGER_USER_AGENT,
             },
             method="POST",
         )
@@ -128,12 +143,19 @@ class TriggerClient:
                 response_body=parsed if isinstance(parsed, dict) else {},
                 error=str(parsed),
             )
-        except URLError as exc:
-            error = _redact_secret(str(exc.reason), access_token)
+        except (URLError, TimeoutError, OSError) as exc:
+            # URLError covers most transport failures. TimeoutError (a subclass
+            # of OSError, NOT of URLError) is raised on socket read timeouts —
+            # which is exactly the failure mode the Python-urllib UA triggers.
+            # Catching OSError/TimeoutError explicitly prevents these from
+            # bubbling up as opaque "trigger request failed" 502s and preserves
+            # the real reason (e.g. "The read operation timed out").
+            reason = exc.reason if isinstance(exc, URLError) else exc
+            error = _redact_secret(str(reason), access_token)
             return TriggerResult(
                 http_status=0,
                 x_request_id=None,
                 conversation_url=None,
                 response_body={},
-                error=error,
+                error=f"{type(exc).__name__}: {error}",
             )

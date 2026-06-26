@@ -474,6 +474,97 @@ def test_late_trigger_result_does_not_reopen_terminal_run(tmp_path: Path) -> Non
     assert store.get_run_by_request_id("run_1")["status"] == "done"
 
 
+def test_update_run_trigger_result_persists_trigger_error(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_err",
+        request_id="run_err",
+    )
+
+    failed = store.update_run_trigger_result(
+        request_id="run_err",
+        trigger_http_status=0,
+        trigger_x_request_id=None,
+        conversation_url=None,
+        trigger_error="TimeoutError: The read operation timed out",
+    )
+
+    assert failed["status"] == "trigger_failed"
+    assert failed["trigger_error"] == "TimeoutError: The read operation timed out"
+    # The column survives a reload (migration path works on existing DBs).
+    reloaded = store.get_run_by_request_id("run_err")
+    assert reloaded["trigger_error"] == "TimeoutError: The read operation timed out"
+
+    # A subsequent accepted trigger clears the error.
+    accepted = store.update_run_trigger_result(
+        request_id="run_err",
+        trigger_http_status=202,
+        trigger_x_request_id="req_ok",
+        conversation_url="https://chatgpt.com/c/test",
+        trigger_error=None,
+    )
+    assert accepted["trigger_error"] is None
+
+
+def test_existing_database_gets_trigger_error_column_via_migration(tmp_path: Path) -> None:
+    # Build a runs table WITHOUT the trigger_error column, then confirm the
+    # store adds it on init (forward-only migration for existing databases).
+    import sqlite3
+    db = tmp_path / "relay.sqlite"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+            trigger_url TEXT NOT NULL, trigger_id TEXT NOT NULL, token_ref TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id INTEGER NOT NULL,
+            name TEXT NOT NULL, conversation_key TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT
+        );
+        CREATE TABLE runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL UNIQUE,
+            agent_id INTEGER NOT NULL, conversation_id INTEGER NOT NULL,
+            conversation_key TEXT NOT NULL, callback_token_hash TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL, input_markdown TEXT NOT NULL,
+            trigger_status TEXT NOT NULL DEFAULT 'draft', trigger_http_status INTEGER,
+            trigger_x_request_id TEXT, conversation_url TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT
+        );
+        CREATE TABLE events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL,
+            request_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT,
+            markdown TEXT, payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL,
+            name TEXT NOT NULL, mime_type TEXT NOT NULL, content TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.close()
+
+    store = RelayStore(db)
+    # Opening the store runs _init_schema, which must add the missing column.
+    import sqlite3 as _sqlite3
+    check = _sqlite3.connect(db)
+    cols = {row[1] for row in check.execute("PRAGMA table_info(runs)")}
+    check.close()
+    assert "trigger_error" in cols
+
+
 def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

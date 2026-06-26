@@ -242,9 +242,57 @@ def test_trigger_client_returns_url_error_without_access_token_echo() -> None:
     assert result.x_request_id is None
     assert result.conversation_url is None
     assert result.response_body == {}
-    assert result.error == "connection refused [REDACTED]"
+    # The error preserves the exception type (so URLError vs TimeoutError are
+    # distinguishable in the stored trigger_error) and redacts the token.
+    assert result.error == "URLError: connection refused [REDACTED]"
     assert access_token not in str(result.response_body)
     assert access_token not in str(result.error)
+
+
+def test_trigger_client_captures_timeout_error_with_real_reason() -> None:
+    # TimeoutError is an OSError subclass, NOT a URLError subclass. Before the
+    # fix it bubbled past the `except URLError` handler and surfaced as an
+    # opaque "trigger request failed" 502 with http_status=0 and no detail.
+    # This is the exact failure mode the Python-urllib User-Agent triggered
+    # against the ChatGPT edge (socket read timeout after 60s).
+    access_token = "agent-token-secret"
+    opener = FakeOpener(error=TimeoutError("The read operation timed out"))
+    client = TriggerClient(opener=opener)
+
+    result = client.trigger(
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        access_token=access_token,
+        conversation_key="research:sherlog",
+        input_text="hello",
+        idempotency_key="relay_123",
+    )
+
+    assert result.accepted is False
+    assert result.http_status == 0
+    assert result.error == "TimeoutError: The read operation timed out"
+    assert access_token not in str(result.error)
+
+
+def test_trigger_client_sends_non_python_urllib_user_agent() -> None:
+    # Regression guard: urllib's default User-Agent ("Python-urllib/<ver>")
+    # causes the ChatGPT trigger edge to stall until the read timeout with no
+    # response bytes. The client must send an explicit, non-Python-urllib UA.
+    opener = FakeOpener()
+    client = TriggerClient(opener=opener)
+
+    client.trigger(
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        access_token="agent-token",
+        conversation_key="research:sherlog",
+        input_text="hello",
+        idempotency_key="relay_123",
+    )
+
+    assert opener.request is not None
+    ua = opener.request.headers.get("User-agent")
+    assert ua is not None
+    assert "Python-urllib" not in ua
+    assert ua.startswith("workspace-agent-relay-mcp/")
 
 
 def test_trigger_result_accepted_reflects_success_status() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 from typing import Any
 
@@ -11,10 +12,18 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from ...store.relay_store import TERMINAL_STATUSES
 from ...store.bus import RunEventBus
-from ...trigger import TriggerClient, build_trigger_input, generate_callback_token, generate_request_id
+from ...trigger import (
+    TriggerClient,
+    build_trigger_input,
+    generate_callback_token,
+    generate_request_id,
+    redact_secret,
+)
 from ..deps import json_body
 from ..errors import json_error
 from ..validation import agent_token, validate_trigger_url
+
+logger = logging.getLogger("workspace_agent_relay_mcp.trigger")
 
 
 def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
@@ -119,15 +128,24 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
                 input_text=trigger_input,
                 idempotency_key=idempotency_key,
             )
-        except Exception:
+        except Exception as exc:
+            # trigger() normally catches HTTPError/URLError/TimeoutError/OSError
+            # itself and returns a TriggerResult. Reaching here means something
+            # unexpected blew up (e.g. opener misconfiguration). Preserve the
+            # real exception type+message so the failure is diagnosable instead
+            # of the old opaque "trigger request failed", but redact the access
+            # token in case it leaked into the exception text.
+            trigger_error = redact_secret(f"{type(exc).__name__}: {exc}", access_token)
+            logger.exception("trigger dispatch raised unexpectedly for request_id=%s", request_id)
             run = store.update_run_trigger_result(
                 request_id=request_id,
                 trigger_http_status=0,
                 trigger_x_request_id=None,
                 conversation_url=None,
+                trigger_error=trigger_error,
             )
             return JSONResponse(
-                {"success": False, "error": "trigger request failed", "run": run},
+                {"success": False, "error": "trigger request failed", "detail": trigger_error, "run": run},
                 status_code=502,
             )
         run = store.update_run_trigger_result(
@@ -135,6 +153,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             trigger_http_status=trigger_result.http_status,
             trigger_x_request_id=trigger_result.x_request_id,
             conversation_url=trigger_result.conversation_url,
+            trigger_error=trigger_result.error,
         )
         return JSONResponse(run)
 

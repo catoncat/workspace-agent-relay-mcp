@@ -319,7 +319,7 @@ function RunPhaseHint({ detail }: { detail: RunDetail }) {
             {hint}
           </Shimmer>
         ) : (
-          <p className="text-sm text-muted-foreground">{hint}</p>
+          <p className="whitespace-pre-line text-sm text-muted-foreground">{hint}</p>
         )}
       </MessageContent>
     </Message>
@@ -631,7 +631,9 @@ function phaseHint(detail: RunDetail): string | null {
   const run = detail.run
   if (detail.events.length > 0 || detail.plan) return null
   if (run.status === 'trigger_failed' || run.trigger_status === 'failed' || run.status === 'failed') {
-    return 'Trigger failed. The agent may still be running — waiting for a callback to confirm.'
+    const reason = run.trigger_error?.trim()
+    const base = 'Trigger failed. The agent may still be running — waiting for a callback to confirm.'
+    return reason ? `${base}\n${reason}` : base
   }
   if (run.trigger_status === 'accepted') {
     return 'Trigger accepted (202). Waiting for the agent to call back via MCP.'

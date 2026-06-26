@@ -22,6 +22,7 @@ export type Run = {
   trigger_status?: string
   trigger_http_status?: number
   trigger_x_request_id?: string
+  trigger_error?: string | null
   conversation_url?: string
   idempotency_key?: string
   created_at?: string
