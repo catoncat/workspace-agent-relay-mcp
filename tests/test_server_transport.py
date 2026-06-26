@@ -1,13 +1,23 @@
+import contextlib
 import base64
 import hashlib
+import socket
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import anyio
+import httpx
 import pytest
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
+import uvicorn
+
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 from workspace_agent_relay_mcp.config import RelayConfig
 from workspace_agent_relay_mcp.db import RelayStore
@@ -84,6 +94,73 @@ def _compat_app(
 def _pkce_s256(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@contextlib.contextmanager
+def _running_server(tmp_path: Path):
+    from workspace_agent_relay_mcp import server
+
+    server.config = RelayConfig(state_dir=tmp_path / "state", auth_token="secret")
+    server.store = RelayStore(server.config.database_path)
+    agent = server.store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conversation = server.store.create_conversation(
+        agent_id=agent["id"],
+        name="Sherlog",
+        conversation_key="research:sherlog",
+    )
+    server.store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    app = server.build_http_app()
+    port = _find_free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="on")
+    uvicorn_server = uvicorn.Server(config)
+    uvicorn_server.install_signal_handlers = lambda: None
+    thread = threading.Thread(target=uvicorn_server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        with socket.socket() as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex(("127.0.0.1", port)) == 0:
+                break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("Timed out waiting for relay MCP test server.")
+    try:
+        yield f"http://127.0.0.1:{port}/mcp", server.store
+    finally:
+        uvicorn_server.should_exit = True
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+
+async def _call_tool(url: str, name: str, arguments: dict[str, object]) -> dict[str, object]:
+    headers = {"Authorization": "Bearer secret"}
+    async with httpx.AsyncClient(headers=headers, timeout=10.0) as client:
+        async with streamable_http_client(url, http_client=client) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(name, arguments)
+                assert result.isError is False
+                assert result.structuredContent is not None
+                return dict(result.structuredContent)
 
 
 def test_server_card_is_public_and_describes_mcp_endpoint(tmp_path: Path) -> None:
@@ -367,3 +444,29 @@ def test_malformed_oauth_request_bodies_return_controlled_400(tmp_path: Path) ->
 
     assert malformed_json.status_code == 400
     assert malformed_form.status_code == 400
+
+
+def test_mcp_record_result_end_to_end(tmp_path: Path) -> None:
+    with _running_server(tmp_path) as (url, store):
+
+        async def scenario() -> None:
+            result = await _call_tool(
+                url,
+                "record_result",
+                {
+                    "request_id": "run_1",
+                    "callback_token": "secret-callback",
+                    "conversation_key": "research:sherlog",
+                    "status": "done",
+                    "title": "Done",
+                    "markdown": "Final Markdown",
+                    "artifacts": [],
+                },
+            )
+            assert result["success"] is True
+
+        anyio.run(scenario)
+        run = store.get_run_by_request_id("run_1")
+        events = store.list_events(run["id"])
+        assert run["status"] == "done"
+        assert events[-1]["markdown"] == "Final Markdown"
