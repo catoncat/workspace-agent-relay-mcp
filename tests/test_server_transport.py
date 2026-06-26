@@ -137,8 +137,16 @@ def test_debug_rpc_summary_redacts_callback_token_argument() -> None:
           "name": "record_result",
           "arguments": {
             "request_id": "relay_1",
-            "callback_token": "secret-callback",
+            "callback_token": "secret-callback-token",
             "conversation_key": "research:sherlog",
+            "message": "echo secret-callback-token",
+            "markdown": "result contains secret-callback-token",
+            "artifacts": [
+              {
+                "title": "artifact secret-callback-token",
+                "content": "artifact body secret-callback-token"
+              }
+            ],
             "nested": {
               "api_key": "api-secret",
               "access_key": "access-secret"
@@ -160,7 +168,7 @@ def test_debug_rpc_summary_redacts_callback_token_argument() -> None:
     summary = _summarize_rpc_body(body)
     rendered = str(summary)
 
-    assert "secret-callback" not in rendered
+    assert "secret-callback-token" not in rendered
     assert "Bearer bearer-secret" not in rendered
     assert "api-secret" not in rendered
     assert "access-secret" not in rendered

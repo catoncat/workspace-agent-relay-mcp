@@ -177,18 +177,54 @@ def _truncate_jsonish(value: Any, *, max_chars: int = 240) -> str:
     return rendered[: max_chars - 1] + "…"
 
 
-def _redact_debug_value(value: Any) -> Any:
+def _is_debug_secret_key(key: Any) -> bool:
+    normalized_key = str(key).lower()
+    return any(part in normalized_key for part in DEBUG_SECRET_KEY_PARTS)
+
+
+def _collect_debug_secret_strings(value: Any, *, secret_context: bool = False) -> set[str]:
+    if isinstance(value, dict):
+        secrets: set[str] = set()
+        for key, item in value.items():
+            secrets.update(
+                _collect_debug_secret_strings(
+                    item,
+                    secret_context=secret_context or _is_debug_secret_key(key),
+                )
+            )
+        return secrets
+    if isinstance(value, list):
+        secrets: set[str] = set()
+        for item in value:
+            secrets.update(_collect_debug_secret_strings(item, secret_context=secret_context))
+        return secrets
+    if secret_context and isinstance(value, str) and value:
+        return {value}
+    return set()
+
+
+def _redact_debug_string(value: str, secrets: set[str]) -> str:
+    redacted = value
+    for secret in sorted(secrets, key=len, reverse=True):
+        redacted = redacted.replace(secret, DEBUG_REDACTED)
+    return redacted
+
+
+def _redact_debug_value(value: Any, secrets: set[str] | None = None) -> Any:
+    if secrets is None:
+        secrets = _collect_debug_secret_strings(value)
     if isinstance(value, dict):
         redacted: dict[Any, Any] = {}
         for key, item in value.items():
-            normalized_key = str(key).lower()
-            if any(part in normalized_key for part in DEBUG_SECRET_KEY_PARTS):
+            if _is_debug_secret_key(key):
                 redacted[key] = DEBUG_REDACTED
             else:
-                redacted[key] = _redact_debug_value(item)
+                redacted[key] = _redact_debug_value(item, secrets)
         return redacted
     if isinstance(value, list):
-        return [_redact_debug_value(item) for item in value]
+        return [_redact_debug_value(item, secrets) for item in value]
+    if isinstance(value, str):
+        return _redact_debug_string(value, secrets)
     return value
 
 
