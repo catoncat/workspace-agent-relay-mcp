@@ -99,6 +99,24 @@ def test_api_can_create_agent_and_conversation(tmp_path: Path) -> None:
     assert conversation_response.json()["conversation_key"] == "research:sherlog"
 
 
+def test_api_uses_default_trigger_url_when_payload_leaves_it_blank(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.post(
+            "/api/agents",
+            json={
+                "name": "default",
+                "trigger_url": "",
+                "token_ref": "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["trigger_url"] == "https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger"
+    assert response.json()["trigger_id"] == "agtch_test"
+
+
 def test_api_send_run_triggers_agent_and_records_metadata(tmp_path: Path) -> None:
     client, trigger_client = _client(tmp_path)
 

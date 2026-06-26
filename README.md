@@ -56,6 +56,8 @@ Dashboard:
 http://127.0.0.1:8799/
 ```
 
+When `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` is set, the dashboard shell still loads locally, but `/api/*` and `/mcp` require bearer auth. Paste the same relay auth token into the dashboard `API token` field and press `Refresh`.
+
 MCP endpoint:
 
 ```text
@@ -92,8 +94,8 @@ Do not only answer in the ChatGPT conversation.
 
 1. Start the relay.
 2. Connect the MCP endpoint to ChatGPT or the Workspace Agent runtime.
-3. Open the dashboard.
-4. Create or load the default agent.
+3. Open the dashboard and enter the relay auth token if auth is enabled.
+4. Create or load the default agent. If no agent exists, the dashboard uses `WORKSPACE_AGENT_RELAY_TRIGGER_URL`.
 5. Send a short task.
 6. Confirm the dashboard shows `accepted`.
 7. Confirm the agent calls `record_result`.
