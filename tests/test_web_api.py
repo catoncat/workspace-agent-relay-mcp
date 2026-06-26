@@ -205,6 +205,7 @@ def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
             },
         )
         missing_runs = client.get("/api/conversations/999/runs")
+        missing_run_detail = client.get("/api/runs/999")
         missing_create_run = client.post(
             "/api/conversations/999/runs",
             json={"input_markdown": "hello"},
@@ -218,6 +219,8 @@ def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
     assert duplicate_key.json()["success"] is False
     assert missing_runs.status_code == 404
     assert missing_runs.json()["success"] is False
+    assert missing_run_detail.status_code == 404
+    assert missing_run_detail.json()["success"] is False
     assert missing_create_run.status_code == 404
     assert missing_create_run.json()["success"] is False
 
@@ -239,10 +242,12 @@ def test_dashboard_shell_is_public_but_api_requires_bearer_when_auth_token_is_se
 
     with client:
         agents_missing = client.get("/api/agents")
+        run_detail_missing = client.get("/api/runs/999")
         dashboard_allowed = client.get("/")
         agents_allowed = client.get("/api/agents", headers=headers)
 
     assert agents_missing.status_code == 401
+    assert run_detail_missing.status_code == 401
     assert dashboard_allowed.status_code == 200
     assert "sessionStorage" in dashboard_allowed.text
     assert "Authorization" in dashboard_allowed.text
