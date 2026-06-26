@@ -46,6 +46,18 @@ def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> No
     assert store.validate_callback("run_1", "other", "secret-callback")["success"] is False
 
 
+def test_delete_conversation_archives_it_from_lists(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+
+    store.delete_conversation(conversation["id"])
+
+    assert store.list_conversations() == []
+    with pytest.raises(KeyError):
+        store.delete_conversation(conversation["id"])
+
+
 def test_create_run_redacts_callback_token_echo_from_input_markdown(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

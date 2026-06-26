@@ -109,6 +109,27 @@ def test_api_can_create_agent_and_conversation(tmp_path: Path) -> None:
     assert conversation_response.json()["conversation_key"] == "research:sherlog"
 
 
+def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        rename_response = client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"name": "Renamed"},
+        )
+        delete_response = client.delete(f"/api/conversations/{conversation['id']}")
+        list_response = client.get("/api/conversations")
+        missing_response = client.delete("/api/conversations/999")
+
+    assert rename_response.status_code == 200
+    assert rename_response.json()["name"] == "Renamed"
+    assert delete_response.status_code == 200
+    assert delete_response.json()["success"] is True
+    assert list_response.json() == []
+    assert missing_response.status_code == 404
+
+
 def test_api_uses_default_trigger_url_when_payload_leaves_it_blank(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
@@ -184,7 +205,7 @@ def test_api_follow_up_reuses_conversation_key_but_generates_new_message_ids(tmp
     assert trigger_client.calls[1]["idempotency_key"] == second["idempotency_key"]
 
 
-def test_dashboard_names_continuation_key_and_recent_conversation_url(tmp_path: Path) -> None:
+def test_dashboard_names_continuation_key_and_recent_conversation_url_actions(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
     with client:
@@ -193,8 +214,8 @@ def test_dashboard_names_continuation_key_and_recent_conversation_url(tmp_path: 
     assert response.status_code == 200
     assert 'id="root"' in response.text
     bundle = _frontend_bundle_text()
-    assert "Continuation key" in bundle
-    assert "Conversation URL" in bundle
+    assert "Copy continuation key" in bundle
+    assert "Open conversation" in bundle
     assert "/api/runs/" in bundle
 
 

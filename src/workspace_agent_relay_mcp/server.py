@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from pydantic import Field
 import uvicorn
 
 from . import __version__
@@ -55,9 +56,11 @@ LOCAL_STATE_TOOL = {
 }
 
 MCP_INSTRUCTIONS = (
-    "This server is a narrow callback relay for Workspace Agent runs. "
-    "Use record_progress for meaningful progress, ask_user when blocked on a human decision, "
-    "and record_result before finishing. Do not expect shell, filesystem, or git tools here."
+    "This server is the local operator's only window into your run. "
+    "The operator CANNOT see your ChatGPT-side plan, tool calls, reasoning, or partial answers — only what you write back here. "
+    "Treat these tools as how you keep the human in the loop, not as optional logging.\n"
+    "Workflow: call record_plan once at the start with your step plan; call record_progress with step_updates in batches after each chunk of work; call ask_user when you genuinely need a human decision; call record_result exactly once when you finish. "
+    "Every call returns the current plan snapshot so you stay oriented. Do not expect shell, filesystem, or git tools here."
 )
 
 mcp = FastMCP(APP_NAME, instructions=MCP_INSTRUCTIONS)
@@ -76,7 +79,7 @@ async def _tool_names() -> list[str]:
     name="server_info",
     title="Server Info",
     annotations=READ_ONLY_TOOL,
-    description="Return relay server metadata, state path, auth mode, version, and registered tool names.",
+    description="Use this to orient yourself: returns the relay app name, version, state paths, auth mode, and the list of tool names available on this server. Read-only, no callback token required.",
 )
 async def server_info() -> dict[str, Any]:
     return {
@@ -91,18 +94,72 @@ async def server_info() -> dict[str, Any]:
 
 
 @mcp.tool(
+    name="record_plan",
+    title="Record Plan",
+    annotations=LOCAL_STATE_TOOL,
+    description=(
+        "Use this at the START of a run to share your step plan with the local operator. "
+        "The operator cannot see your ChatGPT-side plan, so this is their only way to know what you are about to do. "
+        "Call it once before doing work; call it again only if your plan meaningfully changes. "
+        "Each step needs a stable id (reuse the same ids in record_progress step_updates) and a short title. "
+        "Returns the current plan and run status.\n"
+        "Example: steps=[{\"id\":\"s1\",\"title\":\"Confirm changed files\"}, {\"id\":\"s2\",\"title\":\"Fix Header sizing\"}, {\"id\":\"s3\",\"title\":\"Run build\"}]"
+    ),
+)
+def record_plan(
+    request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
+    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
+    conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
+    steps: Annotated[
+        list[dict[str, Any]],
+        Field(
+            description=(
+                "1-20 steps. Each step: {id, title, status?, note?}. "
+                "id: stable string reused in step_updates. title: <=200 chars. "
+                "status: pending|in_progress|done|skipped (defaults pending)."
+            ),
+            json_schema_extra={"minItems": 1, "maxItems": 20},
+        ),
+    ],
+) -> dict[str, Any]:
+    return store.record_plan(
+        request_id=request_id,
+        conversation_key=conversation_key,
+        callback_token=callback_token,
+        steps=steps,
+    )
+
+
+@mcp.tool(
     name="record_progress",
     title="Record Progress",
     annotations=LOCAL_STATE_TOOL,
-    description="Record a progress update for an open relay run. Requires request_id, conversation_key, and callback_token.",
+    description=(
+        "Use this after completing a chunk of work to batch-sync plan step statuses back to the operator. "
+        "Pass step_updates to flip one or more step ids to a new status (done/in_progress/skipped); "
+        "optionally include a one-line message summarizing what you just did. "
+        "Do not call this once per tiny tool call — batch several completed steps into one call. "
+        "Unknown step ids are ignored and listed in the returned ignored_step_ids. "
+        "Returns the updated plan and run status.\n"
+        "Example: step_updates=[{\"id\":\"s1\",\"status\":\"done\",\"note\":\"boundaries confirmed\"}, {\"id\":\"s2\",\"status\":\"in_progress\"}], message=\"Boundaries done, fixing Header\""
+    ),
 )
 def record_progress(
-    request_id: str,
-    callback_token: str,
-    conversation_key: str,
-    message: str,
-    title: str | None = None,
-    payload: dict[str, Any] | None = None,
+    request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
+    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
+    conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
+    message: Annotated[str, Field(description="Optional one-line summary of what you just did. Keep it short; full detail goes in record_result.")],
+    title: Annotated[str | None, Field(description="Optional short title for this progress beat.")] = None,
+    payload: Annotated[dict[str, Any] | None, Field(description="Optional structured extras. Do not put the callback_token here.")] = None,
+    step_updates: Annotated[
+        list[dict[str, Any]] | None,
+        Field(
+            description=(
+                "Optional batch of step status changes. Each: {id, status?, note?}. "
+                "status: pending|in_progress|done|skipped. Unknown ids are ignored."
+            ),
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     return store.record_progress(
         request_id=request_id,
@@ -111,6 +168,7 @@ def record_progress(
         message=message,
         title=title,
         payload=payload,
+        step_updates=step_updates,
     )
 
 
@@ -118,16 +176,25 @@ def record_progress(
     name="record_result",
     title="Record Result",
     annotations=LOCAL_STATE_TOOL,
-    description="Record the final Markdown result for an open relay run. This should be called before the agent finishes.",
+    description=(
+        "Use this EXACTLY ONCE when you finish the run. Records the final status, a title, and the full Markdown answer. "
+        "This is what the operator reads as the result — do not only answer in the ChatGPT conversation. "
+        "status must be done, blocked, or failed. Attach text artifacts if useful. "
+        "Returns the final run status.\n"
+        "Example: status=\"done\", title=\"UI fixes applied\", markdown=\"## Summary\\n...\", artifacts=[{\"name\":\"diff.md\",\"mime_type\":\"text/markdown\",\"content\":\"...\"}]"
+    ),
 )
 def record_result(
-    request_id: str,
-    callback_token: str,
-    conversation_key: str,
-    status: str,
-    title: str,
-    markdown: str,
-    artifacts: list[dict[str, Any]] | None = None,
+    request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
+    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
+    conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
+    status: Annotated[str, Field(description="Final status: done | blocked | failed.", json_schema_extra={"enum": ["done", "blocked", "failed"]})],
+    title: Annotated[str, Field(description="Short headline for the result, e.g. \"UI fixes applied\".")],
+    markdown: Annotated[str, Field(description="Full Markdown answer the operator will read. This is the deliverable.")],
+    artifacts: Annotated[
+        list[dict[str, Any]] | None,
+        Field(description="Optional text artifacts: each {name, mime_type, content, metadata?}."),
+    ] = None,
 ) -> dict[str, Any]:
     return store.record_result(
         request_id=request_id,
@@ -144,15 +211,21 @@ def record_result(
     name="ask_user",
     title="Ask User",
     annotations=LOCAL_STATE_TOOL,
-    description="Record a question that the local user must answer before the run can continue.",
+    description=(
+        "Use this when you are genuinely blocked on a human decision and cannot make progress without an answer. "
+        "Do NOT use this for status updates — use record_progress for those. "
+        "The operator answers via a follow-up trigger, not inline, so phrase a single clear question. "
+        "Returns a question id.\n"
+        "Example: question=\"Which branch should I target?\", choices=[\"main\",\"dev\"], context=\"Need the target before editing.\""
+    ),
 )
 def ask_user(
-    request_id: str,
-    callback_token: str,
-    conversation_key: str,
-    question: str,
-    choices: list[str] | None = None,
-    context: str | None = None,
+    request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
+    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
+    conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
+    question: Annotated[str, Field(description="One clear question the operator must answer.")],
+    choices: Annotated[list[str] | None, Field(description="Optional list of answer options to pick from.")] = None,
+    context: Annotated[str | None, Field(description="Optional short reason why this decision matters.")] = None,
 ) -> dict[str, Any]:
     return store.ask_user(
         request_id=request_id,
@@ -168,9 +241,16 @@ def ask_user(
     name="get_run_context",
     title="Get Run Context",
     annotations=READ_ONLY_TOOL,
-    description="Return recent run summaries for a conversation_key. Does not return secrets or callback tokens.",
+    description=(
+        "Use this to re-orient when your ChatGPT conversation state is incomplete: returns recent run summaries, "
+        "their progress/result event titles, and short markdown excerpts for a conversation_key. "
+        "No callback token required. Capped to <=20 runs and short excerpts to keep your context lean."
+    ),
 )
-def get_run_context(conversation_key: str, limit: int = 5) -> dict[str, Any]:
+def get_run_context(
+    conversation_key: Annotated[str, Field(description="The conversation_key to look up recent runs for.")],
+    limit: Annotated[int, Field(description="How many recent runs to return (1-20).", json_schema_extra={"minimum": 1, "maximum": 20})] = 5,
+) -> dict[str, Any]:
     return store.get_run_context(conversation_key, limit=limit)
 
 

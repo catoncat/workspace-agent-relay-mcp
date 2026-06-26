@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 TERMINAL_STATUSES = {"done", "blocked", "failed"}
 VALID_RESULT_STATUSES = TERMINAL_STATUSES
 TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
+VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
+MAX_PLAN_STEPS = 20
+MAX_STEP_TITLE_LEN = 200
 REDACTED_CALLBACK_TOKEN = "[redacted-callback-token]"
 
 
@@ -70,6 +73,74 @@ def _extract_trigger_id(trigger_url: str) -> str:
     return match.group(1) if match else ""
 
 
+def _normalize_plan_steps(steps: Any) -> list[dict[str, Any]]:
+    if not isinstance(steps, list):
+        raise ValueError("steps must be a list")
+    if not steps:
+        raise ValueError("steps must not be empty")
+    if len(steps) > MAX_PLAN_STEPS:
+        raise ValueError(f"steps must not exceed {MAX_PLAN_STEPS} items")
+    seen_ids: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise ValueError(f"step {index} must be an object")
+        step_id = step.get("id")
+        if not isinstance(step_id, str) or not step_id.strip():
+            raise ValueError(f"step {index} is missing a non-empty id")
+        step_id = step_id.strip()
+        if step_id in seen_ids:
+            raise ValueError(f"step id {step_id!r} is duplicated")
+        seen_ids.add(step_id)
+        title = step.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError(f"step {step_id!r} is missing a non-empty title")
+        title = title.strip()
+        if len(title) > MAX_STEP_TITLE_LEN:
+            raise ValueError(f"step {step_id!r} title exceeds {MAX_STEP_TITLE_LEN} chars")
+        status = step.get("status") or "pending"
+        if status not in VALID_STEP_STATUSES:
+            raise ValueError(f"step {step_id!r} has invalid status {status!r}")
+        note = step.get("note")
+        if note is not None and not isinstance(note, str):
+            raise ValueError(f"step {step_id!r} note must be a string")
+        normalized.append(
+            {
+                "id": step_id,
+                "title": title,
+                "status": status,
+                "note": (note or ""),
+            }
+        )
+    return normalized
+
+
+def _normalize_step_updates(updates: Any) -> list[dict[str, Any]]:
+    if not isinstance(updates, list):
+        raise ValueError("step_updates must be a list")
+    normalized: list[dict[str, Any]] = []
+    for index, update in enumerate(updates):
+        if not isinstance(update, dict):
+            raise ValueError(f"step_updates[{index}] must be an object")
+        step_id = update.get("id")
+        if not isinstance(step_id, str) or not step_id.strip():
+            raise ValueError(f"step_updates[{index}] is missing a non-empty id")
+        status = update.get("status")
+        if status is not None and status not in VALID_STEP_STATUSES:
+            raise ValueError(f"step_updates[{index}] has invalid status {status!r}")
+        note = update.get("note")
+        if note is not None and not isinstance(note, str):
+            raise ValueError(f"step_updates[{index}] note must be a string")
+        normalized.append(
+            {
+                "id": step_id.strip(),
+                "status": status,
+                "note": note,
+            }
+        )
+    return normalized
+
+
 class RelayStore:
     def __init__(self, database_path: Path, *, event_bus: RunEventBus | None = None) -> None:
         self.database_path = database_path
@@ -92,6 +163,7 @@ class RelayStore:
                     "run": self.get_run(run_id),
                     "events": self.list_events(run_id),
                     "artifacts": self.list_artifacts(run_id),
+                    "plan": self.get_plan(run_id),
                 },
             )
         except KeyError:
@@ -183,6 +255,12 @@ class RelayStore:
                     metadata_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS plans (
+                    run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+                    steps_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -243,6 +321,34 @@ class RelayStore:
         if row is None:
             raise KeyError(f"Conversation not found: {conversation_id}")
         return _row_to_dict(row) or {}
+
+    def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
+        if not name or not name.strip():
+            raise ValueError("name must not be empty")
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            conn.execute(
+                "UPDATE conversations SET name = ?, updated_at = ? WHERE id = ?",
+                (name.strip(), now, conversation_id),
+            )
+            row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Conversation not found: {conversation_id}")
+        return _row_to_dict(row) or {}
+
+    def delete_conversation(self, conversation_id: int) -> None:
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute(
+                "SELECT id FROM conversations WHERE id = ? AND archived_at IS NULL",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Conversation not found: {conversation_id}")
+            conn.execute(
+                "UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, conversation_id),
+            )
 
     def create_run(
         self,
@@ -315,6 +421,71 @@ class RelayStore:
         if row is None:
             raise KeyError(f"Run not found: {run_id}")
         return self._redact_run(_row_to_dict(row) or {})
+
+    def _get_plan_conn(self, conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
+        row = conn.execute("SELECT * FROM plans WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        payload = _row_to_dict(row) or {}
+        try:
+            steps = json.loads(payload.get("steps_json") or "[]")
+        except json.JSONDecodeError:
+            steps = []
+        if not isinstance(steps, list):
+            steps = []
+        return {
+            "run_id": int(payload["run_id"]),
+            "steps": steps,
+            "created_at": payload.get("created_at"),
+            "updated_at": payload.get("updated_at"),
+        }
+
+    def get_plan(self, run_id: int) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            return self._get_plan_conn(conn, run_id)
+
+    def record_plan(
+        self,
+        *,
+        request_id: str,
+        conversation_key: str,
+        callback_token: str,
+        steps: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        try:
+            normalized = _normalize_plan_steps(steps)
+        except ValueError as exc:
+            return {"success": False, "error": {"code": "invalid_plan", "message": str(exc)}}
+        with self._lock, self._connect(immediate=True) as conn:
+            validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
+            if not validation["success"]:
+                return validation
+            run = validation["run"]
+            run_id = int(run["id"])
+            now = _now()
+            redacted_steps = _redact_callback_token(normalized, callback_token)
+            conn.execute(
+                """
+                INSERT INTO plans (run_id, steps_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    steps_json = excluded.steps_json,
+                    updated_at = excluded.updated_at
+                """,
+                (run_id, _json_dumps(redacted_steps), now, now),
+            )
+            self._append_event_conn(
+                conn,
+                run_id=run_id,
+                request_id=request_id,
+                event_type="plan",
+                title="Plan updated",
+                markdown=None,
+                payload={"steps": redacted_steps},
+            )
+        plan = self.get_plan(run_id)
+        self._notify_run(run_id)
+        return {"success": True, "plan": plan, "run_status": self.get_run(run_id)["status"]}
 
     def update_run_trigger_result(
         self,
@@ -398,24 +569,126 @@ class RelayStore:
         message: str,
         title: str | None = None,
         payload: dict[str, Any] | None = None,
+        step_updates: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            normalized_updates = _normalize_step_updates(step_updates) if step_updates else []
+        except ValueError as exc:
+            return {"success": False, "error": {"code": "invalid_step_updates", "message": str(exc)}}
+        with self._lock, self._connect(immediate=True) as conn:
+            validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
+            if not validation["success"]:
+                return validation
+            run = validation["run"]
+            run_id = int(run["id"])
+            existing_plan = self._get_plan_conn(conn, run_id)
+            applied_updates: list[dict[str, Any]] = []
+            ignored_ids: list[str] = []
+            if normalized_updates and existing_plan is not None:
+                steps_by_id = {step["id"]: step for step in existing_plan["steps"]}
+                for update in normalized_updates:
+                    step = steps_by_id.get(update["id"])
+                    if step is None:
+                        ignored_ids.append(update["id"])
+                        continue
+                    if update["status"] is not None:
+                        step["status"] = update["status"]
+                    if update["note"] is not None:
+                        step["note"] = update["note"]
+                    applied_updates.append({"id": update["id"], "status": step["status"], "note": step["note"]})
+                redacted_steps = _redact_callback_token(existing_plan["steps"], callback_token)
+                conn.execute(
+                    "UPDATE plans SET steps_json = ?, updated_at = ? WHERE run_id = ?",
+                    (_json_dumps(redacted_steps), _now(), run_id),
+                )
+            elif normalized_updates and existing_plan is None:
+                ignored_ids = [update["id"] for update in normalized_updates]
+            progress_payload: dict[str, Any] = dict(payload or {})
+            if applied_updates:
+                progress_payload["step_updates"] = applied_updates
+            if ignored_ids:
+                progress_payload["ignored_step_ids"] = ignored_ids
+            event = self._append_event_conn(
+                conn,
+                run_id=run_id,
+                request_id=request_id,
+                event_type="progress",
+                title=_redact_callback_token(title, callback_token),
+                markdown=_redact_callback_token(message, callback_token),
+                payload=_redact_callback_token(progress_payload, callback_token),
+            )
+            conn.execute("UPDATE runs SET status = 'waiting', updated_at = ? WHERE id = ?", (_now(), run_id))
+        plan = self.get_plan(run_id)
+        self._notify_run(run_id)
+        return {"success": True, "event_id": event["id"], "plan": plan, "run_status": "waiting"}
+
+    def record_tool_trace(
+        self,
+        *,
+        request_id: str,
+        conversation_key: str,
+        callback_token: str,
+        tool: str,
+        title: str,
+        args_summary: dict[str, Any] | None = None,
+        result_summary: dict[str, Any] | None = None,
+        started_at: str | None = None,
+        duration_ms: int | float | None = None,
+        ok: bool = True,
+        error: str | None = None,
     ) -> dict[str, Any]:
         with self._lock, self._connect(immediate=True) as conn:
             validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
             if not validation["success"]:
                 return validation
             run = validation["run"]
+            run_id = int(run["id"])
+            markdown = self._format_trace_markdown(tool, title, ok, error, duration_ms)
+            payload = {
+                "trace": True,
+                "tool": tool,
+                "title": title,
+                "args_summary": args_summary,
+                "result_summary": result_summary,
+                "started_at": started_at,
+                "duration_ms": duration_ms,
+                "ok": ok,
+                "error": error,
+            }
             event = self._append_event_conn(
                 conn,
-                run_id=int(run["id"]),
+                run_id=run_id,
                 request_id=request_id,
                 event_type="progress",
                 title=_redact_callback_token(title, callback_token),
-                markdown=_redact_callback_token(message, callback_token),
+                markdown=_redact_callback_token(markdown, callback_token),
                 payload=_redact_callback_token(payload, callback_token),
             )
-            conn.execute("UPDATE runs SET status = 'waiting', updated_at = ? WHERE id = ?", (_now(), run["id"]))
-        self._notify_run(int(run["id"]))
+        self._notify_run(run_id)
         return {"success": True, "event_id": event["id"]}
+
+    @staticmethod
+    def _format_trace_markdown(
+        tool: str,
+        title: str,
+        ok: bool,
+        error: str | None,
+        duration_ms: int | float | None,
+    ) -> str:
+        marker = "✓" if ok else "✗"
+        target = title or tool
+        parts: list[str] = [f"{marker} {tool}"]
+        if target and target != tool:
+            parts.append(target)
+        if duration_ms is not None:
+            parts.append(f"({int(duration_ms)}ms)")
+        summary = " ".join(parts)
+        if not ok and error:
+            truncated = error.strip().replace("\n", " ")
+            if len(truncated) > 160:
+                truncated = truncated[:159] + "…"
+            summary += f" (failed: {truncated})"
+        return summary
 
     def ask_user(
         self,

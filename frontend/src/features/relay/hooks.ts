@@ -4,10 +4,12 @@ import { toast } from 'sonner'
 import {
   createConversation,
   createRun,
+  deleteConversation,
   ensureDefaultAgent,
   ensureDefaultConversation,
   getRunDetail,
   listRuns,
+  renameConversation,
   streamRun,
 } from '@/api/client'
 import type { Agent, Conversation, Run, RunDetail } from '@/api/types'
@@ -107,12 +109,25 @@ export function useCreateRun(conversationId: number | null) {
   return useMutation({
     mutationFn: async (input: string) => {
       if (!conversationId) throw new Error('Select a conversation before sending a task.')
-      const run = await createRun(conversationId, input)
-      return getRunDetail(run.id)
+      const { run, triggerFailed, warning } = await createRun(conversationId, input)
+      const detail = await getRunDetail(run.id)
+      if (triggerFailed) {
+        toast.warning(
+          warning
+            ? `${warning}. Your message was saved — open the run to review or retry.`
+            : 'Your message was saved, but triggering the agent failed. Open the run to review or retry.',
+        )
+      }
+      return detail
     },
     onSuccess: (detail) => {
       queryClient.setQueryData(relayQueryKeys.runDetail(detail.run.id), detail)
       if (conversationId) {
+        queryClient.setQueryData<Run[]>(relayQueryKeys.runs(conversationId), (current) => {
+          const runs = current ?? []
+          if (runs.some((run) => run.id === detail.run.id)) return runs
+          return [...runs, detail.run].sort((a, b) => a.id - b.id)
+        })
         void queryClient.invalidateQueries({ queryKey: relayQueryKeys.runs(conversationId) })
       }
     },
@@ -140,9 +155,37 @@ export function useCreateConversation(agents: Agent[]) {
   })
 }
 
+export function useRenameConversation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => renameConversation(id, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useDeleteConversation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => deleteConversation(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
 function emptyRunDetail(run: Run | undefined): RunDetail {
   if (!run) throw new Error('Run detail query is missing a run placeholder.')
-  return { run, events: [], artifacts: [] }
+  return { run, events: [], artifacts: [], plan: null }
 }
 
 function toError(err: unknown): Error {

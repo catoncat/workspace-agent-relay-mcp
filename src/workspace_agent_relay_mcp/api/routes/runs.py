@@ -22,6 +22,7 @@ def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
         "run": store.get_run(run_id),
         "events": store.list_events(run_id),
         "artifacts": store.list_artifacts(run_id),
+        "plan": store.get_plan(run_id),
     }
 
 

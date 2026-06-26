@@ -18,7 +18,7 @@ The relay exists because the Workspace Agent trigger API is currently an asynchr
 
 ## Reference Project
 
-Use `/Users/envvar/work/repos/poke/notion-local-ops-mcp` as an implementation reference for:
+Use `../notion-local-ops-mcp` (the sibling repo) as an implementation reference for:
 
 - FastMCP server structure.
 - Streamable HTTP transport at `/mcp`.

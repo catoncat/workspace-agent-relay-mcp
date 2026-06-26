@@ -14,3 +14,9 @@ frontend/node_modules/
 cloudflared.local.yml
 cloudflared.local.yaml
 .worktrees/
+
+# Editor / tool private state
+.qoder/
+.cursor/
+.idea/
+.vscode/

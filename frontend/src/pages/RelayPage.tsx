@@ -5,6 +5,7 @@ import { RelaySidebar } from '@/components/RelaySidebar'
 import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import type { Agent, Conversation, Run } from '@/api/types'
 import {
   NewConversationDialog,
   type NewConversationValues,
@@ -15,11 +16,17 @@ import {
   useBootstrap,
   useCreateConversation,
   useCreateRun,
+  useDeleteConversation,
+  useRenameConversation,
   useRunDetailStream,
   useRunDetails,
   useRuns,
 } from '@/features/relay/hooks'
-import { useAuth } from '@/providers/AuthProvider'
+import { useAuth } from '@/providers/AuthContext'
+
+const EMPTY_AGENTS: Agent[] = []
+const EMPTY_CONVERSATIONS: Conversation[] = []
+const EMPTY_RUNS: Run[] = []
 
 export function RelayPage() {
   const params = useParams<{ conversationId?: string; runId?: string }>()
@@ -34,16 +41,25 @@ export function RelayPage() {
   const [newConversationOpen, setNewConversationOpen] = useState(false)
 
   const bootstrapQuery = useBootstrap()
-  const agents = bootstrapQuery.data?.agents ?? []
-  const conversations = bootstrapQuery.data?.conversations ?? []
+  const agents = bootstrapQuery.data?.agents ?? EMPTY_AGENTS
+  const conversations = bootstrapQuery.data?.conversations ?? EMPTY_CONVERSATIONS
 
   const runsQuery = useRuns(selectedConversationId)
-  const runs = runsQuery.data ?? []
-  const { details: runDetails } = useRunDetails(runs)
+  const runs = runsQuery.data ?? EMPTY_RUNS
+  const { details: runDetails, isLoading: runDetailsLoading } = useRunDetails(runs)
   useRunDetailStream(selectedRunId)
+  const threadLoading = Boolean(
+    selectedConversationId &&
+      (runsQuery.isPending ||
+        runsQuery.isPlaceholderData ||
+        (runsQuery.isFetching && runs.length === 0) ||
+        (runDetailsLoading && runDetails.length === 0)),
+  )
 
   const createRunMutation = useCreateRun(selectedConversationId)
   const createConversationMutation = useCreateConversation(agents)
+  const renameConversationMutation = useRenameConversation()
+  const deleteConversationMutation = useDeleteConversation()
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
@@ -72,14 +88,11 @@ export function RelayPage() {
   }, [navigate, runDetails, selectedConversationId, selectedRunId])
 
   const handleSend = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const trimmed = text.trim()
       if (!trimmed || !selectedConversationId) return
-      createRunMutation.mutate(trimmed, {
-        onSuccess: (detail) => {
-          navigate(`/c/${selectedConversationId}/r/${detail.run.id}`)
-        },
-      })
+      const detail = await createRunMutation.mutateAsync(trimmed)
+      navigate(`/c/${selectedConversationId}/r/${detail.run.id}`)
     },
     [createRunMutation, navigate, selectedConversationId],
   )
@@ -96,6 +109,16 @@ export function RelayPage() {
     [createConversationMutation, navigate],
   )
 
+  const handleDeleteConversation = useCallback(
+    async (id: number) => {
+      await deleteConversationMutation.mutateAsync(id)
+      if (selectedConversationId === id) {
+        navigate('/', { replace: true })
+      }
+    },
+    [deleteConversationMutation, navigate, selectedConversationId],
+  )
+
   return (
     <SidebarProvider>
       <RelaySidebar
@@ -104,6 +127,8 @@ export function RelayPage() {
         onSelect={(id) => navigate(`/c/${id}`)}
         onNew={() => setNewConversationOpen(true)}
         onRefresh={() => void bootstrapQuery.refetch()}
+        onRename={(id, name) => renameConversationMutation.mutateAsync({ id, name })}
+        onDelete={handleDeleteConversation}
         loading={bootstrapQuery.isLoading || bootstrapQuery.isFetching}
       />
 
@@ -119,7 +144,7 @@ export function RelayPage() {
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ThreadView details={runDetails} />
+          <ThreadView details={runDetails} loading={threadLoading} />
         </div>
 
         <ThreadComposer

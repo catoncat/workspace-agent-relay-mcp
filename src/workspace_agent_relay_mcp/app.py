@@ -10,6 +10,7 @@ from starlette.routing import Mount, Route
 from .api.auth import APIBearerAuthMiddleware
 from .api.routes.agents import agent_routes
 from .api.routes.conversations import conversation_routes
+from .api.routes.internal import internal_routes
 from .api.routes.runs import run_routes
 from .api.static import SPAFallbackMiddleware, frontend_dist, serve_index
 from .http_compat import build_http_compat_app
@@ -59,6 +60,8 @@ def build_app(
     for path, handler, methods in conversation_routes(store):
         routes.append(Route(path, endpoint=handler, methods=methods))
     for path, handler, methods in run_routes(store, config, event_bus):
+        routes.append(Route(path, endpoint=handler, methods=methods))
+    for path, handler, methods in internal_routes(store):
         routes.append(Route(path, endpoint=handler, methods=methods))
 
     routes.append(Mount("/", app=mcp_app))

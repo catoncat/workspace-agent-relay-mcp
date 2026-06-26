@@ -1631,7 +1631,7 @@ Expected: FAIL because `web.py` still returns raw FastMCP app without compatibil
 
 - [ ] **Step 3: Adapt OAuth compatibility module**
 
-Copy `/Users/envvar/work/repos/poke/notion-local-ops-mcp/src/notion_local_ops_mcp/oauth.py` to `src/workspace_agent_relay_mcp/oauth.py`, then apply these exact changes:
+Copy `../notion-local-ops-mcp/src/notion_local_ops_mcp/oauth.py` to `src/workspace_agent_relay_mcp/oauth.py`, then apply these exact changes:
 
 ```text
 Replace DEFAULT_SCOPE = "local-ops" with DEFAULT_SCOPE = "workspace-agent-relay".
@@ -1649,7 +1649,7 @@ Expected: no output and exit 0.
 
 - [ ] **Step 4: Adapt HTTP compatibility module**
 
-Copy `/Users/envvar/work/repos/poke/notion-local-ops-mcp/src/notion_local_ops_mcp/http_compat.py` to `src/workspace_agent_relay_mcp/http_compat.py`, then apply these exact changes:
+Copy `../notion-local-ops-mcp/src/notion_local_ops_mcp/http_compat.py` to `src/workspace_agent_relay_mcp/http_compat.py`, then apply these exact changes:
 
 ```text
 Replace import ".oauth" target with "from .oauth import OAuthManager, OAuthRuntimeConfig".

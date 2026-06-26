@@ -81,6 +81,20 @@ export async function createConversation(body: {
   return api('/api/conversations', { method: 'POST', body: JSON.stringify(body) })
 }
 
+export async function renameConversation(
+  conversationId: number,
+  name: string,
+): Promise<Conversation> {
+  return api(`/api/conversations/${conversationId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function deleteConversation(conversationId: number): Promise<{ success: boolean }> {
+  return api(`/api/conversations/${conversationId}`, { method: 'DELETE' })
+}
+
 export async function ensureDefaultConversation(agentId: number): Promise<Conversation[]> {
   let conversations = await listConversations()
   if (conversations.length === 0) {
@@ -99,11 +113,51 @@ export async function getRunDetail(runId: number): Promise<RunDetail> {
   return normalizeRunDetail(await api(`/api/runs/${runId}`))
 }
 
-export async function createRun(conversationId: number, input_markdown: string): Promise<Run> {
-  return api(`/api/conversations/${conversationId}/runs`, {
+export type CreateRunResponse = {
+  run: Run
+  triggerFailed: boolean
+  warning?: string
+}
+
+export async function createRun(
+  conversationId: number,
+  input_markdown: string,
+): Promise<CreateRunResponse> {
+  const response = await fetch(`/api/conversations/${conversationId}/runs`, {
     method: 'POST',
+    headers: headers(),
     body: JSON.stringify({ input_markdown }),
   })
+  const text = await response.text()
+  let body: unknown = null
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = null
+  }
+
+  if (response.ok && body && typeof body === 'object' && 'id' in body) {
+    return { run: body as Run, triggerFailed: false }
+  }
+
+  if (
+    response.status === 502 &&
+    body &&
+    typeof body === 'object' &&
+    'run' in body &&
+    body.run &&
+    typeof body.run === 'object' &&
+    'id' in body.run
+  ) {
+    const payload = body as { error?: string; run: Run }
+    return {
+      run: payload.run,
+      triggerFailed: true,
+      warning: payload.error?.trim() || 'Trigger request failed',
+    }
+  }
+
+  throw new Error(formatApiError(text))
 }
 
 export function streamRun(
