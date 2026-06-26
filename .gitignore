@@ -1,1 +1,15 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+cloudflared.local.yml
+cloudflared.local.yaml
 .worktrees/
