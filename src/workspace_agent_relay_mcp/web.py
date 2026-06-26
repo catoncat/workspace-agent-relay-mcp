@@ -376,7 +376,7 @@ def _dashboard_html() -> str:
           frame.className = 'run';
           const button = document.createElement('button');
           button.type = 'button';
-          button.addEventListener('click', () => showRun(run));
+          button.addEventListener('click', () => showRun(run).catch((error) => setDetails(String(error))));
           const requestId = document.createElement('span');
           requestId.className = 'mono';
           requestId.textContent = run.request_id;
@@ -388,8 +388,9 @@ def _dashboard_html() -> str:
         }
       }
 
-      function showRun(run) {
-        setDetails(run);
+      async function showRun(run) {
+        const detail = await api(`/api/runs/${run.id}`);
+        setDetails(detail);
       }
 
       async function sendRun() {
@@ -399,7 +400,7 @@ def _dashboard_html() -> str:
           method: 'POST',
           body: JSON.stringify({ input_markdown: input })
         });
-        showRun(run);
+        await showRun(run);
         await loadRuns();
       }
 
@@ -502,6 +503,20 @@ def build_app(
             return _json_error(str(exc), status_code=404)
         return JSONResponse(store.list_runs_for_conversation(int(conversation["id"])))
 
+    async def get_run_detail(request: Request) -> JSONResponse:
+        run_id = int(request.path_params["run_id"])
+        try:
+            run = store.get_run(run_id)
+        except KeyError as exc:
+            return _json_error(str(exc), status_code=404)
+        return JSONResponse(
+            {
+                "run": run,
+                "events": store.list_events(run_id),
+                "artifacts": store.list_artifacts(run_id),
+            }
+        )
+
     async def create_run(request: Request) -> JSONResponse:
         try:
             payload = await _json(request)
@@ -585,6 +600,7 @@ def build_app(
             Route("/api/conversations", endpoint=create_conversation, methods=["POST"]),
             Route("/api/conversations/{conversation_id:int}/runs", endpoint=list_runs, methods=["GET"]),
             Route("/api/conversations/{conversation_id:int}/runs", endpoint=create_run, methods=["POST"]),
+            Route("/api/runs/{run_id:int}", endpoint=get_run_detail, methods=["GET"]),
             Mount("/", app=mcp_app),
         ],
         middleware=[

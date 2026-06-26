@@ -183,6 +183,7 @@ def test_dashboard_names_continuation_key_and_recent_conversation_url(tmp_path: 
     assert response.status_code == 200
     assert "Continuation key" in response.text
     assert "Recent conversation URL" in response.text
+    assert "/api/runs/" in response.text
 
 
 def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
@@ -354,3 +355,78 @@ def test_api_revalidates_stored_trigger_url_before_triggering(tmp_path: Path) ->
     assert response.json()["success"] is False
     assert trigger_client.calls == []
     assert runs == []
+
+
+def test_api_run_detail_returns_callback_events_without_secrets(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path, auth_token="local-secret")
+
+    with client:
+        from workspace_agent_relay_mcp import server
+
+        agent = server.store.upsert_agent(
+            name="default",
+            trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+            token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+        )
+        conversation = server.store.create_conversation(
+            agent_id=agent["id"],
+            name="Sherlog",
+            conversation_key="research:sherlog",
+        )
+        run = server.store.create_run(
+            agent_id=agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown="Research sherlog",
+            callback_token="secret-callback-token",
+            idempotency_key="idem_1",
+            request_id="run_1",
+        )
+        server.store.record_progress(
+            request_id="run_1",
+            conversation_key="research:sherlog",
+            callback_token="secret-callback-token",
+            message="Progress with secret-callback-token",
+            title="Working",
+            payload={"echo": "secret-callback-token"},
+        )
+        server.store.ask_user(
+            request_id="run_1",
+            conversation_key="research:sherlog",
+            callback_token="secret-callback-token",
+            question="Question with secret-callback-token",
+            choices=["Continue"],
+            context="Context",
+        )
+        server.store.record_result(
+            request_id="run_1",
+            conversation_key="research:sherlog",
+            callback_token="secret-callback-token",
+            status="done",
+            title="Done",
+            markdown="Final Markdown with secret-callback-token",
+            artifacts=[
+                {
+                    "name": "result.md",
+                    "mime_type": "text/markdown",
+                    "content": "Artifact with secret-callback-token",
+                    "metadata": {"echo": "secret-callback-token"},
+                }
+            ],
+        )
+        response = client.get(
+            f"/api/runs/{run['id']}",
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    rendered = str(body)
+    assert body["run"]["status"] == "done"
+    assert [event["event_type"] for event in body["events"]] == ["progress", "question", "result"]
+    assert body["events"][-1]["title"] == "Done"
+    assert "Final Markdown" in body["events"][-1]["markdown"]
+    assert body["artifacts"][0]["content"].startswith("Artifact with")
+    assert "secret-callback-token" not in rendered
+    assert "callback_token_hash" not in rendered
+    assert "[redacted-callback-token]" in rendered
