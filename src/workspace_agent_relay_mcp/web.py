@@ -107,169 +107,468 @@ def _dashboard_html() -> str:
     <style>
       :root {
         color-scheme: light;
-        --bg: #f4f7f8;
+        --background: #fafafa;
+        --foreground: #18181b;
+        --muted: #71717a;
+        --muted-2: #a1a1aa;
         --panel: #ffffff;
-        --line: #d7dee2;
-        --text: #18252b;
-        --muted: #5a6870;
-        --accent: #0b7a75;
-        --accent-strong: #075e5a;
-        --warn: #9a5b13;
+        --panel-subtle: #f4f4f5;
+        --border: #e4e4e7;
+        --border-strong: #d4d4d8;
+        --primary: #18181b;
+        --primary-foreground: #ffffff;
+        --accent: #2563eb;
+        --accent-soft: #eff6ff;
+        --success: #15803d;
+        --success-soft: #f0fdf4;
+        --warning: #a16207;
+        --warning-soft: #fefce8;
+        --danger: #b91c1c;
+        --danger-soft: #fef2f2;
+        --shadow: 0 1px 2px rgba(24, 24, 27, 0.06);
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: var(--text);
-        background: var(--bg);
-      }
-      main {
-        display: grid;
-        grid-template-columns: minmax(220px, 300px) minmax(360px, 1fr) minmax(260px, 360px);
         min-height: 100vh;
+        font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--foreground);
+        background: var(--background);
       }
-      aside, section {
-        padding: 16px;
-        border-right: 1px solid var(--line);
-      }
-      aside:last-child { border-right: 0; }
-      h1, h2 {
-        margin: 0 0 12px;
-        font-weight: 650;
-        line-height: 1.2;
-      }
-      h1 { font-size: 20px; }
-      h2 { font-size: 13px; text-transform: uppercase; color: var(--muted); letter-spacing: 0; }
-      label { display: block; margin: 12px 0 6px; color: var(--muted); }
-      textarea {
-        width: 100%;
-        min-height: 180px;
-        resize: vertical;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 10px;
-        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        background: var(--panel);
-        color: var(--text);
-      }
-      input {
-        width: 100%;
-        min-height: 34px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 7px 10px;
+      button, input, textarea {
         font: inherit;
-        background: var(--panel);
-        color: var(--text);
       }
       button {
+        border: 1px solid var(--border);
+        border-radius: 8px;
         min-height: 34px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
         padding: 7px 10px;
-        font: inherit;
-        color: var(--text);
+        color: var(--foreground);
         background: var(--panel);
         cursor: pointer;
       }
-      button.primary {
-        border-color: var(--accent);
-        background: var(--accent);
-        color: #fff;
+      button:hover {
+        background: var(--panel-subtle);
       }
-      button.primary:hover { background: var(--accent-strong); }
-      .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+      button.primary {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: var(--primary-foreground);
+      }
+      button.ghost {
+        border-color: transparent;
+        background: transparent;
+      }
+      input, textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--foreground);
+        background: var(--panel);
+        outline: none;
+      }
+      input:focus, textarea:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      input {
+        min-height: 36px;
+        padding: 8px 10px;
+      }
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+        padding: 11px 12px;
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 292px minmax(420px, 1fr) 360px;
+        min-height: 100vh;
+      }
+      .sidebar, .thread, .inspector {
+        min-width: 0;
+        background: var(--panel);
+      }
+      .sidebar {
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+      }
+      .thread {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        background: var(--background);
+      }
+      .inspector {
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+      }
+      .side-header, .thread-header, .inspector-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .side-scroll, .messages, .inspector-scroll {
+        min-height: 0;
+        overflow: auto;
+      }
+      .side-scroll, .inspector-scroll {
+        padding: 14px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.2;
+        font-weight: 650;
+      }
+      h2 {
+        margin: 18px 0 8px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.2;
+        font-weight: 650;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      label {
+        display: block;
+        margin: 0 0 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .subtle {
+        color: var(--muted);
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .row.between {
+        justify-content: space-between;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .token-box {
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel-subtle);
+      }
       .item {
         width: 100%;
-        margin: 8px 0;
+        display: block;
+        margin: 0 0 8px;
         text-align: left;
+        border-radius: 10px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
       }
-      .item small {
+      .item[aria-selected="true"] {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .item-title {
+        display: block;
+        font-weight: 600;
+      }
+      .item-meta {
         display: block;
         margin-top: 4px;
         color: var(--muted);
-        overflow-wrap: anywhere;
+        font-size: 12px;
       }
-      .run {
-        border: 1px solid var(--line);
-        border-radius: 6px;
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 2px 8px;
+        color: var(--muted);
         background: var(--panel);
-        margin: 8px 0;
-        padding: 10px;
+        font-size: 12px;
+        font-weight: 500;
       }
-      .run button {
-        width: 100%;
-        text-align: left;
+      .badge.accepted, .badge.waiting {
+        border-color: #fde68a;
+        color: var(--warning);
+        background: var(--warning-soft);
       }
-      .meta {
-        display: grid;
+      .badge.done {
+        border-color: #bbf7d0;
+        color: var(--success);
+        background: var(--success-soft);
+      }
+      .badge.failed, .badge.blocked {
+        border-color: #fecaca;
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+      .badge.needs_user {
+        border-color: #bfdbfe;
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .thread-title {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        min-width: 0;
+      }
+      .key-line {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .messages {
+        padding: 20px 22px;
+      }
+      .message-group {
+        max-width: 860px;
+        margin: 0 auto 18px;
+      }
+      .bubble {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .bubble.user {
+        margin-left: auto;
+        max-width: 720px;
+        border-color: #dbeafe;
+        background: #ffffff;
+      }
+      .bubble-header {
+        display: flex;
+        flex-wrap: wrap;
         gap: 8px;
-        margin: 12px 0;
-        padding: 10px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: var(--panel);
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
       }
-      .meta div { min-width: 0; }
-      .meta strong { display: block; color: var(--muted); font-size: 12px; }
-      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
-      pre {
-        min-height: 180px;
+      .bubble-body {
+        padding: 12px;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        border: 1px solid var(--line);
-        border-radius: 6px;
+      }
+      .event {
+        margin-top: 8px;
+        border-left: 2px solid var(--border-strong);
+        padding: 8px 0 8px 12px;
+      }
+      .event.progress {
+        border-color: var(--accent);
+      }
+      .event.question {
+        border-color: var(--warning);
+        background: linear-gradient(90deg, var(--warning-soft), transparent 60%);
+      }
+      .event.result {
+        border-color: var(--success);
+      }
+      .event-title {
+        font-weight: 600;
+      }
+      .event-text {
+        margin-top: 4px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .artifact-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .composer {
+        padding: 14px 18px;
+        border-top: 1px solid var(--border);
         background: var(--panel);
-        padding: 12px;
+      }
+      .composer-inner {
+        max-width: 860px;
+        margin: 0 auto;
+      }
+      .composer-footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+      }
+      .inspector-section {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .inspector-section h2 {
         margin: 0;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel-subtle);
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: 112px minmax(0, 1fr);
+        gap: 7px 10px;
+        padding: 12px;
+        font-size: 12px;
+      }
+      .kv dt {
+        color: var(--muted);
+      }
+      .kv dd {
+        margin: 0;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .empty {
+        padding: 12px;
+        color: var(--muted);
+        border: 1px dashed var(--border-strong);
+        border-radius: 10px;
+        background: var(--panel-subtle);
+      }
+      .error {
+        color: var(--danger);
+      }
+      pre.code {
+        margin: 0;
+        padding: 12px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: var(--foreground);
+        background: var(--panel-subtle);
         font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
-      .empty { color: var(--muted); }
-      @media (max-width: 860px) {
-        main { grid-template-columns: 1fr; }
-        aside, section { border-right: 0; border-bottom: 1px solid var(--line); }
+      @media (max-width: 1080px) {
+        .app {
+          grid-template-columns: 260px minmax(0, 1fr);
+        }
+        .inspector {
+          grid-column: 1 / -1;
+          min-height: 360px;
+          border-left: 0;
+          border-top: 1px solid var(--border);
+        }
+      }
+      @media (max-width: 760px) {
+        .app {
+          display: block;
+        }
+        .sidebar, .thread, .inspector {
+          min-height: auto;
+          border: 0;
+          border-bottom: 1px solid var(--border);
+        }
+        .messages {
+          max-height: none;
+          padding: 14px;
+        }
+        .kv {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
-    <main>
-      <aside>
-        <h2>Conversations</h2>
-        <div class="toolbar"><button id="refreshConversations" type="button">Refresh</button></div>
-        <div id="conversations" class="empty">No conversations loaded.</div>
+    <main class="app">
+      <aside class="sidebar">
+        <div class="side-header">
+          <div class="row between">
+            <div>
+              <h1>Agent Relay</h1>
+              <div class="subtle">Workspace Agent callback inbox</div>
+            </div>
+            <button id="refreshConversations" type="button" title="Refresh">Refresh</button>
+          </div>
+        </div>
+        <div class="side-scroll">
+          <div class="stack">
+            <div class="field token-box">
+              <label for="authToken">API token</label>
+              <input id="authToken" type="password" autocomplete="off" placeholder="Bearer token">
+            </div>
+          </div>
+          <h2>Agents</h2>
+          <div id="agents" class="empty">No agents loaded.</div>
+          <div class="row between">
+            <h2>Conversations</h2>
+            <button id="newConversation" class="ghost" type="button">New</button>
+          </div>
+          <div id="conversations" class="empty">No conversations loaded.</div>
+        </div>
       </aside>
-      <section>
-        <h1>Workspace Agent Relay</h1>
-        <div class="meta">
-          <div>
-            <strong>API token</strong>
-            <input id="authToken" type="password" autocomplete="off">
+      <section class="thread">
+        <header class="thread-header">
+          <div class="row between">
+            <div class="thread-title">
+              <h1 id="conversationTitle">No conversation selected.</h1>
+              <div class="key-line">
+                Continuation key:
+                <span id="continuationKey" class="mono">No conversation selected.</span>
+              </div>
+              <div class="key-line">
+                Recent conversation URL:
+                <span id="recentConversationUrl" class="mono">No trigger accepted yet.</span>
+              </div>
+            </div>
+            <span id="runCount" class="badge">0 runs</span>
           </div>
-          <div>
-            <strong>Continuation key</strong>
-            <span id="continuationKey" class="mono">No conversation selected.</span>
-          </div>
-          <div>
-            <strong>Recent conversation URL</strong>
-            <span id="recentConversationUrl" class="mono">No trigger accepted yet.</span>
-          </div>
+        </header>
+        <div id="messages" class="messages">
+          <div class="empty">No runs loaded.</div>
         </div>
-        <label for="task">Message</label>
-        <textarea id="task"></textarea>
-        <div class="toolbar">
-          <button class="primary" id="sendRun" type="button">Send</button>
-        </div>
-        <h2>Runs</h2>
-        <div id="runs" class="empty">No runs loaded.</div>
+        <footer class="composer">
+          <div class="composer-inner">
+            <label for="task">Message</label>
+            <textarea id="task" placeholder="Send a task to the selected Workspace Agent conversation."></textarea>
+            <div class="composer-footer">
+              <div class="key-line">
+                Sends to <span id="composerKey" class="mono">No conversation selected.</span>
+              </div>
+              <button class="primary" id="sendRun" type="button">Send</button>
+            </div>
+          </div>
+        </footer>
       </section>
-      <aside>
-        <h2>Details</h2>
-        <pre id="details">No run selected.</pre>
+      <aside class="inspector">
+        <div class="inspector-header">
+          <h1>Run inspector</h1>
+          <div id="inspectorSubtitle" class="subtle">Select a run to inspect callback data.</div>
+        </div>
+        <div id="details" class="inspector-scroll">
+          <div class="empty">No run selected.</div>
+        </div>
       </aside>
     </main>
     <script>
+      const TERMINAL_STATUSES = new Set(['done', 'blocked', 'failed']);
       let selectedConversationId = null;
+      let selectedRunId = null;
       let conversationsById = new Map();
+      let currentAgents = [];
+      let currentRunDetails = [];
 
       async function api(path, options = {}) {
         const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -280,51 +579,104 @@ def _dashboard_html() -> str:
         return response.json();
       }
 
-      function setDetails(value) {
-        document.getElementById('details').textContent =
-          typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-      }
-
-      async function bootstrap() {
-        let agents = await api('/api/agents');
-        if (agents.length === 0) {
-          await api('/api/agents', {
-            method: 'POST',
-            body: JSON.stringify({
-              name: 'default',
-              trigger_url: '',
-              token_ref: 'env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN'
-            })
-          });
-          agents = await api('/api/agents');
-        }
-
-        let conversations = await api('/api/conversations');
-        if (conversations.length === 0) {
-          const key = 'default:' + new Date().toISOString().slice(0, 10);
-          await api('/api/conversations', {
-            method: 'POST',
-            body: JSON.stringify({ agent_id: agents[0].id, name: 'Default', conversation_key: key })
-          });
-          conversations = await api('/api/conversations');
-        }
-
-        conversationsById = new Map(conversations.map((item) => [item.id, item]));
-        renderConversations(conversations);
-        selectedConversationId = selectedConversationId || conversations[0].id;
-        await loadRuns();
-      }
-
       function clearElement(element) {
         while (element.firstChild) element.removeChild(element.firstChild);
       }
 
-      function renderEmpty(element, text) {
+      function text(value) {
+        return document.createTextNode(value == null ? '' : String(value));
+      }
+
+      function el(tagName, options = {}, children = []) {
+        const node = document.createElement(tagName);
+        for (const [key, value] of Object.entries(options)) {
+          if (key === 'className') node.className = value;
+          else if (key === 'textContent') node.textContent = value;
+          else if (key === 'title') node.title = value;
+          else if (key === 'type') node.type = value;
+          else if (key === 'ariaSelected') node.setAttribute('aria-selected', value ? 'true' : 'false');
+          else if (key.startsWith('data')) node.dataset[key.slice(4).toLowerCase()] = value;
+          else node.setAttribute(key, value);
+        }
+        for (const child of children) {
+          node.appendChild(typeof child === 'string' ? text(child) : child);
+        }
+        return node;
+      }
+
+      function statusBadge(status) {
+        return el('span', { className: `badge ${status || ''}`, textContent: status || 'unknown' });
+      }
+
+      function formatTime(value) {
+        if (!value) return 'n/a';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString();
+      }
+
+      function renderEmpty(element, message) {
         clearElement(element);
-        const empty = document.createElement('div');
-        empty.className = 'empty';
-        empty.textContent = text;
-        element.appendChild(empty);
+        element.appendChild(el('div', { className: 'empty', textContent: message }));
+      }
+
+      function renderError(message) {
+        const details = document.getElementById('details');
+        clearElement(details);
+        details.appendChild(el('div', { className: 'empty error', textContent: message }));
+      }
+
+      async function bootstrap() {
+        try {
+          let agents = await api('/api/agents');
+          if (agents.length === 0) {
+            await api('/api/agents', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: 'default',
+                trigger_url: '',
+                token_ref: 'env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN'
+              })
+            });
+            agents = await api('/api/agents');
+          }
+          currentAgents = agents;
+          renderAgents(agents);
+
+          let conversations = await api('/api/conversations');
+          if (conversations.length === 0) {
+            const key = 'default:' + new Date().toISOString().slice(0, 10);
+            await api('/api/conversations', {
+              method: 'POST',
+              body: JSON.stringify({ agent_id: agents[0].id, name: 'Default', conversation_key: key })
+            });
+            conversations = await api('/api/conversations');
+          }
+
+          conversationsById = new Map(conversations.map((item) => [item.id, item]));
+          renderConversations(conversations);
+          selectedConversationId = selectedConversationId || conversations[0]?.id || null;
+          await loadRuns();
+        } catch (error) {
+          renderError(String(error));
+        }
+      }
+
+      function renderAgents(agents) {
+        const container = document.getElementById('agents');
+        if (agents.length === 0) {
+          renderEmpty(container, 'No agents loaded.');
+          return;
+        }
+        clearElement(container);
+        for (const agent of agents) {
+          container.appendChild(
+            el('div', { className: 'item' }, [
+              el('span', { className: 'item-title', textContent: agent.name }),
+              el('span', { className: 'item-meta mono', textContent: agent.trigger_id || 'No trigger id' }),
+            ])
+          );
+        }
       }
 
       function renderConversations(conversations) {
@@ -335,14 +687,14 @@ def _dashboard_html() -> str:
         }
         clearElement(container);
         for (const item of conversations) {
-          const button = document.createElement('button');
-          button.className = 'item';
-          button.type = 'button';
+          const button = el('button', {
+            className: 'item',
+            type: 'button',
+            ariaSelected: item.id === selectedConversationId,
+          });
           button.addEventListener('click', () => selectConversation(item.id));
-          button.appendChild(document.createTextNode(item.name));
-          const key = document.createElement('small');
-          key.textContent = item.conversation_key;
-          button.appendChild(key);
+          button.appendChild(el('span', { className: 'item-title', textContent: item.name }));
+          button.appendChild(el('span', { className: 'item-meta mono', textContent: item.conversation_key }));
           container.appendChild(button);
         }
       }
@@ -353,69 +705,223 @@ def _dashboard_html() -> str:
       }
 
       async function loadRuns() {
-        if (!selectedConversationId) return;
+        if (!selectedConversationId) {
+          renderEmpty(document.getElementById('messages'), 'No conversation selected.');
+          return;
+        }
         const conversation = conversationsById.get(selectedConversationId);
-        document.getElementById('continuationKey').textContent =
-          conversation ? conversation.conversation_key : 'No conversation selected.';
-
+        const key = conversation ? conversation.conversation_key : 'No conversation selected.';
+        document.getElementById('conversationTitle').textContent = conversation ? conversation.name : 'No conversation selected.';
+        document.getElementById('continuationKey').textContent = key;
+        document.getElementById('composerKey').textContent = key;
         const runs = await api(`/api/conversations/${selectedConversationId}/runs`);
+        const details = await Promise.all(
+          runs.map((run) => api(`/api/runs/${run.id}`).catch(() => ({ run, events: [], artifacts: [] })))
+        );
+        currentRunDetails = details;
         const recentUrl = runs.find((run) => run.conversation_url)?.conversation_url;
         document.getElementById('recentConversationUrl').textContent = recentUrl || 'No trigger accepted yet.';
-        renderRuns(runs);
+        document.getElementById('runCount').textContent = `${runs.length} ${runs.length === 1 ? 'run' : 'runs'}`;
+        renderConversations(Array.from(conversationsById.values()));
+        renderMessages(details);
+        if (selectedRunId) {
+          const selected = details.find((detail) => detail.run.id === selectedRunId);
+          if (selected) renderInspector(selected);
+        }
       }
 
-      function renderRuns(runs) {
-        const container = document.getElementById('runs');
-        if (runs.length === 0) {
+      function renderMessages(details) {
+        const container = document.getElementById('messages');
+        if (details.length === 0) {
           renderEmpty(container, 'No runs yet.');
           return;
         }
         clearElement(container);
-        for (const run of runs) {
-          const frame = document.createElement('div');
-          frame.className = 'run';
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.addEventListener('click', () => showRun(run).catch((error) => setDetails(String(error))));
-          const requestId = document.createElement('span');
-          requestId.className = 'mono';
-          requestId.textContent = run.request_id;
-          button.appendChild(requestId);
-          button.appendChild(document.createElement('br'));
-          button.appendChild(document.createTextNode(`Status: ${run.status}`));
-          frame.appendChild(button);
-          container.appendChild(frame);
+        for (const detail of [...details].reverse()) {
+          container.appendChild(renderRunMessage(detail));
         }
       }
 
+      function renderRunMessage(detail) {
+        const run = detail.run;
+        const group = el('div', { className: 'message-group' });
+        const userBubble = el('article', { className: 'bubble user' }, [
+          el('div', { className: 'bubble-header' }, [
+            el('strong', { textContent: 'You' }),
+            statusBadge(run.status),
+          ]),
+          el('div', { className: 'bubble-body', textContent: run.input_markdown || '(empty message)' }),
+        ]);
+        const agentBubble = el('article', { className: 'bubble' }, [
+          el('div', { className: 'bubble-header' }, [
+            el('strong', { textContent: 'Workspace Agent' }),
+            el('button', { type: 'button', textContent: 'Inspect' }),
+          ]),
+        ]);
+        agentBubble.querySelector('button').addEventListener('click', () => {
+          selectedRunId = run.id;
+          renderInspector(detail);
+        });
+        const body = el('div', { className: 'bubble-body' });
+        if (!detail.events.length) {
+          body.appendChild(el('div', { className: 'subtle', textContent: `Trigger ${run.trigger_status || run.status || 'pending'}. Waiting for callback events.` }));
+        } else {
+          for (const event of detail.events) {
+            body.appendChild(renderEvent(event));
+          }
+        }
+        if (detail.artifacts.length) {
+          body.appendChild(renderArtifacts(detail.artifacts));
+        }
+        agentBubble.appendChild(body);
+        group.appendChild(userBubble);
+        group.appendChild(agentBubble);
+        return group;
+      }
+
+      function renderEvent(event) {
+        const kind = event.event_type || 'event';
+        const node = el('div', { className: `event ${kind}` }, [
+          el('div', { className: 'row between' }, [
+            el('div', { className: 'event-title', textContent: event.title || kind }),
+            el('span', { className: 'badge', textContent: kind }),
+          ]),
+        ]);
+        if (event.markdown) {
+          node.appendChild(el('div', { className: 'event-text', textContent: event.markdown }));
+        }
+        return node;
+      }
+
+      function renderArtifacts(artifacts) {
+        const list = el('div', { className: 'artifact-list' });
+        for (const artifact of artifacts) {
+          list.appendChild(el('span', { className: 'badge', textContent: artifact.name || 'artifact' }));
+        }
+        return list;
+      }
+
       async function showRun(run) {
+        selectedRunId = run.id;
         const detail = await api(`/api/runs/${run.id}`);
-        setDetails(detail);
+        renderInspector(detail);
+      }
+
+      function renderInspector(detail) {
+        const run = detail.run;
+        const details = document.getElementById('details');
+        document.getElementById('inspectorSubtitle').textContent = run.request_id;
+        clearElement(details);
+        details.appendChild(renderKvSection('Run', [
+          ['status', run.status],
+          ['request_id', run.request_id],
+          ['conversation_key', run.conversation_key],
+          ['created_at', formatTime(run.created_at)],
+          ['completed_at', formatTime(run.completed_at)],
+        ]));
+        details.appendChild(renderKvSection('Trigger', [
+          ['idempotency_key', run.idempotency_key],
+          ['trigger_status', run.trigger_status],
+          ['http_status', run.trigger_http_status],
+          ['x_request_id', run.trigger_x_request_id],
+          ['conversation_url', run.conversation_url],
+        ]));
+        details.appendChild(renderListSection('Events', detail.events, (event) => [
+          event.event_type || 'event',
+          event.title || '',
+          event.markdown || '',
+        ]));
+        details.appendChild(renderListSection('Artifacts', detail.artifacts, (artifact) => [
+          artifact.name || 'artifact',
+          artifact.mime_type || '',
+          artifact.content || '',
+        ]));
+        details.appendChild(renderJsonSection('Raw JSON', detail));
+      }
+
+      function renderKvSection(title, rows) {
+        const dl = el('dl', { className: 'kv' });
+        for (const [key, value] of rows) {
+          dl.appendChild(el('dt', { textContent: key }));
+          dl.appendChild(el('dd', { className: 'mono', textContent: value || 'n/a' }));
+        }
+        return el('section', { className: 'inspector-section' }, [
+          el('h2', { textContent: title }),
+          dl,
+        ]);
+      }
+
+      function renderListSection(title, items, getLines) {
+        const section = el('section', { className: 'inspector-section' }, [
+          el('h2', { textContent: title }),
+        ]);
+        if (!items.length) {
+          section.appendChild(el('div', { className: 'empty', textContent: `No ${title.toLowerCase()}.` }));
+          return section;
+        }
+        const box = el('div', { className: 'stack' });
+        box.style.padding = '12px';
+        for (const item of items) {
+          const lines = getLines(item).filter(Boolean);
+          box.appendChild(el('div', { className: 'token-box' }, lines.map((line, index) =>
+            el('div', { className: index === 0 ? 'event-title' : 'event-text', textContent: line })
+          )));
+        }
+        section.appendChild(box);
+        return section;
+      }
+
+      function renderJsonSection(title, value) {
+        return el('section', { className: 'inspector-section' }, [
+          el('h2', { textContent: title }),
+          el('pre', { className: 'code', textContent: JSON.stringify(value, null, 2) }),
+        ]);
       }
 
       async function sendRun() {
         if (!selectedConversationId) await bootstrap();
         const input = document.getElementById('task').value;
+        if (!input.trim()) return;
         const run = await api(`/api/conversations/${selectedConversationId}/runs`, {
           method: 'POST',
           body: JSON.stringify({ input_markdown: input })
         });
+        document.getElementById('task').value = '';
         await showRun(run);
         await loadRuns();
       }
 
+      async function createConversation() {
+        const agents = currentAgents.length ? currentAgents : await api('/api/agents');
+        if (!agents.length) throw new Error('No agent is configured.');
+        const name = prompt('Conversation name', 'New conversation');
+        if (!name) return;
+        const defaultKey = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, ':').replace(/^:|:$/g, '') || 'conversation';
+        const key = prompt('Stable conversation_key', `${defaultKey}:${new Date().toISOString().slice(0, 10)}`);
+        if (!key) return;
+        const conversation = await api('/api/conversations', {
+          method: 'POST',
+          body: JSON.stringify({ agent_id: agents[0].id, name, conversation_key: key })
+        });
+        selectedConversationId = conversation.id;
+        await bootstrap();
+      }
+
       document.getElementById('refreshConversations').addEventListener('click', () => {
-        bootstrap().catch((error) => setDetails(String(error)));
+        bootstrap().catch((error) => renderError(String(error)));
       });
       document.getElementById('sendRun').addEventListener('click', () => {
-        sendRun().catch((error) => setDetails(String(error)));
+        sendRun().catch((error) => renderError(String(error)));
+      });
+      document.getElementById('newConversation').addEventListener('click', () => {
+        createConversation().catch((error) => renderError(String(error)));
       });
       document.getElementById('authToken').addEventListener('input', (event) => {
         sessionStorage.setItem('relayAuthToken', event.target.value.trim());
       });
       document.getElementById('authToken').value = sessionStorage.getItem('relayAuthToken') || '';
-      bootstrap().catch((error) => setDetails(String(error)));
-      setInterval(() => loadRuns().catch((error) => setDetails(String(error))), 2000);
+      bootstrap().catch((error) => renderError(String(error)));
+      setInterval(() => loadRuns().catch((error) => renderError(String(error))), 3000);
     </script>
   </body>
 </html>
