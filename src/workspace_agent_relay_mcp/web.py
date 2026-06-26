@@ -27,6 +27,10 @@ def _agent_token(config: Any, token_ref: str) -> str:
     return str(config.default_agent_token)
 
 
+def _missing_fields(payload: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
+    return [field for field in fields if payload.get(field) in (None, "")]
+
+
 def _dashboard_html() -> str:
     return """
 <!doctype html>
@@ -156,7 +160,7 @@ def _dashboard_html() -> str:
     <main>
       <aside>
         <h2>Conversations</h2>
-        <div class="toolbar"><button onclick="bootstrap()">Refresh</button></div>
+        <div class="toolbar"><button id="refreshConversations" type="button">Refresh</button></div>
         <div id="conversations" class="empty">No conversations loaded.</div>
       </aside>
       <section>
@@ -174,7 +178,7 @@ def _dashboard_html() -> str:
         <label for="task">Message</label>
         <textarea id="task"></textarea>
         <div class="toolbar">
-          <button class="primary" onclick="sendRun()">Send</button>
+          <button class="primary" id="sendRun" type="button">Send</button>
         </div>
         <h2>Runs</h2>
         <div id="runs" class="empty">No runs loaded.</div>
@@ -225,14 +229,41 @@ def _dashboard_html() -> str:
         }
 
         conversationsById = new Map(conversations.map((item) => [item.id, item]));
-        document.getElementById('conversations').innerHTML = conversations.map((item) => `
-          <button class="item" onclick="selectConversation(${item.id})">
-            ${item.name}
-            <small>${item.conversation_key}</small>
-          </button>
-        `).join('');
+        renderConversations(conversations);
         selectedConversationId = selectedConversationId || conversations[0].id;
         await loadRuns();
+      }
+
+      function clearElement(element) {
+        while (element.firstChild) element.removeChild(element.firstChild);
+      }
+
+      function renderEmpty(element, text) {
+        clearElement(element);
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = text;
+        element.appendChild(empty);
+      }
+
+      function renderConversations(conversations) {
+        const container = document.getElementById('conversations');
+        if (conversations.length === 0) {
+          renderEmpty(container, 'No conversations loaded.');
+          return;
+        }
+        clearElement(container);
+        for (const item of conversations) {
+          const button = document.createElement('button');
+          button.className = 'item';
+          button.type = 'button';
+          button.addEventListener('click', () => selectConversation(item.id));
+          button.appendChild(document.createTextNode(item.name));
+          const key = document.createElement('small');
+          key.textContent = item.conversation_key;
+          button.appendChild(key);
+          container.appendChild(button);
+        }
       }
 
       async function selectConversation(id) {
@@ -249,16 +280,31 @@ def _dashboard_html() -> str:
         const runs = await api(`/api/conversations/${selectedConversationId}/runs`);
         const recentUrl = runs.find((run) => run.conversation_url)?.conversation_url;
         document.getElementById('recentConversationUrl').textContent = recentUrl || 'No trigger accepted yet.';
-        document.getElementById('runs').innerHTML = runs.length
-          ? runs.map((run) => `
-              <div class="run">
-                <button onclick='showRun(${JSON.stringify(run)})'>
-                  <span class="mono">${run.request_id}</span><br>
-                  Status: ${run.status}
-                </button>
-              </div>
-            `).join('')
-          : '<div class="empty">No runs yet.</div>';
+        renderRuns(runs);
+      }
+
+      function renderRuns(runs) {
+        const container = document.getElementById('runs');
+        if (runs.length === 0) {
+          renderEmpty(container, 'No runs yet.');
+          return;
+        }
+        clearElement(container);
+        for (const run of runs) {
+          const frame = document.createElement('div');
+          frame.className = 'run';
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.addEventListener('click', () => showRun(run));
+          const requestId = document.createElement('span');
+          requestId.className = 'mono';
+          requestId.textContent = run.request_id;
+          button.appendChild(requestId);
+          button.appendChild(document.createElement('br'));
+          button.appendChild(document.createTextNode(`Status: ${run.status}`));
+          frame.appendChild(button);
+          container.appendChild(frame);
+        }
       }
 
       function showRun(run) {
@@ -276,6 +322,12 @@ def _dashboard_html() -> str:
         await loadRuns();
       }
 
+      document.getElementById('refreshConversations').addEventListener('click', () => {
+        bootstrap().catch((error) => setDetails(String(error)));
+      });
+      document.getElementById('sendRun').addEventListener('click', () => {
+        sendRun().catch((error) => setDetails(String(error)));
+      });
       bootstrap().catch((error) => setDetails(String(error)));
       setInterval(() => loadRuns().catch((error) => setDetails(String(error))), 2000);
     </script>
@@ -330,22 +382,37 @@ def build_app(
 
     async def create_conversation(request: Request) -> JSONResponse:
         payload = await _json(request)
-        conversation = store.create_conversation(
-            agent_id=int(payload["agent_id"]),
-            name=str(payload["name"]),
-            conversation_key=str(payload["conversation_key"]),
-        )
+        missing = _missing_fields(payload, ("agent_id", "name", "conversation_key"))
+        if missing:
+            return _json_error(f"missing required field(s): {', '.join(missing)}")
+        try:
+            conversation = store.create_conversation(
+                agent_id=int(payload["agent_id"]),
+                name=str(payload["name"]),
+                conversation_key=str(payload["conversation_key"]),
+            )
+        except (KeyError, ValueError) as exc:
+            return _json_error(str(exc), status_code=400)
         return JSONResponse(conversation)
 
     async def list_runs(request: Request) -> JSONResponse:
-        conversation = store.get_conversation(int(request.path_params["conversation_id"]))
+        try:
+            conversation = store.get_conversation(int(request.path_params["conversation_id"]))
+        except KeyError as exc:
+            return _json_error(str(exc), status_code=404)
         return JSONResponse(store.list_runs_for_conversation(int(conversation["id"])))
 
     async def create_run(request: Request) -> JSONResponse:
         payload = await _json(request)
-        conversation = store.get_conversation(int(request.path_params["conversation_id"]))
+        try:
+            conversation = store.get_conversation(int(request.path_params["conversation_id"]))
+        except KeyError as exc:
+            return _json_error(str(exc), status_code=404)
         agents = store.list_agents()
-        agent = next(item for item in agents if int(item["id"]) == int(conversation["agent_id"]))
+        try:
+            agent = next(item for item in agents if int(item["id"]) == int(conversation["agent_id"]))
+        except StopIteration:
+            return _json_error("conversation agent was not found", status_code=404)
         request_id = generate_request_id()
         idempotency_key = generate_request_id("idem")
         callback_token = generate_callback_token()

@@ -150,3 +150,33 @@ def test_dashboard_names_continuation_key_and_recent_conversation_url(tmp_path: 
     assert response.status_code == 200
     assert "Continuation key" in response.text
     assert "Recent conversation URL" in response.text
+
+
+def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        bad_conversation = client.post("/api/conversations", json={})
+        missing_runs = client.get("/api/conversations/999/runs")
+        missing_create_run = client.post(
+            "/api/conversations/999/runs",
+            json={"input_markdown": "hello"},
+        )
+
+    assert bad_conversation.status_code == 400
+    assert bad_conversation.json()["success"] is False
+    assert missing_runs.status_code == 404
+    assert missing_runs.json()["success"] is False
+    assert missing_create_run.status_code == 404
+    assert missing_create_run.json()["success"] is False
+
+
+def test_dashboard_does_not_use_inner_html_for_stored_data(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert ".innerHTML" not in response.text
+    assert "onclick=" not in response.text
