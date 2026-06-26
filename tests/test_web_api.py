@@ -22,19 +22,34 @@ class FakeTriggerClient:
         )
 
 
-def _client(tmp_path: Path) -> tuple[TestClient, FakeTriggerClient]:
+class RaisingTriggerClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def trigger(self, **kwargs: Any) -> TriggerResult:
+        self.calls.append(kwargs)
+        raise RuntimeError("upstream failed with agent-token")
+
+
+def _client(
+    tmp_path: Path,
+    *,
+    auth_token: str = "",
+    trigger_client: Any | None = None,
+) -> tuple[TestClient, Any]:
     from workspace_agent_relay_mcp import server
 
     server.config = RelayConfig(
         state_dir=tmp_path / "state",
+        auth_token=auth_token,
         default_agent_token="agent-token",
         default_trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
     )
     server.store = RelayStore(server.config.database_path)
     app = server.build_http_app()
-    trigger_client = FakeTriggerClient()
-    app.state.trigger_client = trigger_client
-    return TestClient(app), trigger_client
+    active_trigger_client = trigger_client or FakeTriggerClient()
+    app.state.trigger_client = active_trigger_client
+    return TestClient(app), active_trigger_client
 
 
 def _seed_conversation(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -197,3 +212,93 @@ def test_dashboard_does_not_use_inner_html_for_stored_data(tmp_path: Path) -> No
     assert response.status_code == 200
     assert ".innerHTML" not in response.text
     assert "onclick=" not in response.text
+
+
+def test_dashboard_and_api_require_bearer_when_auth_token_is_set(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path, auth_token="local-secret")
+    headers = {"Authorization": "Bearer local-secret"}
+
+    with client:
+        dashboard_missing = client.get("/")
+        agents_missing = client.get("/api/agents")
+        dashboard_allowed = client.get("/", headers=headers)
+        agents_allowed = client.get("/api/agents", headers=headers)
+
+    assert dashboard_missing.status_code == 401
+    assert agents_missing.status_code == 401
+    assert dashboard_allowed.status_code == 200
+    assert agents_allowed.status_code == 200
+
+
+def test_api_rejects_non_workspace_trigger_url_and_unknown_token_ref(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        bad_url = client.post(
+            "/api/agents",
+            json={
+                "name": "bad",
+                "trigger_url": "https://example.com/v1/workspace_agents/agtch_test/trigger",
+                "token_ref": "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+            },
+        )
+        bad_path = client.post(
+            "/api/agents",
+            json={
+                "name": "bad-path",
+                "trigger_url": "https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger/extra",
+                "token_ref": "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+            },
+        )
+        bad_ref = client.post(
+            "/api/agents",
+            json={
+                "name": "bad-ref",
+                "trigger_url": "https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+                "token_ref": "env:OTHER_TOKEN",
+            },
+        )
+
+    assert bad_url.status_code == 400
+    assert bad_url.json()["success"] is False
+    assert bad_path.status_code == 400
+    assert bad_path.json()["success"] is False
+    assert bad_ref.status_code == 400
+    assert bad_ref.json()["success"] is False
+
+
+def test_api_returns_controlled_error_for_malformed_json(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.post(
+            "/api/agents",
+            content="{",
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "malformed JSON body"}
+
+
+def test_api_marks_run_failed_when_trigger_client_raises(tmp_path: Path) -> None:
+    trigger_client = RaisingTriggerClient()
+    client, _ = _client(tmp_path, trigger_client=trigger_client)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Research sherlog"},
+        )
+        runs_response = client.get(f"/api/conversations/{conversation['id']}/runs")
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"] == "trigger request failed"
+    assert body["run"]["status"] == "failed"
+    assert body["run"]["trigger_http_status"] == 0
+    assert "agent-token" not in str(body)
+    assert runs_response.json()[0]["status"] == "failed"
+    assert trigger_client.calls[0]["conversation_key"] == "research:sherlog"

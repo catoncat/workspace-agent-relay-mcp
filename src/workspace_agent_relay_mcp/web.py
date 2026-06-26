@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 import sqlite3
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware import Middleware as StarletteMiddleware
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 
-from .http_compat import build_http_compat_app
+from .http_compat import HTTPBearerAuthMiddleware, build_http_compat_app
+from .oauth import OAuthManager
 from .trigger import TriggerClient, build_trigger_input, generate_callback_token, generate_request_id
+
+
+SUPPORTED_AGENT_TOKEN_REF = "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN"
+WORKSPACE_AGENT_TRIGGER_HOST = "api.chatgpt.com"
+WORKSPACE_AGENT_TRIGGER_PREFIX = "/v1/workspace_agents/"
+WORKSPACE_AGENT_TRIGGER_SUFFIX = "/trigger"
 
 
 def _json_error(message: str, status_code: int = 400) -> JSONResponse:
@@ -18,14 +29,40 @@ def _json_error(message: str, status_code: int = 400) -> JSONResponse:
 
 
 async def _json(request: Request) -> dict[str, Any]:
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("malformed JSON body") from exc
     return payload if isinstance(payload, dict) else {}
 
 
+def _validate_trigger_url(trigger_url: str) -> None:
+    parsed = urlparse(trigger_url)
+    trigger_id = ""
+    if parsed.path.startswith(WORKSPACE_AGENT_TRIGGER_PREFIX) and parsed.path.endswith(WORKSPACE_AGENT_TRIGGER_SUFFIX):
+        trigger_id = parsed.path[len(WORKSPACE_AGENT_TRIGGER_PREFIX) : -len(WORKSPACE_AGENT_TRIGGER_SUFFIX)]
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != WORKSPACE_AGENT_TRIGGER_HOST
+        or not trigger_id
+        or "/" in trigger_id
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("trigger_url must be a ChatGPT Workspace Agent trigger endpoint")
+
+
+def _validate_agent_token_ref(token_ref: str) -> None:
+    if token_ref != SUPPORTED_AGENT_TOKEN_REF:
+        raise ValueError(f"unsupported token_ref: {token_ref}")
+
+
 def _agent_token(config: Any, token_ref: str) -> str:
-    if token_ref == "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN":
-        return str(config.default_agent_token)
-    return str(config.default_agent_token)
+    _validate_agent_token_ref(token_ref)
+    token = str(config.default_agent_token)
+    if not token:
+        raise ValueError("WORKSPACE_AGENT_RELAY_AGENT_TOKEN is not configured")
+    return token
 
 
 def _missing_fields(payload: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
@@ -360,6 +397,9 @@ def build_app(
         instructions=instructions,
     )
 
+    def current_oauth_manager() -> OAuthManager:
+        return OAuthManager(get_oauth_config(), mcp_path="/mcp")
+
     async def dashboard(_: Request) -> HTMLResponse:
         return HTMLResponse(_dashboard_html())
 
@@ -367,14 +407,23 @@ def build_app(
         return JSONResponse(store.list_agents())
 
     async def create_agent(request: Request) -> JSONResponse:
-        payload = await _json(request)
+        try:
+            payload = await _json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=400)
         trigger_url = str(payload.get("trigger_url") or config.default_trigger_url)
         if not trigger_url:
             return _json_error("trigger_url is required")
+        token_ref = str(payload.get("token_ref") or SUPPORTED_AGENT_TOKEN_REF)
+        try:
+            _validate_trigger_url(trigger_url)
+            _validate_agent_token_ref(token_ref)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=400)
         agent = store.upsert_agent(
             name=str(payload.get("name") or config.default_agent_name),
             trigger_url=trigger_url,
-            token_ref=str(payload.get("token_ref") or "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN"),
+            token_ref=token_ref,
         )
         return JSONResponse(agent)
 
@@ -382,7 +431,10 @@ def build_app(
         return JSONResponse(store.list_conversations())
 
     async def create_conversation(request: Request) -> JSONResponse:
-        payload = await _json(request)
+        try:
+            payload = await _json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=400)
         missing = _missing_fields(payload, ("agent_id", "name", "conversation_key"))
         if missing:
             return _json_error(f"missing required field(s): {', '.join(missing)}")
@@ -404,7 +456,10 @@ def build_app(
         return JSONResponse(store.list_runs_for_conversation(int(conversation["id"])))
 
     async def create_run(request: Request) -> JSONResponse:
-        payload = await _json(request)
+        try:
+            payload = await _json(request)
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=400)
         try:
             conversation = store.get_conversation(int(request.path_params["conversation_id"]))
         except KeyError as exc:
@@ -414,6 +469,10 @@ def build_app(
             agent = next(item for item in agents if int(item["id"]) == int(conversation["agent_id"]))
         except StopIteration:
             return _json_error("conversation agent was not found", status_code=404)
+        try:
+            access_token = _agent_token(config, str(agent["token_ref"]))
+        except ValueError as exc:
+            return _json_error(str(exc), status_code=400)
         request_id = generate_request_id()
         idempotency_key = generate_request_id("idem")
         callback_token = generate_callback_token()
@@ -435,13 +494,26 @@ def build_app(
             request_id=request_id,
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
-        trigger_result = trigger_client.trigger(
-            trigger_url=str(agent["trigger_url"]),
-            access_token=_agent_token(config, str(agent["token_ref"])),
-            conversation_key=conversation_key,
-            input_text=trigger_input,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            trigger_result = await run_in_threadpool(
+                trigger_client.trigger,
+                trigger_url=str(agent["trigger_url"]),
+                access_token=access_token,
+                conversation_key=conversation_key,
+                input_text=trigger_input,
+                idempotency_key=idempotency_key,
+            )
+        except Exception:
+            run = store.update_run_trigger_result(
+                request_id=request_id,
+                trigger_http_status=0,
+                trigger_x_request_id=None,
+                conversation_url=None,
+            )
+            return JSONResponse(
+                {"success": False, "error": "trigger request failed", "run": run},
+                status_code=502,
+            )
         run = store.update_run_trigger_result(
             request_id=request_id,
             trigger_http_status=trigger_result.http_status,
@@ -465,6 +537,15 @@ def build_app(
             Route("/api/conversations/{conversation_id:int}/runs", endpoint=list_runs, methods=["GET"]),
             Route("/api/conversations/{conversation_id:int}/runs", endpoint=create_run, methods=["POST"]),
             Mount("/", app=mcp_app),
+        ],
+        middleware=[
+            StarletteMiddleware(
+                HTTPBearerAuthMiddleware,
+                get_auth_token=get_auth_token,
+                get_oauth_config=get_oauth_config,
+                get_oauth_manager=current_oauth_manager,
+                mcp_path="/mcp",
+            )
         ],
         lifespan=lifespan,
     )
