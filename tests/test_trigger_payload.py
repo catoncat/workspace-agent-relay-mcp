@@ -95,9 +95,10 @@ def make_http_error(
 def test_trigger_client_posts_expected_payload() -> None:
     opener = FakeOpener()
     client = TriggerClient(opener=opener)
+    trigger_url = "https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger"
 
     result = client.trigger(
-        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        trigger_url=trigger_url,
         access_token="agent-token",
         conversation_key="research:sherlog",
         input_text="hello",
@@ -108,6 +109,7 @@ def test_trigger_client_posts_expected_payload() -> None:
     assert result.x_request_id == "req_api_123"
     assert result.conversation_url == "https://chatgpt.com/c/test"
     assert opener.request is not None
+    assert opener.request.full_url == trigger_url
     assert opener.request.get_method() == "POST"
     assert opener.request.headers["Authorization"] == "Bearer agent-token"
     assert opener.request.headers["Content-type"] == "application/json"
