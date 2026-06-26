@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import sqlite3
 from typing import Any, Callable
 
 from starlette.applications import Starlette
@@ -391,7 +392,7 @@ def build_app(
                 name=str(payload["name"]),
                 conversation_key=str(payload["conversation_key"]),
             )
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, sqlite3.IntegrityError) as exc:
             return _json_error(str(exc), status_code=400)
         return JSONResponse(conversation)
 

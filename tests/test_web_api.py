@@ -157,6 +157,19 @@ def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
 
     with client:
         bad_conversation = client.post("/api/conversations", json={})
+        missing_agent = client.post(
+            "/api/conversations",
+            json={"agent_id": 999, "name": "Missing", "conversation_key": "missing:agent"},
+        )
+        _, conversation = _seed_conversation(client)
+        duplicate_key = client.post(
+            "/api/conversations",
+            json={
+                "agent_id": conversation["agent_id"],
+                "name": "Duplicate",
+                "conversation_key": conversation["conversation_key"],
+            },
+        )
         missing_runs = client.get("/api/conversations/999/runs")
         missing_create_run = client.post(
             "/api/conversations/999/runs",
@@ -165,6 +178,10 @@ def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
 
     assert bad_conversation.status_code == 400
     assert bad_conversation.json()["success"] is False
+    assert missing_agent.status_code == 400
+    assert missing_agent.json()["success"] is False
+    assert duplicate_key.status_code == 400
+    assert duplicate_key.json()["success"] is False
     assert missing_runs.status_code == 404
     assert missing_runs.json()["success"] is False
     assert missing_create_run.status_code == 404
