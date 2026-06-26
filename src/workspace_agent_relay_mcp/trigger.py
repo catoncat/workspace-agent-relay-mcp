@@ -86,7 +86,10 @@ class TriggerClient:
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
-                parsed = json.loads(raw) if raw.strip() else {}
+                try:
+                    parsed = json.loads(raw) if raw.strip() else {}
+                except json.JSONDecodeError:
+                    parsed = {"raw": raw}
                 return TriggerResult(
                     http_status=int(response.status),
                     x_request_id=response.headers.get("x-request-id"),
