@@ -46,6 +46,31 @@ def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> No
     assert store.validate_callback("run_1", "other", "secret-callback")["success"] is False
 
 
+def test_create_run_redacts_callback_token_echo_from_input_markdown(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="callback_token: secret-callback",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+
+    stored = store.get_run_by_request_id("run_1")
+    listed = store.list_runs_for_conversation(conversation["id"])
+    context = store.get_run_context("research:sherlog", limit=1)
+
+    for payload in (run, stored, listed, context):
+        rendered = str(payload)
+        assert "secret-callback" not in rendered
+        assert "[redacted-callback-token]" in rendered
+
+
 def test_record_progress_result_and_question_update_run_state(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
@@ -325,6 +350,69 @@ def test_terminal_run_rejects_later_callbacks_without_reopening(tmp_path: Path) 
     assert question["error"]["code"] == "run_closed"
     assert second_result["success"] is False
     assert second_result["error"]["code"] == "run_closed"
+    assert store.get_run_by_request_id("run_1")["status"] == "done"
+
+
+def test_terminal_run_checks_callback_token_before_closed_status(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="done",
+        title="Finished",
+        markdown="Final answer",
+    )
+
+    wrong_progress = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="wrong-callback",
+        message="Reading repository",
+    )
+    wrong_result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="wrong-callback",
+        status="done",
+        title="Finished again",
+        markdown="Second answer",
+    )
+    correct_progress = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        message="Reading repository",
+    )
+    correct_result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="done",
+        title="Finished again",
+        markdown="Second answer",
+    )
+
+    assert result["success"] is True
+    assert wrong_progress["success"] is False
+    assert wrong_progress["error"]["code"] == "invalid_callback_token"
+    assert wrong_result["success"] is False
+    assert wrong_result["error"]["code"] == "invalid_callback_token"
+    assert correct_progress["success"] is False
+    assert correct_progress["error"]["code"] == "run_closed"
+    assert correct_result["success"] is False
+    assert correct_result["error"]["code"] == "run_closed"
     assert store.get_run_by_request_id("run_1")["status"] == "done"
 
 

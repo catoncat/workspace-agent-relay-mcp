@@ -230,6 +230,7 @@ class RelayStore:
         request_id: str,
     ) -> dict[str, Any]:
         now = _now()
+        redacted_input_markdown = _redact_callback_token(input_markdown, callback_token)
         with self._lock, self._connect() as conn:
             conversation = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
             if conversation is None:
@@ -253,7 +254,7 @@ class RelayStore:
                     conversation_key,
                     _hash_token(callback_token),
                     idempotency_key,
-                    input_markdown,
+                    redacted_input_markdown,
                     now,
                     now,
                 ),
@@ -318,12 +319,12 @@ class RelayStore:
             return {"success": False, "error": {"code": "run_not_found", "message": "Run was not found."}}
         if run["conversation_key"] != conversation_key:
             return {"success": False, "error": {"code": "conversation_mismatch", "message": "conversation_key does not match run."}}
-        if run["status"] in TERMINAL_STATUSES:
-            return {"success": False, "error": {"code": "run_closed", "message": "Run is already terminal."}}
         expected = str(run["callback_token_hash"])
         actual = _hash_token(callback_token)
         if not hmac.compare_digest(expected, actual):
             return {"success": False, "error": {"code": "invalid_callback_token", "message": "callback_token is invalid."}}
+        if run["status"] in TERMINAL_STATUSES:
+            return {"success": False, "error": {"code": "run_closed", "message": "Run is already terminal."}}
         return {"success": True, "run": self._redact_run(run)}
 
     def validate_callback(self, request_id: str, conversation_key: str, callback_token: str) -> dict[str, Any]:
