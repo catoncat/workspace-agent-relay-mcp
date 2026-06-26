@@ -44,6 +44,15 @@ WORKSPACE_AGENT_RELAY_TRIGGER_URL=https://api.chatgpt.com/v1/workspace_agents/ag
 WORKSPACE_AGENT_RELAY_AGENT_TOKEN=your-workspace-agent-access-token
 ```
 
+Two tokens serve different purposes:
+
+| Variable | Purpose | Where it goes |
+| --- | --- | --- |
+| `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` | Protects `/api/*` and `/mcp` | `.env` on the server **and** dashboard "Relay API Token" field |
+| `WORKSPACE_AGENT_RELAY_AGENT_TOKEN` | Authenticates trigger calls to ChatGPT | `.env` on the server only (never the browser) |
+
+The relay loads `.env` from the current working directory (or project root) on startup. Run `workspace-agent-relay-mcp` from the directory that contains `.env`, or export the variables in your shell.
+
 Generate the relay auth token with:
 
 ```bash
@@ -62,7 +71,7 @@ Dashboard:
 http://127.0.0.1:8799/
 ```
 
-When `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` is set, the dashboard shell is public wherever the relay is reachable, including through a tunnel, but `/api/*` and `/mcp` require bearer auth. Paste the same relay auth token into the dashboard `API token` field and press `Refresh`.
+When `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` is set, the dashboard shell is public wherever the relay is reachable, including through a tunnel, but `/api/*` and `/mcp` require bearer auth. Paste the same relay auth token into the dashboard **Relay API Token** field and press **Refresh**.
 
 MCP endpoint:
 
