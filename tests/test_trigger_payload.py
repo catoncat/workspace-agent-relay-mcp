@@ -1,5 +1,6 @@
 from io import BytesIO
 import json
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -20,6 +21,7 @@ def test_generate_ids_are_prefixed_and_distinct() -> None:
     assert first.startswith("relay_")
     assert second.startswith("relay_")
     assert first != second
+    assert re.match(r"^relay_\d{8}T\d{6}Z_[0-9a-f]{12}$", first)
     assert len(token) >= 32
 
 
@@ -69,9 +71,11 @@ class FakeOpener:
         self.headers = headers or {"x-request-id": "req_api_123"}
         self.error = error
         self.request: Request | None = None
+        self.timeout: float | None = None
 
     def open(self, request: Request, timeout: float):
         self.request = request
+        self.timeout = timeout
         if self.error is not None:
             raise self.error
         return FakeResponse(self.status, self.body, self.headers)
@@ -111,6 +115,7 @@ def test_trigger_client_posts_expected_payload() -> None:
     assert opener.request is not None
     assert opener.request.full_url == trigger_url
     assert opener.request.get_method() == "POST"
+    assert opener.timeout == 60.0
     assert opener.request.headers["Authorization"] == "Bearer agent-token"
     assert opener.request.headers["Content-type"] == "application/json"
     assert opener.request.headers["Idempotency-key"] == "relay_123"
@@ -160,6 +165,31 @@ def test_trigger_client_returns_http_error_json_body_without_access_token_echo()
     assert result.x_request_id == "req_api_400"
     assert result.conversation_url is None
     assert result.response_body == {"error": {"message": "bad request [REDACTED]"}}
+    assert "[REDACTED]" in str(result.error)
+    assert access_token not in str(result.response_body)
+    assert access_token not in str(result.error)
+
+
+def test_trigger_client_redacts_access_token_from_http_error_json_keys() -> None:
+    access_token = "agent-token-secret"
+    opener = FakeOpener(
+        error=make_http_error(
+            status=400,
+            body=b'{"agent-token-secret":"reflected key"}',
+            headers={"x-request-id": "req_api_400"},
+        )
+    )
+    client = TriggerClient(opener=opener)
+
+    result = client.trigger(
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        access_token=access_token,
+        conversation_key="research:sherlog",
+        input_text="hello",
+        idempotency_key="relay_123",
+    )
+
+    assert result.response_body == {"[REDACTED]": "reflected key"}
     assert "[REDACTED]" in str(result.error)
     assert access_token not in str(result.response_body)
     assert access_token not in str(result.error)

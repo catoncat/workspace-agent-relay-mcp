@@ -27,7 +27,7 @@ def _redact_secret(value: Any, secret: str) -> Any:
     if isinstance(value, str):
         return value.replace(secret, REDACTED_SECRET)
     if isinstance(value, dict):
-        return {key: _redact_secret(item, secret) for key, item in value.items()}
+        return {_redact_secret(key, secret): _redact_secret(item, secret) for key, item in value.items()}
     if isinstance(value, list):
         return [_redact_secret(item, secret) for item in value]
     return value
