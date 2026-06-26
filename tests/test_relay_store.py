@@ -198,6 +198,47 @@ def test_callback_token_echoes_are_redacted_from_callback_content(tmp_path: Path
         assert "[redacted-callback-token]" in rendered
 
 
+def test_artifact_bytes_scalars_are_redacted_after_string_coercion(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+
+    result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="done",
+        title="Finished",
+        markdown="Final answer",
+        artifacts=[
+            {
+                "name": b"name secret-callback",
+                "mime_type": b"text/secret-callback",
+                "content": b"content secret-callback",
+            }
+        ],
+    )
+
+    artifacts = store.list_artifacts(run["id"])
+    rendered = str(artifacts)
+
+    assert result["success"] is True
+    assert "secret-callback" not in rendered
+    assert "[redacted-callback-token]" in rendered
+    assert "[redacted-callback-token]" in artifacts[0]["name"]
+    assert "[redacted-callback-token]" in artifacts[0]["mime_type"]
+    assert "[redacted-callback-token]" in artifacts[0]["content"]
+
+
 def test_record_result_rolls_back_result_event_when_artifact_metadata_fails(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
@@ -382,6 +423,40 @@ def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -
         store.get_run_by_request_id("run_1")
 
 
+def test_create_run_rejects_agent_that_does_not_own_conversation(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    owning_agent = store.upsert_agent(
+        name="owner",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_owner/trigger",
+        token_ref="env:OWNER_TOKEN",
+    )
+    other_agent = store.upsert_agent(
+        name="other",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_other/trigger",
+        token_ref="env:OTHER_TOKEN",
+    )
+    conversation = store.create_conversation(
+        agent_id=owning_agent["id"],
+        name="Sherlog",
+        conversation_key="research:sherlog",
+    )
+
+    with pytest.raises(ValueError):
+        store.create_run(
+            agent_id=other_agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key=conversation["conversation_key"],
+            input_markdown="task",
+            callback_token="secret-callback",
+            idempotency_key="run_1",
+            request_id="run_1",
+        )
+
+    assert store.list_runs_for_conversation(conversation["id"]) == []
+    with pytest.raises(KeyError):
+        store.get_run_by_request_id("run_1")
+
+
 def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -460,8 +535,7 @@ def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callba
     try:
         assert progress_validated.wait(timeout=2)
         result_thread.start()
-        if result_entered_validation.wait(timeout=1):
-            assert result_finished.wait(timeout=2)
+        assert result_entered_validation.wait(timeout=0.25) is False
     finally:
         release_progress.set()
         progress_thread.join(timeout=2)
@@ -470,6 +544,7 @@ def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callba
 
     assert not progress_thread.is_alive()
     assert not result_thread.is_alive()
+    assert result_finished.wait(timeout=0)
     assert progress_errors == []
     assert result_errors == []
     assert progress_result["value"]["success"] is True

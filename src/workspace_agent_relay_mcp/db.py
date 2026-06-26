@@ -57,6 +57,11 @@ def _redact_callback_token(value: Any, callback_token: str) -> Any:
     return value
 
 
+def _redact_artifact_scalar(value: Any, callback_token: str, default: str) -> str:
+    scalar = value or default
+    return _redact_callback_token(str(scalar), callback_token)
+
+
 def _extract_trigger_id(trigger_url: str) -> str:
     match = re.search(r"/workspace_agents/([^/]+)/trigger$", trigger_url)
     return match.group(1) if match else ""
@@ -231,6 +236,8 @@ class RelayStore:
                 raise ValueError(f"Conversation not found: {conversation_id}")
             if conversation["conversation_key"] != conversation_key:
                 raise ValueError("conversation_key does not match conversation_id.")
+            if conversation["agent_id"] != agent_id:
+                raise ValueError("agent_id does not own conversation_id.")
             conn.execute(
                 """
                 INSERT INTO runs (
@@ -431,7 +438,7 @@ class RelayStore:
             )
             now = _now()
             for artifact in artifacts or []:
-                redacted_artifact = _redact_callback_token(artifact, callback_token)
+                redacted_metadata = _redact_callback_token(artifact.get("metadata") or {}, callback_token)
                 conn.execute(
                     """
                     INSERT INTO artifacts (run_id, name, mime_type, content, metadata_json, created_at)
@@ -439,10 +446,10 @@ class RelayStore:
                     """,
                     (
                         run["id"],
-                        str(redacted_artifact.get("name") or "artifact.txt"),
-                        str(redacted_artifact.get("mime_type") or "text/plain"),
-                        str(redacted_artifact.get("content") or ""),
-                        _json_dumps(redacted_artifact.get("metadata") or {}),
+                        _redact_artifact_scalar(artifact.get("name"), callback_token, "artifact.txt"),
+                        _redact_artifact_scalar(artifact.get("mime_type"), callback_token, "text/plain"),
+                        _redact_artifact_scalar(artifact.get("content"), callback_token, ""),
+                        _json_dumps(redacted_metadata),
                         now,
                     ),
                 )
