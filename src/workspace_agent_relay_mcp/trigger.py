@@ -9,6 +9,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 
 
+REDACTED_SECRET = "[REDACTED]"
+
+
 def generate_request_id(prefix: str = "relay") -> str:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     return f"{prefix}_{stamp}_{secrets.token_hex(6)}"
@@ -16,6 +19,18 @@ def generate_request_id(prefix: str = "relay") -> str:
 
 def generate_callback_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _redact_secret(value: Any, secret: str) -> Any:
+    if not secret:
+        return value
+    if isinstance(value, str):
+        return value.replace(secret, REDACTED_SECRET)
+    if isinstance(value, dict):
+        return {key: _redact_secret(item, secret) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_secret(item, secret) for item in value]
+    return value
 
 
 def build_trigger_input(
@@ -102,6 +117,7 @@ class TriggerClient:
                 parsed = json.loads(raw) if raw.strip() else {}
             except json.JSONDecodeError:
                 parsed = {"raw": raw}
+            parsed = _redact_secret(parsed, access_token)
             return TriggerResult(
                 http_status=int(exc.code),
                 x_request_id=exc.headers.get("x-request-id"),
@@ -110,10 +126,11 @@ class TriggerClient:
                 error=str(parsed),
             )
         except URLError as exc:
+            error = _redact_secret(str(exc.reason), access_token)
             return TriggerResult(
                 http_status=0,
                 x_request_id=None,
                 conversation_url=None,
                 response_body={},
-                error=str(exc.reason),
+                error=error,
             )

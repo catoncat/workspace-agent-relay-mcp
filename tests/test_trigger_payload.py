@@ -141,7 +141,7 @@ def test_trigger_client_returns_http_error_json_body_without_access_token_echo()
     opener = FakeOpener(
         error=make_http_error(
             status=400,
-            body=b'{"error":{"message":"bad request"}}',
+            body=b'{"error":{"message":"bad request agent-token-secret"}}',
             headers={"x-request-id": "req_api_400"},
         )
     )
@@ -159,7 +159,8 @@ def test_trigger_client_returns_http_error_json_body_without_access_token_echo()
     assert result.http_status == 400
     assert result.x_request_id == "req_api_400"
     assert result.conversation_url is None
-    assert result.response_body == {"error": {"message": "bad request"}}
+    assert result.response_body == {"error": {"message": "bad request [REDACTED]"}}
+    assert "[REDACTED]" in str(result.error)
     assert access_token not in str(result.response_body)
     assert access_token not in str(result.error)
 
@@ -169,7 +170,7 @@ def test_trigger_client_returns_http_error_raw_body_without_access_token_echo() 
     opener = FakeOpener(
         error=make_http_error(
             status=502,
-            body=b"upstream unavailable",
+            body=b"upstream agent-token-secret unavailable",
             headers={"x-request-id": "req_api_502"},
         )
     )
@@ -187,14 +188,15 @@ def test_trigger_client_returns_http_error_raw_body_without_access_token_echo() 
     assert result.http_status == 502
     assert result.x_request_id == "req_api_502"
     assert result.conversation_url is None
-    assert result.response_body == {"raw": "upstream unavailable"}
+    assert result.response_body == {"raw": "upstream [REDACTED] unavailable"}
+    assert "[REDACTED]" in str(result.error)
     assert access_token not in str(result.response_body)
     assert access_token not in str(result.error)
 
 
 def test_trigger_client_returns_url_error_without_access_token_echo() -> None:
     access_token = "agent-token-secret"
-    opener = FakeOpener(error=URLError("connection refused"))
+    opener = FakeOpener(error=URLError("connection refused agent-token-secret"))
     client = TriggerClient(opener=opener)
 
     result = client.trigger(
@@ -210,7 +212,7 @@ def test_trigger_client_returns_url_error_without_access_token_echo() -> None:
     assert result.x_request_id is None
     assert result.conversation_url is None
     assert result.response_body == {}
-    assert result.error == "connection refused"
+    assert result.error == "connection refused [REDACTED]"
     assert access_token not in str(result.response_body)
     assert access_token not in str(result.error)
 
