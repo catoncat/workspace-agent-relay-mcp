@@ -57,6 +57,10 @@ class RelayStore:
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
+        except Exception:
+            conn.rollback()
+            raise
+        else:
             conn.commit()
         finally:
             conn.close()
@@ -194,6 +198,11 @@ class RelayStore:
     ) -> dict[str, Any]:
         now = _now()
         with self._lock, self._connect() as conn:
+            conversation = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            if conversation is None:
+                raise ValueError(f"Conversation not found: {conversation_id}")
+            if conversation["conversation_key"] != conversation_key:
+                raise ValueError("conversation_key does not match conversation_id.")
             conn.execute(
                 """
                 INSERT INTO runs (
@@ -219,14 +228,22 @@ class RelayStore:
         payload.pop("callback_token_hash", None)
         return payload
 
-    def get_run_by_request_id(self, request_id: str, *, include_secret_hash: bool = False) -> dict[str, Any]:
-        with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+    def _get_run_by_request_id_conn(self, conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
+        row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row is None:
             raise KeyError(f"Run not found: {request_id}")
-        payload = _row_to_dict(row) or {}
+        return _row_to_dict(row) or {}
+
+    def _redact_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(run)
+        payload.pop("callback_token_hash", None)
+        return payload
+
+    def get_run_by_request_id(self, request_id: str, *, include_secret_hash: bool = False) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            payload = self._get_run_by_request_id_conn(conn, request_id)
         if not include_secret_hash:
-            payload.pop("callback_token_hash", None)
+            payload = self._redact_run(payload)
         return payload
 
     def update_run_trigger_result(
@@ -252,9 +269,15 @@ class RelayStore:
             )
         return self.get_run_by_request_id(request_id)
 
-    def validate_callback(self, request_id: str, conversation_key: str, callback_token: str) -> dict[str, Any]:
+    def _validate_callback_conn(
+        self,
+        conn: sqlite3.Connection,
+        request_id: str,
+        conversation_key: str,
+        callback_token: str,
+    ) -> dict[str, Any]:
         try:
-            run = self.get_run_by_request_id(request_id, include_secret_hash=True)
+            run = self._get_run_by_request_id_conn(conn, request_id)
         except KeyError:
             return {"success": False, "error": {"code": "run_not_found", "message": "Run was not found."}}
         if run["conversation_key"] != conversation_key:
@@ -265,11 +288,15 @@ class RelayStore:
         actual = _hash_token(callback_token)
         if not hmac.compare_digest(expected, actual):
             return {"success": False, "error": {"code": "invalid_callback_token", "message": "callback_token is invalid."}}
-        run.pop("callback_token_hash", None)
-        return {"success": True, "run": run}
+        return {"success": True, "run": self._redact_run(run)}
 
-    def _append_event(
+    def validate_callback(self, request_id: str, conversation_key: str, callback_token: str) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            return self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
+
+    def _append_event_conn(
         self,
+        conn: sqlite3.Connection,
         *,
         run_id: int,
         request_id: str,
@@ -279,15 +306,14 @@ class RelayStore:
         payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         now = _now()
-        with self._lock, self._connect() as conn:
-            cur = conn.execute(
-                """
-                INSERT INTO events (run_id, request_id, event_type, title, markdown, payload_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (run_id, request_id, event_type, title, markdown, _json_dumps(payload or {}), now),
-            )
-            row = conn.execute("SELECT * FROM events WHERE id = ?", (cur.lastrowid,)).fetchone()
+        cur = conn.execute(
+            """
+            INSERT INTO events (run_id, request_id, event_type, title, markdown, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, request_id, event_type, title, markdown, _json_dumps(payload or {}), now),
+        )
+        row = conn.execute("SELECT * FROM events WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _row_to_dict(row) or {}
 
     def record_progress(
@@ -300,19 +326,20 @@ class RelayStore:
         title: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        validation = self.validate_callback(request_id, conversation_key, callback_token)
-        if not validation["success"]:
-            return validation
-        run = validation["run"]
-        event = self._append_event(
-            run_id=int(run["id"]),
-            request_id=request_id,
-            event_type="progress",
-            title=title,
-            markdown=message,
-            payload=payload,
-        )
         with self._lock, self._connect() as conn:
+            validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
+            if not validation["success"]:
+                return validation
+            run = validation["run"]
+            event = self._append_event_conn(
+                conn,
+                run_id=int(run["id"]),
+                request_id=request_id,
+                event_type="progress",
+                title=title,
+                markdown=message,
+                payload=payload,
+            )
             conn.execute("UPDATE runs SET status = 'waiting', updated_at = ? WHERE id = ?", (_now(), run["id"]))
         return {"success": True, "event_id": event["id"]}
 
@@ -326,19 +353,20 @@ class RelayStore:
         choices: list[str] | None = None,
         context: str | None = None,
     ) -> dict[str, Any]:
-        validation = self.validate_callback(request_id, conversation_key, callback_token)
-        if not validation["success"]:
-            return validation
-        run = validation["run"]
-        event = self._append_event(
-            run_id=int(run["id"]),
-            request_id=request_id,
-            event_type="question",
-            title="User input needed",
-            markdown=question,
-            payload={"choices": choices or [], "context": context or ""},
-        )
         with self._lock, self._connect() as conn:
+            validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
+            if not validation["success"]:
+                return validation
+            run = validation["run"]
+            event = self._append_event_conn(
+                conn,
+                run_id=int(run["id"]),
+                request_id=request_id,
+                event_type="question",
+                title="User input needed",
+                markdown=question,
+                payload={"choices": choices or [], "context": context or ""},
+            )
             conn.execute("UPDATE runs SET status = 'needs_user', updated_at = ? WHERE id = ?", (_now(), run["id"]))
         return {"success": True, "event_id": event["id"], "question_id": event["id"]}
 
@@ -355,20 +383,21 @@ class RelayStore:
     ) -> dict[str, Any]:
         if status not in VALID_RESULT_STATUSES:
             return {"success": False, "error": {"code": "invalid_status", "message": "status must be done, blocked, or failed."}}
-        validation = self.validate_callback(request_id, conversation_key, callback_token)
-        if not validation["success"]:
-            return validation
-        run = validation["run"]
-        self._append_event(
-            run_id=int(run["id"]),
-            request_id=request_id,
-            event_type="result",
-            title=title,
-            markdown=markdown,
-            payload={"status": status},
-        )
-        now = _now()
         with self._lock, self._connect() as conn:
+            validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
+            if not validation["success"]:
+                return validation
+            run = validation["run"]
+            self._append_event_conn(
+                conn,
+                run_id=int(run["id"]),
+                request_id=request_id,
+                event_type="result",
+                title=title,
+                markdown=markdown,
+                payload={"status": status},
+            )
+            now = _now()
             for artifact in artifacts or []:
                 conn.execute(
                     """
