@@ -1,11 +1,36 @@
 from pathlib import Path
 
+import pytest
+
 from workspace_agent_relay_mcp.config import RelayConfig, load_config
 
 
+RELAY_ENV_VARS = (
+    "WORKSPACE_AGENT_RELAY_HOST",
+    "WORKSPACE_AGENT_RELAY_PORT",
+    "WORKSPACE_AGENT_RELAY_STATE_DIR",
+    "WORKSPACE_AGENT_RELAY_AUTH_TOKEN",
+    "WORKSPACE_AGENT_RELAY_AUTH_MODE",
+    "WORKSPACE_AGENT_RELAY_PUBLIC_BASE_URL",
+    "WORKSPACE_AGENT_RELAY_OAUTH_LOGIN_TOKEN",
+    "WORKSPACE_AGENT_RELAY_OAUTH_SCOPES",
+    "WORKSPACE_AGENT_RELAY_OAUTH_TOKEN_TTL_SECONDS",
+    "WORKSPACE_AGENT_RELAY_DEBUG_MCP_LOGGING",
+    "WORKSPACE_AGENT_RELAY_AGENT_NAME",
+    "WORKSPACE_AGENT_RELAY_TRIGGER_URL",
+    "WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+    "WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG",
+    "WORKSPACE_AGENT_RELAY_TUNNEL_NAME",
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_relay_env(monkeypatch) -> None:
+    for name in RELAY_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_load_config_uses_safe_defaults(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("WORKSPACE_AGENT_RELAY_HOST", raising=False)
-    monkeypatch.delenv("WORKSPACE_AGENT_RELAY_PORT", raising=False)
     monkeypatch.setenv("WORKSPACE_AGENT_RELAY_STATE_DIR", str(tmp_path / "state"))
 
     config = load_config()
@@ -44,3 +69,21 @@ def test_ensure_runtime_directories_creates_owner_only_state_dir(tmp_path: Path)
 
     assert config.state_dir.is_dir()
     assert oct(config.state_dir.stat().st_mode & 0o777) == "0o700"
+
+
+def test_ensure_runtime_directories_raises_when_owner_only_permissions_fail(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state_dir.chmod(0o755)
+    config = RelayConfig(state_dir=state_dir)
+
+    def ignore_chmod(self: Path, mode: int) -> None:
+        return None
+
+    monkeypatch.setattr(Path, "chmod", ignore_chmod)
+
+    with pytest.raises(PermissionError, match="owner-only"):
+        config.ensure_runtime_directories()

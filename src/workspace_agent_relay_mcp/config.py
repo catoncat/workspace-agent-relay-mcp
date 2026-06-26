@@ -40,8 +40,15 @@ class RelayConfig:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         try:
             self.state_dir.chmod(0o700)
-        except OSError:
-            pass
+        except OSError as exc:
+            raise PermissionError(
+                f"Could not set owner-only permissions on state directory: {self.state_dir}"
+            ) from exc
+        mode = self.state_dir.stat().st_mode & 0o777
+        if mode != 0o700:
+            raise PermissionError(
+                f"State directory must have owner-only permissions 0o700, got {oct(mode)}: {self.state_dir}"
+            )
 
 
 def load_config() -> RelayConfig:

@@ -20,7 +20,15 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Edit `.env`, then run:
+Edit `.env`, then export it into the current shell:
+
+```bash
+set -a
+source .env
+set +a
+```
+
+Once the server module task is implemented, run:
 
 ```bash
 workspace-agent-relay-mcp
