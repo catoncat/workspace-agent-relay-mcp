@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { DebugSheet } from '@/components/DebugSheet'
 import { RelaySidebar } from '@/components/RelaySidebar'
 import { SettingsSheet } from '@/components/SettingsSheet'
-import { ThreadView } from '@/components/ThreadView'
+import { ThreadView, pickActiveRunDetail } from '@/components/ThreadView'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import type { Agent, Conversation, Run } from '@/api/types'
 import {
@@ -69,6 +69,7 @@ export function RelayPage() {
     () => runDetails.find((detail) => detail.run.id === selectedRunId) ?? null,
     [runDetails, selectedRunId],
   )
+  const activeDetail = useMemo(() => pickActiveRunDetail(runDetails), [runDetails])
   const recentUrl = useMemo(
     () => runDetails.map((detail) => detail.run.conversation_url).find(Boolean) ?? null,
     [runDetails],
@@ -144,7 +145,7 @@ export function RelayPage() {
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ThreadView details={runDetails} loading={threadLoading} />
+          <ThreadView details={runDetails} loading={threadLoading} onSend={handleSend} activeDetail={activeDetail} />
         </div>
 
         <ThreadComposer

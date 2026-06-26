@@ -496,10 +496,18 @@ class RelayStore:
         conversation_url: str | None,
     ) -> dict[str, Any]:
         trigger_status = "accepted" if 200 <= trigger_http_status < 300 else "failed"
+        # On trigger failure, mark the run trigger_failed (non-terminal) instead of
+        # failed (terminal). The ChatGPT trigger API is async and may still have
+        # dispatched the agent even when we got no 202 (timeout/connection error).
+        # A non-terminal status lets a live agent's record_plan/record_progress/
+        # record_result write back and advance the run, instead of being rejected
+        # with run_closed. If no callback ever arrives, the run stays trigger_failed
+        # (harvest-to-failed can be added later).
+        run_status_on_trigger = "accepted" if trigger_status == "accepted" else "trigger_failed"
         now = _now()
         with self._lock, self._connect(immediate=True) as conn:
             run = self._get_run_by_request_id_conn(conn, request_id)
-            status = trigger_status if run["status"] in TRIGGER_MUTABLE_RUN_STATUSES else run["status"]
+            status = run_status_on_trigger if run["status"] in TRIGGER_MUTABLE_RUN_STATUSES else run["status"]
             conn.execute(
                 """
                 UPDATE runs

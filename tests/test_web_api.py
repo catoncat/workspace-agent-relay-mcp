@@ -386,11 +386,74 @@ def test_api_marks_run_failed_when_trigger_client_raises(tmp_path: Path) -> None
     body = response.json()
     assert body["success"] is False
     assert body["error"] == "trigger request failed"
-    assert body["run"]["status"] == "failed"
+    # Trigger failure is non-terminal (trigger_failed), because the ChatGPT
+    # trigger API is async and may still have dispatched the agent even when we
+    # got no 202. A live agent's callbacks must still be accepted.
+    assert body["run"]["status"] == "trigger_failed"
     assert body["run"]["trigger_http_status"] == 0
     assert "agent-token" not in str(body)
-    assert runs_response.json()[0]["status"] == "failed"
+    assert runs_response.json()[0]["status"] == "trigger_failed"
     assert trigger_client.calls[0]["conversation_key"] == "research:sherlog"
+
+
+def test_trigger_failed_run_still_accepts_callbacks(tmp_path: Path) -> None:
+    """A trigger_failed run is non-terminal, so a live agent that was actually
+    dispatched can still write back plan/progress and advance the run instead of
+    being rejected with run_closed."""
+    client, _ = _client(tmp_path, trigger_client=RaisingTriggerClient())
+
+    with client:
+        from workspace_agent_relay_mcp import server
+
+        agent = server.store.upsert_agent(
+            name="Sherlog",
+            trigger_url="https://example.com/v1/workspace_agents/agtch_test/trigger",
+            token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+        )
+        conversation = server.store.create_conversation(
+            agent_id=agent["id"],
+            name="Sherlog",
+            conversation_key="research:sherlog",
+        )
+        callback_token = "secret-callback-token"
+        run = server.store.create_run(
+            agent_id=agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown="Research sherlog",
+            callback_token=callback_token,
+            idempotency_key="idem_tf",
+            request_id="run_tf",
+        )
+        # Simulate the trigger HTTP call failing (no 202).
+        run = server.store.update_run_trigger_result(
+            request_id="run_tf",
+            trigger_http_status=0,
+            trigger_x_request_id=None,
+            conversation_url=None,
+        )
+        assert run["status"] == "trigger_failed"
+
+        # A live agent's record_plan must be accepted (not run_closed).
+        plan = server.store.record_plan(
+            request_id="run_tf",
+            conversation_key="research:sherlog",
+            callback_token=callback_token,
+            steps=[{"id": "s1", "title": "Step one", "status": "in_progress"}],
+        )
+        assert plan["success"] is True
+
+        # record_progress advances the run to waiting, proving the agent is alive
+        # and that trigger_failed did not lock the run out of further callbacks.
+        progress = server.store.record_progress(
+            request_id="run_tf",
+            conversation_key="research:sherlog",
+            callback_token=callback_token,
+            message="Still working despite trigger failure",
+            title="Working",
+        )
+        assert progress["success"] is True
+        assert server.store.get_run(run["id"])["status"] == "waiting"
 
 
 def test_api_revalidates_stored_trigger_url_before_triggering(tmp_path: Path) -> None:

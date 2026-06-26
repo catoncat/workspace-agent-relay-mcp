@@ -17,6 +17,7 @@ const STATUS_META: Record<string, StatusMeta> = {
   done: { label: 'Done', token: '--status-done' },
   result: { label: 'Result', token: '--status-done' },
   failed: { label: 'Failed', token: '--status-failed' },
+  trigger_failed: { label: 'Trigger failed', token: '--status-failed' },
   blocked: { label: 'Blocked', token: '--status-failed' },
   needs_user: { label: 'Needs user', token: '--status-info' },
   question: { label: 'Question', token: '--status-info' },

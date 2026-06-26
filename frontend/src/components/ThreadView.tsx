@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import type { JsonValue, Plan, PlanStep, PlanStepStatus, RunDetail, RunEvent, RunEventPayload, ToolTraceFields } from '@/api/types'
+import type { JsonValue, Plan, PlanStep, PlanStepStatus, Run, RunDetail, RunEvent, RunEventPayload, ToolTraceFields } from '@/api/types'
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -32,15 +32,17 @@ import {
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-const ACTIVE_STATUSES = new Set(['pending', 'running', 'accepted', 'waiting', 'needs_user'])
+const ACTIVE_STATUSES = new Set(['pending', 'running', 'accepted', 'waiting', 'needs_user', 'trigger_failed'])
 const TERMINAL_STATUSES = new Set(['done', 'blocked', 'failed'])
 
 type Props = {
   details: RunDetail[]
   loading?: boolean
+  onSend?: (text: string) => void | Promise<void>
+  activeDetail?: RunDetail | null
 }
 
-export function ThreadView({ details, loading = false }: Props) {
+export function ThreadView({ details, loading = false, onSend, activeDetail }: Props) {
   if (loading) {
     return (
       <Conversation className="h-full">
@@ -65,8 +67,9 @@ export function ThreadView({ details, loading = false }: Props) {
   return (
     <Conversation className="h-full">
       <ConversationContent className="mx-auto max-w-3xl gap-6">
+        {activeDetail ? <StickyPlanBar detail={activeDetail} /> : null}
         {details.map((detail) => (
-          <RunThread key={detail.run.id} detail={detail} />
+          <RunThread key={detail.run.id} detail={detail} onSend={onSend} />
         ))}
       </ConversationContent>
       <ConversationScrollButton />
@@ -74,7 +77,7 @@ export function ThreadView({ details, loading = false }: Props) {
   )
 }
 
-function RunThread({ detail }: { detail: RunDetail }) {
+function RunThread({ detail, onSend }: { detail: RunDetail; onSend?: (text: string) => void | Promise<void> }) {
   const run = detail.run
   const isActive = ACTIVE_STATUSES.has(run.status)
   const hasResultEvent = detail.events.some((event) => event.event_type === 'result')
@@ -98,7 +101,7 @@ function RunThread({ detail }: { detail: RunDetail }) {
   const tracesDefaultOpen = isActive && !hasNarrations && !hasResultEvent
 
   return (
-    <div className="flex flex-col gap-3">
+    <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16">
       <Message from="user">
         <MessageContent>
           <MessageResponse>{run.input_markdown || '(empty message)'}</MessageResponse>
@@ -124,7 +127,12 @@ function RunThread({ detail }: { detail: RunDetail }) {
       {detail.events
         .filter((event) => event.event_type === 'question')
         .map((event, index) => (
-          <QuestionEvent key={`question-${event.id ?? index}`} event={event} />
+          <QuestionEvent
+            key={`question-${event.id ?? index}`}
+            event={event}
+            runStatus={run.status}
+            onSend={onSend}
+          />
         ))}
 
       {detail.events
@@ -138,7 +146,7 @@ function RunThread({ detail }: { detail: RunDetail }) {
         ))}
 
       {!hasResultEvent && TERMINAL_STATUSES.has(run.status) ? (
-        <TerminalStatus status={run.status} />
+        <TerminalStatus run={run} />
       ) : null}
 
       {detail.artifacts.length > 0 && (
@@ -154,11 +162,29 @@ function RunThread({ detail }: { detail: RunDetail }) {
   )
 }
 
-function PlanChecklist({ plan, active }: { plan: Plan; active: boolean }) {
+function planProgress(plan: Plan) {
+  const total = plan.steps.length
   const doneCount = plan.steps.filter((step) => step.status === 'done').length
   const inProgress = plan.steps.some((step) => step.status === 'in_progress')
-  const total = plan.steps.length
   const allDone = doneCount === total && total > 0
+  const currentStep =
+    plan.steps.find((step) => step.status === 'in_progress') ??
+    plan.steps[plan.steps.length - 1]
+  return { total, doneCount, inProgress, allDone, currentStep }
+}
+
+/** Pick the most recent run that is still active and has a plan, for the sticky
+ * summary bar. Returns null when nothing is active or no active run has a plan. */
+export function pickActiveRunDetail(details: RunDetail[]): RunDetail | null {
+  for (let i = details.length - 1; i >= 0; i -= 1) {
+    const detail = details[i]
+    if (ACTIVE_STATUSES.has(detail.run.status) && detail.plan) return detail
+  }
+  return null
+}
+
+function PlanChecklist({ plan, active }: { plan: Plan; active: boolean }) {
+  const { doneCount, inProgress, total, allDone } = planProgress(plan)
 
   return (
     <div className="rounded-lg border bg-muted/30 p-3">
@@ -185,6 +211,43 @@ function PlanChecklist({ plan, active }: { plan: Plan; active: boolean }) {
         ))}
       </ol>
     </div>
+  )
+}
+
+function StickyPlanBar({ detail }: { detail: RunDetail }) {
+  const run = detail.run
+  const plan = detail.plan
+  if (!plan) return null
+  const { doneCount, total, inProgress, currentStep } = planProgress(plan)
+  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
+
+  const handleClick = () => {
+    const el = document.getElementById(`run-${run.id}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="sticky top-0 z-10 flex w-full items-center gap-3 rounded-lg border bg-background/95 px-3 py-2 text-left text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent/40"
+    >
+      <span className="shrink-0 font-medium text-muted-foreground">
+        Plan <span className="tabular-nums text-foreground">{doneCount}/{total}</span>
+      </span>
+      <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+        <span
+          className="absolute inset-y-0 left-0 rounded-full bg-primary transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        {currentStep ? currentStep.title : 'Working…'}
+      </span>
+      {inProgress ? (
+        <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-foreground" />
+      ) : null}
+    </button>
   )
 }
 
@@ -407,10 +470,26 @@ function SummaryList({
   )
 }
 
-function QuestionEvent({ event }: { event: RunEvent }) {
+function QuestionEvent({
+  event,
+  runStatus,
+  onSend,
+}: {
+  event: RunEvent
+  runStatus: string
+  onSend?: (text: string) => void | Promise<void>
+}) {
   const payload = eventPayload(event)
   const choices = stringArray(payload.choices)
   const context = stringValue(payload.context)
+  const [picked, setPicked] = useState<string | null>(null)
+  const answerable = runStatus === 'needs_user' && onSend
+
+  const handlePick = (choice: string) => {
+    if (!answerable || picked) return
+    setPicked(choice)
+    void onSend(choice)
+  }
 
   return (
     <Message from="assistant">
@@ -426,12 +505,36 @@ function QuestionEvent({ event }: { event: RunEvent }) {
           {context ? <p className="text-sm text-muted-foreground">{context}</p> : null}
           {choices.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {choices.map((choice) => (
-                <Badge key={choice} variant="secondary" className="max-w-full whitespace-normal">
-                  {choice}
-                </Badge>
-              ))}
+              {choices.map((choice) => {
+                const isPicked = picked === choice
+                const disabled = !answerable || (picked !== null && !isPicked)
+                return (
+                  <button
+                    key={choice}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => handlePick(choice)}
+                    className={cn(
+                      'max-w-full whitespace-normal rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                      isPicked
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : answerable
+                          ? 'border-border bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                          : 'border-border bg-secondary/50 text-muted-foreground',
+                      answerable && !isPicked && 'cursor-pointer',
+                      disabled && 'cursor-not-allowed opacity-70',
+                    )}
+                  >
+                    {choice}
+                  </button>
+                )
+              })}
             </div>
+          ) : null}
+          {!answerable && choices.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Reply below to answer the agent.
+            </p>
           ) : null}
         </div>
       </MessageContent>
@@ -452,10 +555,27 @@ function ResultEvent({ event, runStatus }: { event: RunEvent; runStatus: string 
   )
 }
 
-function TerminalStatus({ status }: { status: string }) {
+function TerminalStatus({ run }: { run: Run }) {
+  // A failed run with no result and a failed/zero trigger usually means the
+  // trigger HTTP call never got a 202 — but the ChatGPT agent may still have
+  // been dispatched and tried to write back, only to be rejected because this
+  // run is already terminal. Surface that distinctly instead of misleadingly
+  // saying the agent "finished without a result".
+  const triggerFailed =
+    run.status === 'failed' &&
+    (run.trigger_status === 'failed' || run.trigger_http_status === 0)
+  if (triggerFailed) {
+    return (
+      <RunTerminalMessage
+        status={run.status}
+        title="Trigger failed"
+        description="The relay could not confirm the trigger reached ChatGPT. The agent may still be running, but its updates were rejected because this run was marked failed. Try sending the message again."
+      />
+    )
+  }
   return (
     <RunTerminalMessage
-      status={status}
+      status={run.status}
       title="Run finished"
       description="Run finished without a result event."
     />
@@ -510,8 +630,8 @@ function ThreadLoadingSkeleton() {
 function phaseHint(detail: RunDetail): string | null {
   const run = detail.run
   if (detail.events.length > 0 || detail.plan) return null
-  if (run.trigger_status === 'failed' || run.status === 'failed') {
-    return 'Trigger failed. Open trigger trace for details.'
+  if (run.status === 'trigger_failed' || run.trigger_status === 'failed' || run.status === 'failed') {
+    return 'Trigger failed. The agent may still be running — waiting for a callback to confirm.'
   }
   if (run.trigger_status === 'accepted') {
     return 'Trigger accepted (202). Waiting for the agent to call back via MCP.'
