@@ -39,9 +39,15 @@ cp .env.example .env
 Edit `.env`:
 
 ```bash
-WORKSPACE_AGENT_RELAY_AUTH_TOKEN=local-mcp-token
+WORKSPACE_AGENT_RELAY_AUTH_TOKEN=paste-output-from-openssl-rand-hex-32
 WORKSPACE_AGENT_RELAY_TRIGGER_URL=https://api.chatgpt.com/v1/workspace_agents/agtch_your_id/trigger
 WORKSPACE_AGENT_RELAY_AGENT_TOKEN=your-workspace-agent-access-token
+```
+
+Generate the relay auth token with:
+
+```bash
+openssl rand -hex 32
 ```
 
 Run locally:
@@ -56,7 +62,7 @@ Dashboard:
 http://127.0.0.1:8799/
 ```
 
-When `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` is set, the dashboard shell still loads locally, but `/api/*` and `/mcp` require bearer auth. Paste the same relay auth token into the dashboard `API token` field and press `Refresh`.
+When `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` is set, the dashboard shell is public wherever the relay is reachable, including through a tunnel, but `/api/*` and `/mcp` require bearer auth. Paste the same relay auth token into the dashboard `API token` field and press `Refresh`.
 
 MCP endpoint:
 
