@@ -51,17 +51,22 @@ class RelayStore:
         self._init_schema()
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.database_path)
+    def _connect(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(self.database_path, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        transaction_started = False
         try:
+            conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            transaction_started = True
             yield conn
         except Exception:
-            conn.rollback()
+            if transaction_started:
+                conn.rollback()
             raise
         else:
-            conn.commit()
+            if transaction_started:
+                conn.commit()
         finally:
             conn.close()
 
@@ -326,7 +331,7 @@ class RelayStore:
         title: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connect(immediate=True) as conn:
             validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
             if not validation["success"]:
                 return validation
@@ -353,7 +358,7 @@ class RelayStore:
         choices: list[str] | None = None,
         context: str | None = None,
     ) -> dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connect(immediate=True) as conn:
             validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
             if not validation["success"]:
                 return validation
@@ -383,7 +388,7 @@ class RelayStore:
     ) -> dict[str, Any]:
         if status not in VALID_RESULT_STATUSES:
             return {"success": False, "error": {"code": "invalid_status", "message": "status must be done, blocked, or failed."}}
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connect(immediate=True) as conn:
             validation = self._validate_callback_conn(conn, request_id, conversation_key, callback_token)
             if not validation["success"]:
                 return validation

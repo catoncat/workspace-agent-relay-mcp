@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -262,3 +263,101 @@ def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -
 
     with pytest.raises(KeyError):
         store.get_run_by_request_id("run_1")
+
+
+def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "relay.sqlite"
+    setup_store = RelayStore(database_path)
+    progress_store = RelayStore(database_path)
+    result_store = RelayStore(database_path)
+    agent = setup_store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = setup_store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    setup_store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+
+    progress_validated = threading.Event()
+    release_progress = threading.Event()
+    result_entered_validation = threading.Event()
+    result_finished = threading.Event()
+    progress_result: dict[str, object] = {}
+    result_result: dict[str, object] = {}
+    progress_errors: list[BaseException] = []
+    result_errors: list[BaseException] = []
+
+    original_progress_validate = progress_store._validate_callback_conn
+    original_result_validate = result_store._validate_callback_conn
+
+    def pause_after_progress_validation(*args: object, **kwargs: object) -> dict[str, object]:
+        validation = original_progress_validate(*args, **kwargs)
+        progress_validated.set()
+        if not release_progress.wait(timeout=2):
+            raise TimeoutError("progress callback was not released")
+        return validation
+
+    def mark_result_validation(*args: object, **kwargs: object) -> dict[str, object]:
+        result_entered_validation.set()
+        return original_result_validate(*args, **kwargs)
+
+    monkeypatch.setattr(progress_store, "_validate_callback_conn", pause_after_progress_validation)
+    monkeypatch.setattr(result_store, "_validate_callback_conn", mark_result_validation)
+
+    def record_progress() -> None:
+        try:
+            progress_result["value"] = progress_store.record_progress(
+                request_id="run_1",
+                conversation_key="research:sherlog",
+                callback_token="secret-callback",
+                message="Reading repository",
+            )
+        except BaseException as exc:
+            progress_errors.append(exc)
+
+    def record_result() -> None:
+        try:
+            result_result["value"] = result_store.record_result(
+                request_id="run_1",
+                conversation_key="research:sherlog",
+                callback_token="secret-callback",
+                status="done",
+                title="Finished",
+                markdown="Final answer",
+            )
+        except BaseException as exc:
+            result_errors.append(exc)
+        finally:
+            result_finished.set()
+
+    progress_thread = threading.Thread(target=record_progress)
+    result_thread = threading.Thread(target=record_result)
+    progress_thread.start()
+    try:
+        assert progress_validated.wait(timeout=2)
+        result_thread.start()
+        if result_entered_validation.wait(timeout=1):
+            assert result_finished.wait(timeout=2)
+    finally:
+        release_progress.set()
+        progress_thread.join(timeout=2)
+        if result_thread.ident is not None:
+            result_thread.join(timeout=2)
+
+    assert not progress_thread.is_alive()
+    assert not result_thread.is_alive()
+    assert progress_errors == []
+    assert result_errors == []
+    assert progress_result["value"]["success"] is True
+    assert result_result["value"]["success"] is True
+    run = setup_store.get_run_by_request_id("run_1")
+    events = setup_store.list_events(run["id"])
+    assert run["status"] == "done"
+    assert [event["event_type"] for event in events] == ["progress", "result"]
