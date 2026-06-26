@@ -45,7 +45,10 @@ OAUTH_DISCOVERY_PATHS = {
 AuthTokenProvider = Callable[[], str]
 OAuthConfigProvider = Callable[[], OAuthRuntimeConfig]
 DebugEnabledProvider = Callable[[], bool]
+OAuthManagerProvider = Callable[[], OAuthManager]
 DEBUG_LOGGER = logging.getLogger("workspace_agent_relay_mcp.mcp_debug")
+DEBUG_REDACTED = "[redacted]"
+DEBUG_SECRET_KEY_PARTS = ("authorization", "password", "secret", "token", "code_verifier")
 
 
 def _emit_debug_log(message: str, *args: object) -> None:
@@ -147,6 +150,21 @@ def _truncate_jsonish(value: Any, *, max_chars: int = 240) -> str:
     return rendered[: max_chars - 1] + "…"
 
 
+def _redact_debug_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[Any, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if any(part in normalized_key for part in DEBUG_SECRET_KEY_PARTS):
+                redacted[key] = DEBUG_REDACTED
+            else:
+                redacted[key] = _redact_debug_value(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_debug_value(item) for item in value]
+    return value
+
+
 def _summarize_rpc_body(body: bytes) -> dict[str, Any]:
     if not body:
         return {"kind": "empty"}
@@ -169,9 +187,9 @@ def _summarize_rpc_body(body: bytes) -> dict[str, Any]:
         if isinstance(params, dict):
             tool_name = params.get("name") or params.get("tool")
             if "arguments" in params:
-                tool_args = _truncate_jsonish(params.get("arguments"))
+                tool_args = _truncate_jsonish(_redact_debug_value(params.get("arguments")))
             else:
-                params_summary = _truncate_jsonish(params)
+                params_summary = _truncate_jsonish(_redact_debug_value(params))
         entries.append(
             {
                 "id": item.get("id"),
@@ -327,13 +345,13 @@ class HTTPBearerAuthMiddleware:
         app: Any,
         get_auth_token: AuthTokenProvider,
         get_oauth_config: OAuthConfigProvider,
-        oauth_manager: OAuthManager,
+        get_oauth_manager: OAuthManagerProvider,
         mcp_path: str,
     ) -> None:
         self.app = app
         self._get_auth_token = get_auth_token
         self._get_oauth_config = get_oauth_config
-        self._oauth_manager = oauth_manager
+        self._get_oauth_manager = get_oauth_manager
         self._mcp_path = mcp_path
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
@@ -368,15 +386,16 @@ class HTTPBearerAuthMiddleware:
             return
 
         if auth_mode == "oauth":
+            oauth_manager = self._get_oauth_manager()
             headers = Headers(raw=scope.get("headers", []))
             fallback_base_url = _base_url_from_headers(headers, str(scope.get("scheme", "https")))
-            base_url = self._oauth_manager.metadata_base_url(fallback_base_url)
+            base_url = oauth_manager.metadata_base_url(fallback_base_url)
             static_token_matches = bool(
                 provided
                 and config.auth_token
                 and hmac.compare_digest(provided, config.auth_token)
             )
-            oauth_token_matches = self._oauth_manager.verify_access_token(provided, base_url=base_url)
+            oauth_token_matches = oauth_manager.verify_access_token(provided, base_url=base_url)
             if static_token_matches or oauth_token_matches:
                 await self.app(scope, receive, send)
                 return
@@ -395,10 +414,11 @@ class HTTPBearerAuthMiddleware:
         base_url: str | None = None,
     ) -> None:
         if oauth and base_url:
+            oauth_manager = self._get_oauth_manager()
             challenge = (
                 f'Bearer realm="mcp", '
-                f'resource_metadata="{self._oauth_manager.resource_metadata_url(base_url)}", '
-                f'scope="{self._oauth_manager.scope_string()}"'
+                f'resource_metadata="{oauth_manager.resource_metadata_url(base_url)}", '
+                f'scope="{oauth_manager.scope_string()}"'
             )
         else:
             challenge = 'Bearer realm="mcp"'
@@ -527,7 +547,10 @@ def build_http_compat_app(
     instructions: str,
 ) -> Starlette:
     app_version = _resolve_version(app_name)
-    oauth_manager = OAuthManager(get_oauth_config(), mcp_path=mcp_path)
+
+    def current_oauth_manager() -> OAuthManager:
+        return OAuthManager(get_oauth_config(), mcp_path=mcp_path)
+
     dispatcher = MCPCompatibilityDispatcher(
         streamable_app=streamable_app,
         legacy_sse_app=legacy_sse_app,
@@ -541,7 +564,7 @@ def build_http_compat_app(
 
     def oauth_base_url(request: Request) -> str:
         fallback = _base_url_from_headers(request.headers, request.url.scheme)
-        return oauth_manager.metadata_base_url(fallback)
+        return current_oauth_manager().metadata_base_url(fallback)
 
     def oauth_enabled() -> bool:
         return get_oauth_config().normalized_auth_mode == "oauth"
@@ -552,6 +575,7 @@ def build_http_compat_app(
     async def oauth_authorization_server_metadata(request: Request) -> Response:
         if not oauth_enabled():
             return Response(status_code=404, headers=DISCOVERY_HEADERS)
+        oauth_manager = current_oauth_manager()
         return JSONResponse(
             oauth_manager.authorization_server_metadata(oauth_base_url(request)),
             headers=DISCOVERY_HEADERS,
@@ -560,6 +584,7 @@ def build_http_compat_app(
     async def oauth_protected_resource_metadata(request: Request) -> Response:
         if not oauth_enabled():
             return Response(status_code=404, headers=DISCOVERY_HEADERS)
+        oauth_manager = current_oauth_manager()
         return JSONResponse(
             oauth_manager.protected_resource_metadata(oauth_base_url(request)),
             headers=DISCOVERY_HEADERS,
@@ -568,6 +593,7 @@ def build_http_compat_app(
     async def oauth_register(request: Request) -> Response:
         if not oauth_enabled():
             return Response(status_code=404, headers=DISCOVERY_HEADERS)
+        oauth_manager = current_oauth_manager()
         try:
             registration = oauth_manager.register_client(await _parse_request_data(request))
         except ValueError as exc:
@@ -580,6 +606,7 @@ def build_http_compat_app(
     async def oauth_authorize(request: Request) -> Response:
         if not oauth_enabled():
             return Response(status_code=404, headers=DISCOVERY_HEADERS)
+        oauth_manager = current_oauth_manager()
         if request.method == "GET":
             return HTMLResponse(oauth_manager.authorize_page(dict(request.query_params)))
         try:
@@ -596,6 +623,7 @@ def build_http_compat_app(
     async def oauth_token(request: Request) -> Response:
         if not oauth_enabled():
             return Response(status_code=404, headers=DISCOVERY_HEADERS)
+        oauth_manager = current_oauth_manager()
         try:
             token = oauth_manager.exchange_code(
                 _string_values(await _parse_request_data(request)),
@@ -644,7 +672,7 @@ def build_http_compat_app(
                 HTTPBearerAuthMiddleware,
                 get_auth_token=get_auth_token,
                 get_oauth_config=get_oauth_config,
-                oauth_manager=oauth_manager,
+                get_oauth_manager=current_oauth_manager,
                 mcp_path=mcp_path,
             ),
         ],

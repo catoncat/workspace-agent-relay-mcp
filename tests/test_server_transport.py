@@ -1,9 +1,12 @@
 from pathlib import Path
 
+from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 from workspace_agent_relay_mcp.config import RelayConfig
 from workspace_agent_relay_mcp.db import RelayStore
+from workspace_agent_relay_mcp.http_compat import _summarize_rpc_body, build_http_compat_app
+from workspace_agent_relay_mcp.oauth import OAuthRuntimeConfig
 
 
 def _client(tmp_path: Path, *, auth_token: str = "") -> TestClient:
@@ -53,3 +56,65 @@ def test_plain_get_mcp_returns_server_card_when_auth_disabled(tmp_path: Path) ->
 
     assert response.status_code == 200
     assert response.json()["transport"]["endpoint"] == "/mcp"
+
+
+def test_debug_rpc_summary_redacts_callback_token_argument() -> None:
+    body = b"""{
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "record_result",
+        "arguments": {
+          "request_id": "relay_1",
+          "callback_token": "secret-callback",
+          "conversation_key": "research:sherlog"
+        }
+      }
+    }"""
+
+    summary = _summarize_rpc_body(body)
+    rendered = str(summary)
+
+    assert "secret-callback" not in rendered
+    assert "[redacted]" in rendered
+    assert summary["entries"][0]["tool"] == "record_result"
+
+
+def test_oauth_metadata_uses_latest_runtime_config(tmp_path: Path) -> None:
+    active_config = {
+        "value": OAuthRuntimeConfig(
+            auth_mode="oauth",
+            auth_token="",
+            public_base_url="https://old.example",
+            state_dir=tmp_path / "old",
+            oauth_login_token="login-old",
+            oauth_scopes=("workspace-agent-relay",),
+            oauth_token_ttl_seconds=3600,
+        )
+    }
+    app = build_http_compat_app(
+        streamable_app=Starlette(),
+        legacy_sse_app=Starlette(),
+        app_name="workspace-agent-relay-mcp",
+        mcp_path="/mcp",
+        get_auth_token=lambda: "",
+        get_oauth_config=lambda: active_config["value"],
+        get_debug_enabled=lambda: False,
+        instructions="test",
+    )
+    active_config["value"] = OAuthRuntimeConfig(
+        auth_mode="oauth",
+        auth_token="",
+        public_base_url="https://new.example",
+        state_dir=tmp_path / "new",
+        oauth_login_token="login-new",
+        oauth_scopes=("workspace-agent-relay",),
+        oauth_token_ttl_seconds=3600,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/.well-known/oauth-authorization-server")
+
+    assert response.status_code == 200
+    assert response.json()["issuer"] == "https://new.example"
