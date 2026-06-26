@@ -15,6 +15,7 @@ from typing import Any, Iterator
 TERMINAL_STATUSES = {"done", "blocked", "failed"}
 VALID_RESULT_STATUSES = TERMINAL_STATUSES
 TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
+REDACTED_CALLBACK_TOKEN = "[redacted-callback-token]"
 
 
 def _now() -> str:
@@ -33,6 +34,27 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _redact_callback_token(value: Any, callback_token: str) -> Any:
+    if not callback_token:
+        return value
+    if isinstance(value, str):
+        return value.replace(callback_token, REDACTED_CALLBACK_TOKEN)
+    if isinstance(value, dict):
+        return {
+            (
+                _redact_callback_token(key, callback_token)
+                if isinstance(key, str)
+                else key
+            ): _redact_callback_token(item, callback_token)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_callback_token(item, callback_token) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_callback_token(item, callback_token) for item in value)
+    return value
 
 
 def _extract_trigger_id(trigger_url: str) -> str:
@@ -343,9 +365,9 @@ class RelayStore:
                 run_id=int(run["id"]),
                 request_id=request_id,
                 event_type="progress",
-                title=title,
-                markdown=message,
-                payload=payload,
+                title=_redact_callback_token(title, callback_token),
+                markdown=_redact_callback_token(message, callback_token),
+                payload=_redact_callback_token(payload, callback_token),
             )
             conn.execute("UPDATE runs SET status = 'waiting', updated_at = ? WHERE id = ?", (_now(), run["id"]))
         return {"success": True, "event_id": event["id"]}
@@ -371,8 +393,11 @@ class RelayStore:
                 request_id=request_id,
                 event_type="question",
                 title="User input needed",
-                markdown=question,
-                payload={"choices": choices or [], "context": context or ""},
+                markdown=_redact_callback_token(question, callback_token),
+                payload=_redact_callback_token(
+                    {"choices": choices or [], "context": context or ""},
+                    callback_token,
+                ),
             )
             conn.execute("UPDATE runs SET status = 'needs_user', updated_at = ? WHERE id = ?", (_now(), run["id"]))
         return {"success": True, "event_id": event["id"], "question_id": event["id"]}
@@ -400,12 +425,13 @@ class RelayStore:
                 run_id=int(run["id"]),
                 request_id=request_id,
                 event_type="result",
-                title=title,
-                markdown=markdown,
+                title=_redact_callback_token(title, callback_token),
+                markdown=_redact_callback_token(markdown, callback_token),
                 payload={"status": status},
             )
             now = _now()
             for artifact in artifacts or []:
+                redacted_artifact = _redact_callback_token(artifact, callback_token)
                 conn.execute(
                     """
                     INSERT INTO artifacts (run_id, name, mime_type, content, metadata_json, created_at)
@@ -413,10 +439,10 @@ class RelayStore:
                     """,
                     (
                         run["id"],
-                        str(artifact.get("name") or "artifact.txt"),
-                        str(artifact.get("mime_type") or "text/plain"),
-                        str(artifact.get("content") or ""),
-                        _json_dumps(artifact.get("metadata") or {}),
+                        str(redacted_artifact.get("name") or "artifact.txt"),
+                        str(redacted_artifact.get("mime_type") or "text/plain"),
+                        str(redacted_artifact.get("content") or ""),
+                        _json_dumps(redacted_artifact.get("metadata") or {}),
                         now,
                     ),
                 )

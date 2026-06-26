@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import threading
 
 import pytest
@@ -35,7 +36,11 @@ def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> No
     )
 
     assert run["request_id"] == "run_1"
+    assert "callback_token_hash" not in run
     assert "secret-callback" not in str(run)
+    secret_run = store.get_run_by_request_id("run_1", include_secret_hash=True)
+    assert secret_run["callback_token_hash"] == hashlib.sha256(b"secret-callback").hexdigest()
+    assert "secret-callback" not in str(secret_run)
     assert store.validate_callback("run_1", "research:sherlog", "secret-callback")["success"] is True
     assert store.validate_callback("run_1", "research:sherlog", "wrong")["success"] is False
     assert store.validate_callback("run_1", "other", "secret-callback")["success"] is False
@@ -100,7 +105,42 @@ def test_get_run_context_redacts_callback_tokens(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
-    store.create_run(
+
+    for index in range(1, 4):
+        request_id = f"run_{index}"
+        store.create_run(
+            agent_id=agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown=f"task {index}",
+            callback_token="secret-callback",
+            idempotency_key=request_id,
+            request_id=request_id,
+        )
+        store.record_result(
+            request_id=request_id,
+            conversation_key="research:sherlog",
+            callback_token="secret-callback",
+            status="done",
+            title=f"Finished {index}",
+            markdown=f"Final answer {index}",
+        )
+
+    context = store.get_run_context("research:sherlog", limit=2)
+
+    rendered = str(context)
+    assert context["success"] is True
+    assert "secret-callback" not in rendered
+    assert "callback_token_hash" not in rendered
+    assert [run["request_id"] for run in context["runs"]] == ["run_3", "run_2"]
+    assert "run_1" not in rendered
+
+
+def test_callback_token_echoes_are_redacted_from_callback_content(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    run = store.create_run(
         agent_id=agent["id"],
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
@@ -109,22 +149,53 @@ def test_get_run_context_redacts_callback_tokens(tmp_path: Path) -> None:
         idempotency_key="run_1",
         request_id="run_1",
     )
+
+    store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        message="progress message secret-callback",
+        title="progress title secret-callback",
+        payload={
+            "secret-callback-key": "payload value secret-callback",
+            "nested": ["list value secret-callback", {"inner": "dict value secret-callback"}],
+        },
+    )
+    store.ask_user(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        question="question secret-callback",
+        choices=["choice secret-callback"],
+        context="context secret-callback",
+    )
     store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
         callback_token="secret-callback",
         status="done",
-        title="Finished",
-        markdown="Final answer",
+        title="result title secret-callback",
+        markdown="result markdown secret-callback",
+        artifacts=[
+            {
+                "name": "artifact secret-callback",
+                "mime_type": "text/secret-callback",
+                "content": "artifact content secret-callback",
+                "metadata": {
+                    "metadata-secret-callback": "metadata value secret-callback",
+                    "nested": ["metadata list secret-callback"],
+                },
+            }
+        ],
     )
 
-    context = store.get_run_context("research:sherlog", limit=3)
+    events_rendered = str(store.list_events(run["id"]))
+    artifacts_rendered = str(store.list_artifacts(run["id"]))
+    context_rendered = str(store.get_run_context("research:sherlog", limit=1))
 
-    rendered = str(context)
-    assert context["success"] is True
-    assert "secret-callback" not in rendered
-    assert "callback_token_hash" not in rendered
-    assert context["runs"][0]["request_id"] == "run_1"
+    for rendered in (events_rendered, artifacts_rendered, context_rendered):
+        assert "secret-callback" not in rendered
+        assert "[redacted-callback-token]" in rendered
 
 
 def test_record_result_rolls_back_result_event_when_artifact_metadata_fails(tmp_path: Path) -> None:
