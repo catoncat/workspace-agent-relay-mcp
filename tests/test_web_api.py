@@ -214,19 +214,19 @@ def test_dashboard_does_not_use_inner_html_for_stored_data(tmp_path: Path) -> No
     assert "onclick=" not in response.text
 
 
-def test_dashboard_and_api_require_bearer_when_auth_token_is_set(tmp_path: Path) -> None:
+def test_dashboard_shell_is_public_but_api_requires_bearer_when_auth_token_is_set(tmp_path: Path) -> None:
     client, _ = _client(tmp_path, auth_token="local-secret")
     headers = {"Authorization": "Bearer local-secret"}
 
     with client:
-        dashboard_missing = client.get("/")
         agents_missing = client.get("/api/agents")
-        dashboard_allowed = client.get("/", headers=headers)
+        dashboard_allowed = client.get("/")
         agents_allowed = client.get("/api/agents", headers=headers)
 
-    assert dashboard_missing.status_code == 401
     assert agents_missing.status_code == 401
     assert dashboard_allowed.status_code == 200
+    assert "sessionStorage" in dashboard_allowed.text
+    assert "Authorization" in dashboard_allowed.text
     assert agents_allowed.status_code == 200
 
 
@@ -271,14 +271,20 @@ def test_api_returns_controlled_error_for_malformed_json(tmp_path: Path) -> None
     client, _ = _client(tmp_path)
 
     with client:
-        response = client.post(
+        malformed = client.post(
             "/api/agents",
             content="{",
             headers={"Content-Type": "application/json"},
         )
+        non_object = client.post(
+            "/api/agents",
+            json=[],
+        )
 
-    assert response.status_code == 400
-    assert response.json() == {"success": False, "error": "malformed JSON body"}
+    assert malformed.status_code == 400
+    assert malformed.json() == {"success": False, "error": "malformed JSON body"}
+    assert non_object.status_code == 400
+    assert non_object.json() == {"success": False, "error": "JSON body must be an object"}
 
 
 def test_api_marks_run_failed_when_trigger_client_raises(tmp_path: Path) -> None:
@@ -302,3 +308,31 @@ def test_api_marks_run_failed_when_trigger_client_raises(tmp_path: Path) -> None
     assert "agent-token" not in str(body)
     assert runs_response.json()[0]["status"] == "failed"
     assert trigger_client.calls[0]["conversation_key"] == "research:sherlog"
+
+
+def test_api_revalidates_stored_trigger_url_before_triggering(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        from workspace_agent_relay_mcp import server
+
+        agent = server.store.upsert_agent(
+            name="bad-stored",
+            trigger_url="https://example.com/v1/workspace_agents/agtch_test/trigger",
+            token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+        )
+        conversation = server.store.create_conversation(
+            agent_id=agent["id"],
+            name="Bad Stored",
+            conversation_key="bad:stored",
+        )
+        response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Research sherlog"},
+        )
+        runs = client.get(f"/api/conversations/{conversation['id']}/runs").json()
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+    assert trigger_client.calls == []
+    assert runs == []

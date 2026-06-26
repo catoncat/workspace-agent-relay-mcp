@@ -24,6 +24,31 @@ WORKSPACE_AGENT_TRIGGER_PREFIX = "/v1/workspace_agents/"
 WORKSPACE_AGENT_TRIGGER_SUFFIX = "/trigger"
 
 
+class APIBearerAuthMiddleware:
+    def __init__(
+        self,
+        app: Any,
+        *,
+        get_auth_token: Callable[[], str],
+        get_oauth_config: Callable[[], Any],
+        get_oauth_manager: Callable[[], OAuthManager],
+    ) -> None:
+        self.app = app
+        self._api_auth_app = HTTPBearerAuthMiddleware(
+            app,
+            get_auth_token=get_auth_token,
+            get_oauth_config=get_oauth_config,
+            get_oauth_manager=get_oauth_manager,
+            mcp_path="/mcp",
+        )
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and str(scope.get("path", "")).startswith("/api/"):
+            await self._api_auth_app(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def _json_error(message: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"success": False, "error": message}, status_code=status_code)
 
@@ -33,7 +58,9 @@ async def _json(request: Request) -> dict[str, Any]:
         payload = await request.json()
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("malformed JSON body") from exc
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        raise ValueError("JSON body must be an object")
+    return payload
 
 
 def _validate_trigger_url(trigger_url: str) -> None:
@@ -125,6 +152,16 @@ def _dashboard_html() -> str:
         background: var(--panel);
         color: var(--text);
       }
+      input {
+        width: 100%;
+        min-height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 7px 10px;
+        font: inherit;
+        background: var(--panel);
+        color: var(--text);
+      }
       button {
         min-height: 34px;
         border: 1px solid var(--line);
@@ -205,6 +242,10 @@ def _dashboard_html() -> str:
         <h1>Workspace Agent Relay</h1>
         <div class="meta">
           <div>
+            <strong>API token</strong>
+            <input id="authToken" type="password" autocomplete="off">
+          </div>
+          <div>
             <strong>Continuation key</strong>
             <span id="continuationKey" class="mono">No conversation selected.</span>
           </div>
@@ -232,6 +273,8 @@ def _dashboard_html() -> str:
 
       async function api(path, options = {}) {
         const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+        const token = (sessionStorage.getItem('relayAuthToken') || document.getElementById('authToken')?.value || '').trim();
+        if (token && !headers.Authorization) headers.Authorization = `Bearer ${token}`;
         const response = await fetch(path, { ...options, headers });
         if (!response.ok) throw new Error(await response.text());
         return response.json();
@@ -366,6 +409,10 @@ def _dashboard_html() -> str:
       document.getElementById('sendRun').addEventListener('click', () => {
         sendRun().catch((error) => setDetails(String(error)));
       });
+      document.getElementById('authToken').addEventListener('input', (event) => {
+        sessionStorage.setItem('relayAuthToken', event.target.value.trim());
+      });
+      document.getElementById('authToken').value = sessionStorage.getItem('relayAuthToken') || '';
       bootstrap().catch((error) => setDetails(String(error)));
       setInterval(() => loadRuns().catch((error) => setDetails(String(error))), 2000);
     </script>
@@ -469,7 +516,9 @@ def build_app(
             agent = next(item for item in agents if int(item["id"]) == int(conversation["agent_id"]))
         except StopIteration:
             return _json_error("conversation agent was not found", status_code=404)
+        trigger_url = str(agent["trigger_url"])
         try:
+            _validate_trigger_url(trigger_url)
             access_token = _agent_token(config, str(agent["token_ref"]))
         except ValueError as exc:
             return _json_error(str(exc), status_code=400)
@@ -497,7 +546,7 @@ def build_app(
         try:
             trigger_result = await run_in_threadpool(
                 trigger_client.trigger,
-                trigger_url=str(agent["trigger_url"]),
+                trigger_url=trigger_url,
                 access_token=access_token,
                 conversation_key=conversation_key,
                 input_text=trigger_input,
@@ -540,11 +589,10 @@ def build_app(
         ],
         middleware=[
             StarletteMiddleware(
-                HTTPBearerAuthMiddleware,
+                APIBearerAuthMiddleware,
                 get_auth_token=get_auth_token,
                 get_oauth_config=get_oauth_config,
                 get_oauth_manager=current_oauth_manager,
-                mcp_path="/mcp",
             )
         ],
         lifespan=lifespan,
