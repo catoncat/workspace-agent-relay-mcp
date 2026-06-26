@@ -106,6 +106,8 @@ def _find_free_port() -> int:
 def _running_server(tmp_path: Path):
     from workspace_agent_relay_mcp import server
 
+    old_config = server.config
+    old_store = server.store
     server.config = RelayConfig(state_dir=tmp_path / "state", auth_token="secret")
     server.store = RelayStore(server.config.database_path)
     agent = server.store.upsert_agent(
@@ -134,21 +136,24 @@ def _running_server(tmp_path: Path):
     uvicorn_server.install_signal_handlers = lambda: None
     thread = threading.Thread(target=uvicorn_server.run, daemon=True)
     thread.start()
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        with socket.socket() as sock:
-            sock.settimeout(0.2)
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
-                break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("Timed out waiting for relay MCP test server.")
     try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            with socket.socket() as sock:
+                sock.settimeout(0.2)
+                if sock.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("Timed out waiting for relay MCP test server.")
         yield f"http://127.0.0.1:{port}/mcp", server.store
     finally:
         uvicorn_server.should_exit = True
         thread.join(timeout=10)
-        assert not thread.is_alive()
+        thread_alive = thread.is_alive()
+        server.config = old_config
+        server.store = old_store
+        assert not thread_alive
 
 
 async def _call_tool(url: str, name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -464,9 +469,12 @@ def test_mcp_record_result_end_to_end(tmp_path: Path) -> None:
                 },
             )
             assert result["success"] is True
+            assert result["run_status"] == "done"
 
         anyio.run(scenario)
         run = store.get_run_by_request_id("run_1")
         events = store.list_events(run["id"])
         assert run["status"] == "done"
+        assert events[-1]["event_type"] == "result"
+        assert events[-1]["title"] == "Done"
         assert events[-1]["markdown"] == "Final Markdown"
