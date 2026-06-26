@@ -2,6 +2,8 @@
 
 A local relay + dashboard that lets a ChatGPT **Workspace Agent** report its plan, progress, tool calls, questions, and final result back to your machine — in real time, while it works.
 
+![Relay dashboard](./assets/dashboard-overview.webp)
+
 > Why this exists: the Workspace Agent **trigger API** is fire-and-forget. You POST a task and get a `202 Accepted` with no body and no way to retrieve the agent's answer. So an agent running in ChatGPT has no built-in channel to show you what it's doing or hand you a result. This relay gives it that channel: a tiny MCP server the agent calls back into, plus a live dashboard you watch.
 
 ## How it fits together
@@ -46,6 +48,9 @@ Open `http://127.0.0.1:8799/` in a browser. For each run, in reading order:
 
 1. **Your message** (what you sent the agent).
 2. **Plan checklist** — the steps the agent committed to, with live `in_progress / done / skipped` states.
+
+   ![Plan checklist](./assets/plan-checklist.png)
+
 3. **Tool calls** — a collapsible list of tool-call traces auto-mirrored from the agent's working MCP (apply_patch, git_commit, run_command, …), each with args, result summary, and duration. Failed calls are flagged red.
 4. **Notes** — the agent's own one-line progress narrations (only when it has something worth saying).
 5. **Question** — if the agent asked you something via `ask_user`.
@@ -94,27 +99,76 @@ Or behind a tunnel:
 ./scripts/dev-tunnel.sh          # uses cloudflared if cloudflared.local.yml exists, else a quick tunnel
 ```
 
-### 4. Wire it into ChatGPT
+### 4. Configure the ChatGPT Workspace Agent
 
-- Add the MCP endpoint (`http://127.0.0.1:8799/mcp` locally, or your tunnel URL) to your Workspace Agent's MCP connectors.
-- Paste the relay collaboration instruction from [`docs/agent-instructions.md`](docs/agent-instructions.md) into the Agent's **Instructions** field. That tells the agent to `record_plan` → `bind_relay_run` → batch `record_progress` → `record_result`.
+This is the part that turns the relay from a blank dashboard into a live one. Three things to set in ChatGPT: the **trigger**, the **MCP connector**, and the **Instructions**.
+
+#### a. Create the Workspace Agent and copy its trigger credentials
+
+1. In ChatGPT, create (or open) a Workspace Agent.
+2. Copy its **Trigger URL** (`https://api.chatgpt.com/v1/workspace_agents/agtch_…/trigger`) into `WORKSPACE_AGENT_RELAY_TRIGGER_URL`.
+3. Copy its **access token** into `WORKSPACE_AGENT_RELAY_AGENT_TOKEN` (server-side only — never paste this into the browser dashboard).
+
+The relay uses these to POST new tasks to the agent when you hit Send in the dashboard.
+
+#### b. Add the relay as an MCP connector
+
+In the Workspace Agent's **MCP connectors** section, add:
+
+| Field | Value |
+| --- | --- |
+| URL | `http://127.0.0.1:8799/mcp` locally, or your tunnel URL `https://<your-host>/mcp` |
+| Auth type | `Bearer` |
+| Token | the value of `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` |
+
+After connecting, confirm the tool list includes `record_plan`, `record_progress`, `record_result`, `ask_user`, `get_run_context`, `server_info`. If a tool is missing, reconnect the MCP so ChatGPT re-fetches `tools/list`.
+
+#### c. Paste the collaboration Instructions
+
+Open [`docs/agent-instructions.md`](docs/agent-instructions.md), copy the fenced block under "指令正文", and paste it into the Agent's **Instructions** field (append to, or replace, any existing relay section). This tells the agent the workflow it must follow on every run:
+
+```
+record_plan  →  bind_relay_run  →  batch record_progress  →  record_result
+```
+
+Without this, the agent will silently do work in ChatGPT that the dashboard can't see.
+
+#### d. (Optional, for live tool traces) Connect notion-local-ops-mcp too
+
+If you want the **Tool calls** panel to stream the agent's real file/git/shell actions, also connect [notion-local-ops-mcp](https://github.com/catoncat/notion-local-ops-mcp) as a second MCP connector and paste its `bind_relay_run` step — see [Pairing with notion-local-ops-mcp](#pairing-with-notion-local-ops-mcp) below.
 
 ### 5. Smoke test
 
-1. Start the relay, open the dashboard, paste the auth token.
-2. Send a short task from the dashboard.
+1. Start the relay, open `http://127.0.0.1:8799/`, paste the auth token.
+2. Send a short task from the dashboard (e.g. "create /tmp/hello.txt with one line, then read it back").
 3. Watch the plan checklist appear, tool traces stream in, then the final result.
 
-## Tool-call mirroring (pairing with notion-local-ops-mcp)
+## Pairing with notion-local-ops-mcp
 
-This is the part that makes the dashboard feel *live* instead of a silence-then-bang.
+This relay only exposes **reporting** tools (plan/progress/result) — it deliberately has no shell, file, or git access. To let the agent actually *do* work and have those actions show up live in the dashboard, pair it with its sibling project:
 
-1. The agent calls `record_plan` on this relay (its plan shows up).
-2. The agent calls `bind_relay_run` on **notion-local-ops-mcp**, passing the `request_id` + `callback_token` from the trigger. It does **not** pass a relay URL — that's already configured locally (`NOTION_LOCAL_OPS_RELAY_URL`, default `http://127.0.0.1:8799`).
-3. From then on, every tool the agent runs on notion-local-ops fires a fire-and-forget `POST /internal/tool-trace` to this relay.
+> **[notion-local-ops-mcp](https://github.com/catoncat/notion-local-ops-mcp)** — a local MCP that gives the agent file reads/writes, patch editing, git, shell, and delegated tasks. It lives in a separate repo and works standalone; the relay integration is opt-in.
+
+### What the pairing enables
+
+On its own, this relay shows the agent's **plan + progress + result**. With notion-local-ops-mcp paired, it additionally shows every **tool call** the agent makes (`write_file`, `apply_patch`, `git_commit`, `run_command`, …) streaming in live — without the agent manually reporting any of them.
+
+### How they talk
+
+```
+ChatGPT Agent ──MCP──▶ notion-local-ops-mcp ──POST /internal/tool-trace──▶ this relay ──SSE──▶ dashboard
+```
+
+1. The agent calls `record_plan` on **this relay** (the plan shows up).
+2. The agent calls `bind_relay_run` on **notion-local-ops-mcp**, passing the `request_id` + `callback_token` from the trigger. It does **not** pass a relay URL — that's configured on the notion-local-ops side via `NOTION_LOCAL_OPS_RELAY_URL` (default `http://127.0.0.1:8799`).
+3. From then on, every `@traced` tool the agent runs on notion-local-ops fires a fire-and-forget trace POST to this relay.
 4. This relay stores each trace as a progress event and pushes it over SSE to the dashboard.
 
 The internal endpoint authenticates with the per-run `callback_token` in the body (not the dashboard bearer), and a closed/terminal run rejects traces with `409`. The relay being unreachable never blocks the agent's tool execution — traces are best-effort.
+
+### Setup on the notion-local-ops side
+
+See [notion-local-ops-mcp → Relay Bridge](https://github.com/catoncat/notion-local-ops-mcp#relay-bridge-mirror-tool-calls-to-a-dashboard) for its env knobs (`NOTION_LOCAL_OPS_RELAY_URL`, `NOTION_LOCAL_OPS_RELAY_BRIDGE_ENABLED`, `NOTION_LOCAL_OPS_RELAY_BRIDGE_TIMEOUT`). Default values point at this relay's default port, so a same-machine install works with no extra config.
 
 ## Project layout
 
