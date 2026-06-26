@@ -16,7 +16,7 @@ class FakeTriggerClient:
         self.calls.append(kwargs)
         return TriggerResult(
             http_status=202,
-            x_request_id=f"api_req_{len(self.calls)}",
+            x_request_id="api_req_123",
             conversation_url="https://chatgpt.com/c/test",
             response_body={"conversation_url": "https://chatgpt.com/c/test"},
         )
@@ -99,7 +99,7 @@ def test_api_send_run_triggers_agent_and_records_metadata(tmp_path: Path) -> Non
     run = run_response.json()
     assert run["status"] == "accepted"
     assert run["trigger_http_status"] == 202
-    assert run["trigger_x_request_id"] == "api_req_1"
+    assert run["trigger_x_request_id"] == "api_req_123"
     assert run["conversation_key"] == "research:sherlog"
     assert run["conversation_url"] == "https://chatgpt.com/c/test"
     assert run["request_id"].startswith("relay_")
