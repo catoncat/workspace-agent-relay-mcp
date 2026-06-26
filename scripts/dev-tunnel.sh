@@ -27,6 +27,14 @@ export WORKSPACE_AGENT_RELAY_HOST="${WORKSPACE_AGENT_RELAY_HOST:-127.0.0.1}"
 export WORKSPACE_AGENT_RELAY_PORT="${WORKSPACE_AGENT_RELAY_PORT:-8799}"
 export WORKSPACE_AGENT_RELAY_STATE_DIR="${WORKSPACE_AGENT_RELAY_STATE_DIR:-${HOME}/.workspace-agent-relay-mcp}"
 
+if [[ -z "${WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG:-}" ]]; then
+  if [[ -f "$ROOT_DIR/cloudflared.local.yml" ]]; then
+    export WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG="$ROOT_DIR/cloudflared.local.yml"
+  elif [[ -f "$ROOT_DIR/cloudflared.local.yaml" ]]; then
+    export WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG="$ROOT_DIR/cloudflared.local.yaml"
+  fi
+fi
+
 if [[ -z "${WORKSPACE_AGENT_RELAY_AUTH_TOKEN:-}" ]]; then
   echo "Missing WORKSPACE_AGENT_RELAY_AUTH_TOKEN. Set it in .env." >&2
   exit 1

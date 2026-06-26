@@ -76,6 +76,8 @@ Run with a tunnel:
 ./scripts/dev-tunnel.sh
 ```
 
+If `cloudflared.local.yml` or `cloudflared.local.yaml` exists in the repository root, `dev-tunnel.sh` uses that named tunnel automatically. Otherwise it falls back to a random quick tunnel.
+
 ## Workspace Agent Instruction
 
 Add an instruction like this to the Workspace Agent:
