@@ -282,6 +282,13 @@ class RelayStore:
             payload = self._redact_run(payload)
         return payload
 
+    def get_run(self, run_id: int) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Run not found: {run_id}")
+        return self._redact_run(_row_to_dict(row) or {})
+
     def update_run_trigger_result(
         self,
         *,
