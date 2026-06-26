@@ -9,10 +9,32 @@ import uvicorn
 from . import __version__
 from .config import APP_NAME, RelayConfig, load_config
 from .db import RelayStore
+from .oauth import OAuthRuntimeConfig
 
 
 config: RelayConfig = load_config()
 store = RelayStore(config.database_path)
+
+
+def _current_auth_token() -> str:
+    return globals().get("config", config).auth_token
+
+
+def _current_debug_mcp_logging() -> bool:
+    return bool(globals().get("config", config).debug_mcp_logging)
+
+
+def _current_oauth_config() -> OAuthRuntimeConfig:
+    active = globals().get("config", config)
+    return OAuthRuntimeConfig(
+        auth_mode=active.auth_mode,
+        auth_token=active.auth_token,
+        public_base_url=active.public_base_url,
+        state_dir=active.state_dir,
+        oauth_login_token=active.oauth_login_token,
+        oauth_scopes=active.oauth_scopes,
+        oauth_token_ttl_seconds=active.oauth_token_ttl_seconds,
+    )
 
 READ_ONLY_TOOL = {
     "readOnlyHint": True,
@@ -151,7 +173,19 @@ def get_run_context(conversation_key: str, limit: int = 5) -> dict[str, Any]:
 def build_http_app():
     from .web import build_app
 
-    return build_app(mcp=mcp, store=store, config=config)
+    streamable_app = mcp.http_app(path="/mcp", transport="streamable-http")
+    legacy_sse_app = mcp.http_app(path="/mcp", transport="sse")
+    return build_app(
+        mcp=mcp,
+        streamable_app=streamable_app,
+        legacy_sse_app=legacy_sse_app,
+        store=store,
+        config=config,
+        get_auth_token=_current_auth_token,
+        get_oauth_config=_current_oauth_config,
+        get_debug_enabled=_current_debug_mcp_logging,
+        instructions=MCP_INSTRUCTIONS,
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
