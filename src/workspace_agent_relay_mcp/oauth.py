@@ -232,7 +232,7 @@ class OAuthManager:
   <body>
     <main style="font-family: system-ui; max-width: 480px; margin: 48px auto;">
       <h1>Authorize local MCP access</h1>
-      <p>Enter your local ops token to let this ChatGPT session call the MCP server.</p>
+      <p>Enter your workspace-agent relay token to let this ChatGPT session call the MCP server.</p>
       <form method="post" action="/oauth/authorize">
         {hidden_inputs}
         <label>Token <input name="login_token" type="password" autofocus></label>

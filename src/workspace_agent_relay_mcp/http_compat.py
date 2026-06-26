@@ -47,8 +47,19 @@ OAuthConfigProvider = Callable[[], OAuthRuntimeConfig]
 DebugEnabledProvider = Callable[[], bool]
 OAuthManagerProvider = Callable[[], OAuthManager]
 DEBUG_LOGGER = logging.getLogger("workspace_agent_relay_mcp.mcp_debug")
-DEBUG_REDACTED = "[redacted]"
-DEBUG_SECRET_KEY_PARTS = ("authorization", "password", "secret", "token", "code_verifier")
+DEBUG_REDACTED = "[REDACTED]"
+DEBUG_SECRET_KEY_PARTS = (
+    "callback_token",
+    "token",
+    "secret",
+    "password",
+    "authorization",
+    "api_key",
+    "apikey",
+    "access_key",
+    "code_verifier",
+)
+VALID_AUTH_MODES = {"none", "shared_token", "oauth"}
 
 
 def _emit_debug_log(message: str, *args: object) -> None:
@@ -87,15 +98,31 @@ def _base_url_from_headers(headers: Headers, scheme: str = "https") -> str:
 async def _parse_request_data(request: Request) -> dict[str, Any]:
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
-        payload = await request.json()
+        try:
+            payload = await request.json()
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("malformed request body") from exc
         return payload if isinstance(payload, dict) else {}
-    body = (await request.body()).decode("utf-8")
+    try:
+        body = (await request.body()).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("malformed request body") from exc
     parsed = parse_qs(body, keep_blank_values=True)
     return {key: values[-1] if values else "" for key, values in parsed.items()}
 
 
 def _string_values(data: dict[str, Any]) -> dict[str, str]:
     return {key: str(value) for key, value in data.items() if value is not None}
+
+
+def _validate_auth_config(config: OAuthRuntimeConfig, *, get_auth_token: AuthTokenProvider) -> None:
+    mode = config.normalized_auth_mode
+    if mode not in VALID_AUTH_MODES:
+        raise ValueError(f"Unsupported auth_mode: {config.auth_mode!r}")
+    if config.auth_mode.strip().lower() == "shared_token" and not (get_auth_token() or "").strip():
+        raise ValueError("auth_mode=shared_token requires auth_token")
+    if mode == "oauth" and not config.login_token.strip():
+        raise ValueError("auth_mode=oauth requires oauth_login_token or auth_token login token")
 
 
 def _build_server_card(
@@ -548,8 +575,15 @@ def build_http_compat_app(
 ) -> Starlette:
     app_version = _resolve_version(app_name)
 
+    def current_config() -> OAuthRuntimeConfig:
+        config = get_oauth_config()
+        _validate_auth_config(config, get_auth_token=get_auth_token)
+        return config
+
+    current_config()
+
     def current_oauth_manager() -> OAuthManager:
-        return OAuthManager(get_oauth_config(), mcp_path=mcp_path)
+        return OAuthManager(current_config(), mcp_path=mcp_path)
 
     dispatcher = MCPCompatibilityDispatcher(
         streamable_app=streamable_app,
@@ -558,7 +592,7 @@ def build_http_compat_app(
         app_version=app_version,
         mcp_path=mcp_path,
         get_auth_token=get_auth_token,
-        get_oauth_config=get_oauth_config,
+        get_oauth_config=current_config,
         instructions=instructions,
     )
 
@@ -567,7 +601,7 @@ def build_http_compat_app(
         return current_oauth_manager().metadata_base_url(fallback)
 
     def oauth_enabled() -> bool:
-        return get_oauth_config().normalized_auth_mode == "oauth"
+        return current_config().normalized_auth_mode == "oauth"
 
     async def server_card(_: Request) -> JSONResponse:
         return JSONResponse(dispatcher.server_card, headers=DISCOVERY_HEADERS)
@@ -671,7 +705,7 @@ def build_http_compat_app(
             StarletteMiddleware(
                 HTTPBearerAuthMiddleware,
                 get_auth_token=get_auth_token,
-                get_oauth_config=get_oauth_config,
+                get_oauth_config=current_config,
                 get_oauth_manager=current_oauth_manager,
                 mcp_path=mcp_path,
             ),
