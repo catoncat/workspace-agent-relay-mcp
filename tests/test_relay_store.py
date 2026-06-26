@@ -216,6 +216,52 @@ def test_terminal_run_rejects_later_callbacks_without_reopening(tmp_path: Path) 
     assert store.get_run_by_request_id("run_1")["status"] == "done"
 
 
+def test_late_trigger_result_does_not_reopen_terminal_run(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="done",
+        title="Finished",
+        markdown="Final answer",
+    )
+
+    trigger_update = store.update_run_trigger_result(
+        request_id="run_1",
+        trigger_http_status=202,
+        trigger_x_request_id="trigger_req_1",
+        conversation_url="https://chatgpt.com/c/test",
+    )
+    progress = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        message="Reading repository",
+    )
+
+    assert result["success"] is True
+    assert trigger_update["status"] == "done"
+    assert trigger_update["trigger_status"] == "accepted"
+    assert trigger_update["trigger_http_status"] == 202
+    assert trigger_update["trigger_x_request_id"] == "trigger_req_1"
+    assert trigger_update["conversation_url"] == "https://chatgpt.com/c/test"
+    assert progress["success"] is False
+    assert progress["error"]["code"] == "run_closed"
+    assert store.get_run_by_request_id("run_1")["status"] == "done"
+
+
 def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

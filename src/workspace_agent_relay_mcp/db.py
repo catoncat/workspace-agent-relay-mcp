@@ -14,6 +14,7 @@ from typing import Any, Iterator
 
 TERMINAL_STATUSES = {"done", "blocked", "failed"}
 VALID_RESULT_STATUSES = TERMINAL_STATUSES
+TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 
 
 def _now() -> str:
@@ -259,10 +260,11 @@ class RelayStore:
         trigger_x_request_id: str | None,
         conversation_url: str | None,
     ) -> dict[str, Any]:
-        status = "accepted" if 200 <= trigger_http_status < 300 else "failed"
-        trigger_status = "accepted" if status == "accepted" else "failed"
+        trigger_status = "accepted" if 200 <= trigger_http_status < 300 else "failed"
         now = _now()
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connect(immediate=True) as conn:
+            run = self._get_run_by_request_id_conn(conn, request_id)
+            status = trigger_status if run["status"] in TRIGGER_MUTABLE_RUN_STATUSES else run["status"]
             conn.execute(
                 """
                 UPDATE runs
