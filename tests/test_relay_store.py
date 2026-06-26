@@ -16,6 +16,7 @@ def test_store_creates_default_agent_from_env_config(tmp_path: Path) -> None:
     assert agent["name"] == "default"
     assert agent["trigger_id"] == "agtch_test"
     assert agent["trigger_url"].endswith("/agtch_test/trigger")
+    assert agent["token_ref"] == "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN"
 
 
 def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> None:
@@ -61,6 +62,8 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
         title="Working",
         payload={"phase": "scan"},
     )
+    assert store.get_run_by_request_id("run_1")["status"] == "waiting"
+
     question = store.ask_user(
         request_id="run_1",
         conversation_key="research:sherlog",
@@ -69,6 +72,8 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
         choices=["main", "dev"],
         context="Need target branch",
     )
+    assert store.get_run_by_request_id("run_1")["status"] == "needs_user"
+
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
