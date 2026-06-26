@@ -8,6 +8,16 @@ from workspace_agent_relay_mcp.db import RelayStore
 from workspace_agent_relay_mcp.trigger import TriggerResult
 
 
+def _frontend_bundle_text() -> str:
+    dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+    chunks = [(dist / "index.html").read_text(encoding="utf-8")]
+    assets = dist / "assets"
+    if assets.is_dir():
+        for path in sorted(assets.glob("*.js")):
+            chunks.append(path.read_text(encoding="utf-8"))
+    return "\n".join(chunks)
+
+
 class FakeTriggerClient:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -181,9 +191,35 @@ def test_dashboard_names_continuation_key_and_recent_conversation_url(tmp_path: 
         response = client.get("/")
 
     assert response.status_code == 200
-    assert "Continuation key" in response.text
-    assert "Recent conversation URL" in response.text
-    assert "/api/runs/" in response.text
+    assert 'id="root"' in response.text
+    bundle = _frontend_bundle_text()
+    assert "Continuation key" in bundle
+    assert "Conversation URL" in bundle
+    assert "/api/runs/" in bundle
+
+
+def test_spa_deep_links_serve_index_html_without_auth(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path, auth_token="secret")
+
+    with client:
+        # Deep links that React Router should handle must return the SPA shell,
+        # not a 401 from MCP auth.
+        for path in ("/c/123", "/c/123/r/456", "/c/some:conversation_key/r/789"):
+            response = client.get(path)
+            assert response.status_code == 200, f"{path} -> {response.status_code}"
+            assert 'id="root"' in response.text
+
+
+def test_dashboard_does_not_use_inner_html_for_stored_data(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert ".innerHTML" not in response.text
+    assert "onclick=" not in response.text
+    assert "dangerouslySetInnerHTML" not in _frontend_bundle_text()
 
 
 def test_api_returns_controlled_errors_for_bad_requests(tmp_path: Path) -> None:
@@ -249,8 +285,10 @@ def test_dashboard_shell_is_public_but_api_requires_bearer_when_auth_token_is_se
     assert agents_missing.status_code == 401
     assert run_detail_missing.status_code == 401
     assert dashboard_allowed.status_code == 200
-    assert "sessionStorage" in dashboard_allowed.text
-    assert "Authorization" in dashboard_allowed.text
+    assert 'id="root"' in dashboard_allowed.text
+    bundle = _frontend_bundle_text()
+    assert "localStorage" in bundle
+    assert "Authorization" in bundle
     assert agents_allowed.status_code == 200
 
 
@@ -435,3 +473,48 @@ def test_api_run_detail_returns_callback_events_without_secrets(tmp_path: Path) 
     assert "secret-callback-token" not in rendered
     assert "callback_token_hash" not in rendered
     assert "[redacted-callback-token]" in rendered
+
+
+def test_run_stream_returns_snapshot_for_terminal_run(tmp_path: Path) -> None:
+    import json
+
+    client, _ = _client(tmp_path)
+
+    with client:
+        from workspace_agent_relay_mcp import server
+
+        agent = server.store.upsert_agent(
+            name="default",
+            trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+            token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+        )
+        conversation = server.store.create_conversation(
+            agent_id=agent["id"],
+            name="Sherlog",
+            conversation_key="research:sherlog",
+        )
+        run = server.store.create_run(
+            agent_id=agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown="Research sherlog",
+            callback_token="secret-callback-token",
+            idempotency_key="idem_stream",
+            request_id="run_stream",
+        )
+        server.store.record_result(
+            request_id="run_stream",
+            conversation_key="research:sherlog",
+            callback_token="secret-callback-token",
+            status="done",
+            title="Done",
+            markdown="Finished",
+        )
+        response = client.get(f"/api/runs/{run['id']}/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    data_line = next(line for line in response.text.splitlines() if line.startswith("data: "))
+    payload = json.loads(data_line[6:])
+    assert payload["run"]["status"] == "done"
+    assert payload["events"][-1]["title"] == "Done"

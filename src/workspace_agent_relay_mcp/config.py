@@ -7,6 +7,64 @@ from pathlib import Path
 
 APP_NAME = "workspace-agent-relay-mcp"
 DEFAULT_SCOPE = "workspace-agent-relay"
+_DOTENV_LOADED = False
+
+
+def _parse_dotenv_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped[len("export ") :].strip()
+    if "=" not in stripped:
+        return None
+    key, _, value = stripped.partition("=")
+    key = key.strip()
+    if not key:
+        return None
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return key, value
+
+
+def _dotenv_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(path: Path) -> None:
+        resolved = path.resolve()
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        candidates.append(resolved)
+
+    cwd = Path.cwd()
+    for path in [cwd, *cwd.parents]:
+        add(path / ".env")
+    package_root = Path(__file__).resolve().parents[2]
+    add(package_root / ".env")
+    return candidates
+
+
+def _load_dotenv_files() -> None:
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
+        return
+    if _env_flag("WORKSPACE_AGENT_RELAY_SKIP_DOTENV", default=False):
+        _DOTENV_LOADED = True
+        return
+    for path in _dotenv_candidates():
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parsed = _parse_dotenv_line(line)
+            if parsed is None:
+                continue
+            key, value = parsed
+            os.environ.setdefault(key, value)
+        break
+    _DOTENV_LOADED = True
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -52,6 +110,7 @@ class RelayConfig:
 
 
 def load_config() -> RelayConfig:
+    _load_dotenv_files()
     scopes = tuple(
         scope
         for scope in os.environ.get("WORKSPACE_AGENT_RELAY_OAUTH_SCOPES", DEFAULT_SCOPE).split()

@@ -7,13 +7,14 @@ from fastmcp import FastMCP
 import uvicorn
 
 from . import __version__
+from .app import build_app
 from .config import APP_NAME, RelayConfig, load_config
-from .db import RelayStore
-from .oauth import OAuthRuntimeConfig
+from .store import RelayStore, RunEventBus
 
 
 config: RelayConfig = load_config()
-store = RelayStore(config.database_path)
+event_bus = RunEventBus()
+store = RelayStore(config.database_path, event_bus=event_bus)
 
 
 def _current_auth_token() -> str:
@@ -24,7 +25,9 @@ def _current_debug_mcp_logging() -> bool:
     return bool(globals().get("config", config).debug_mcp_logging)
 
 
-def _current_oauth_config() -> OAuthRuntimeConfig:
+def _current_oauth_config() -> Any:
+    from .oauth import OAuthRuntimeConfig
+
     active = globals().get("config", config)
     return OAuthRuntimeConfig(
         auth_mode=active.auth_mode,
@@ -35,6 +38,7 @@ def _current_oauth_config() -> OAuthRuntimeConfig:
         oauth_scopes=active.oauth_scopes,
         oauth_token_ttl_seconds=active.oauth_token_ttl_seconds,
     )
+
 
 READ_ONLY_TOOL = {
     "readOnlyHint": True,
@@ -171,8 +175,6 @@ def get_run_context(conversation_key: str, limit: int = 5) -> dict[str, Any]:
 
 
 def build_http_app():
-    from .web import build_app
-
     streamable_app = mcp.http_app(path="/mcp", transport="streamable-http")
     legacy_sse_app = mcp.http_app(path="/mcp", transport="sse")
     return build_app(
@@ -181,6 +183,7 @@ def build_http_app():
         legacy_sse_app=legacy_sse_app,
         store=store,
         config=config,
+        event_bus=event_bus,
         get_auth_token=_current_auth_token,
         get_oauth_config=_current_oauth_config,
         get_debug_enabled=_current_debug_mcp_logging,

@@ -44,6 +44,31 @@ def test_load_config_uses_safe_defaults(monkeypatch, tmp_path: Path) -> None:
     assert config.auth_token == ""
 
 
+def test_load_config_reads_dotenv_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("WORKSPACE_AGENT_RELAY_SKIP_DOTENV", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "WORKSPACE_AGENT_RELAY_AUTH_TOKEN=from-dotenv",
+                "WORKSPACE_AGENT_RELAY_AGENT_TOKEN=agent-from-dotenv",
+                f"WORKSPACE_AGENT_RELAY_STATE_DIR={tmp_path / 'state'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    import workspace_agent_relay_mcp.config as config_module
+
+    config_module._DOTENV_LOADED = False
+    config = load_config()
+
+    assert config.auth_token == "from-dotenv"
+    assert config.default_agent_token == "agent-from-dotenv"
+    assert config.state_dir == tmp_path / "state"
+    config_module._DOTENV_LOADED = False
+
+
 def test_load_config_reads_env_overrides(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKSPACE_AGENT_RELAY_HOST", "0.0.0.0")
     monkeypatch.setenv("WORKSPACE_AGENT_RELAY_PORT", "8801")
