@@ -194,3 +194,7 @@ def main(argv: list[str] | None = None) -> None:
     config.ensure_runtime_directories()
     app = build_http_app()
     uvicorn.run(app, host=config.host, port=config.port)
+
+
+if __name__ == "__main__":
+    main()
