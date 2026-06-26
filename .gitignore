@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+frontend/node_modules/
 *.egg-info/
 *.sqlite
 *.sqlite-shm
