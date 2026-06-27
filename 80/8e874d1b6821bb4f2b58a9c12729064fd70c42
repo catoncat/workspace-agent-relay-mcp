@@ -1,0 +1,85 @@
+frontend/src/lib/conversationKey.ts
+  s_1a98f877b1591d::t_a6765f5fbf13ac 1-13
+frontend/src/features/relay/hooks.ts
+  s_1a98f877b1591d::t_dfed69345f4d91 162-170
+README.md
+  s_1a98f877b1591d::t_309de993b2e559 178
+frontend/src/components/RelaySidebar.tsx
+  s_1a98f877b1591d::t_19ee51dc2a8b14 36-37,42-46,53-54,66-67,73-93,168,177-178,188-218,220-225,227,229,232-238,241-242,246-256,259-279,294,417
+  s_a83a203a5ef7f2::t_028cc6a5c2ca6b 100-103,105-107,109-111
+  s_a83a203a5ef7f2::t_218ac4b138363e 57
+  s_6e0a015b5dc1e9::t_66774cfef5e897 96
+  s_1a98f877b1591d::t_389def418554b9 39-40,95,97-99,108,141,167,219,228,230-231,243-245,350,355,370-377,379-386,388-402,404-411
+  s_a83a203a5ef7f2::t_1b9c8a3cab1a46 70
+  s_1a98f877b1591d::t_05203831b982b5 240
+  s_1a98f877b1591d::t_f6bd198efba860 352
+  s_6e0a015b5dc1e9::t_2b8f2ae370ec3d 117-126,128-140,142-166,179
+  s_1a98f877b1591d::t_9ad62a9d9ac97d 41
+  s_1a98f877b1591d::t_ef3c1cc171ed33 239
+  s_5b6a0d5cf6c61c::t_f051cfed286158 104,112
+  s_1a98f877b1591d::t_3acb82fcadaaea 1
+  s_1bbf370083ee2d::t_d7ee32388989b3 2
+  s_1a98f877b1591d::t_fae6068a155039 7
+  s_55f8fd78b106d8::t_feb94fb8d2c24c 5
+  s_1a98f877b1591d::t_9bbe01b9420ac0 412
+  s_1a98f877b1591d::t_e4e8929b91e263 226
+  s_1a98f877b1591d::t_810c27defdac76 257-258
+  s_1a98f877b1591d::t_3b9d73b42d49f8 349,351,353-354,356-369
+  s_6e0a015b5dc1e9::t_784180c4e0fdbb 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "808e874d1b6821bb4f2b58a9c12729064fd70c42",
+  "prompts": {},
+  "sessions": {
+    "s_1a98f877b1591d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5cca5388-9895-4f52-9bf6-58e4cb67286b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_1bbf370083ee2d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d0320096-b3d4-4a32-aa3d-d188cc4668e0",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_55f8fd78b106d8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a4962414-8108-4b66-ae5f-7da2c1b89858",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_5b6a0d5cf6c61c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "737eac2a-b19d-4b72-8186-df58158e345d",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_6e0a015b5dc1e9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9157ca8f-3875-4395-9aa0-f61f177d808b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a83a203a5ef7f2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "46741cc5-bfde-4744-9ad9-27bee775ff51",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
