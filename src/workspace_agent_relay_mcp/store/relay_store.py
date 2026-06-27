@@ -15,8 +15,10 @@ if TYPE_CHECKING:
     from .bus import RunEventBus
 
 
-TERMINAL_STATUSES = {"done", "blocked", "failed"}
-VALID_RESULT_STATUSES = TERMINAL_STATUSES
+TERMINAL_STATUSES = {"done", "blocked", "failed", "superseded"}
+# Agent-settable result statuses. `superseded` is system-only (set when a newer
+# turn starts in the same conversation), so record_result must reject it.
+VALID_RESULT_STATUSES = {"done", "blocked", "failed"}
 TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
@@ -370,6 +372,7 @@ class RelayStore:
     ) -> dict[str, Any]:
         now = _now()
         redacted_input_markdown = _redact_callback_token(input_markdown, callback_token)
+        superseded_run_ids: list[int] = []
         with self._lock, self._connect() as conn:
             conversation = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
             if conversation is None:
@@ -378,6 +381,32 @@ class RelayStore:
                 raise ValueError("conversation_key does not match conversation_id.")
             if conversation["agent_id"] != agent_id:
                 raise ValueError("agent_id does not own conversation_id.")
+            # Zombie cleanup: when a new turn starts, close out older non-terminal
+            # runs in the same conversation. The user moved on; their late
+            # callbacks (if any) must be rejected as run_closed rather than
+            # polluting the new turn. `superseded` is system-only — agents cannot
+            # set it via record_result.
+            existing_rows = conn.execute(
+                "SELECT id, status FROM runs WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchall()
+            for row in existing_rows:
+                if row["status"] in TERMINAL_STATUSES:
+                    continue
+                conn.execute(
+                    "UPDATE runs SET status = 'superseded', completed_at = ?, updated_at = ? WHERE id = ?",
+                    (now, now, int(row["id"])),
+                )
+                self._append_event_conn(
+                    conn,
+                    run_id=int(row["id"]),
+                    request_id="system",
+                    event_type="system",
+                    title="Superseded by newer turn",
+                    markdown=None,
+                    payload={"reason": "newer_turn_started"},
+                )
+                superseded_run_ids.append(int(row["id"]))
             conn.execute(
                 """
                 INSERT INTO runs (
@@ -401,6 +430,8 @@ class RelayStore:
             row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         payload = _row_to_dict(row) or {}
         payload.pop("callback_token_hash", None)
+        for rid in superseded_run_ids:
+            self._notify_run(rid)
         self._notify_run(int(payload["id"]))
         return payload
 

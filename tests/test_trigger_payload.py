@@ -38,7 +38,29 @@ def test_build_trigger_input_contains_callback_contract() -> None:
     assert "callback_token: callback-secret" in rendered
     assert "record_result" in rendered
     assert "Do not only answer in the ChatGPT conversation." in rendered
+    assert "If notion-local-ops-mcp is unavailable" in rendered
     assert rendered.endswith("Please research sherlog.")
+
+
+def test_build_trigger_input_continuation_is_compact() -> None:
+    """A follow-up turn in the same conversation skips the full ~250-token
+    contract and restates one reminder line, to avoid bloating every turn."""
+    rendered = build_trigger_input(
+        request_id="relay_456",
+        conversation_key="research:sherlog",
+        callback_token="callback-secret-2",
+        user_input="Now add tests.",
+        is_continuation=True,
+    )
+
+    assert "request_id: relay_456" in rendered
+    assert "callback_token: callback-secret-2" in rendered
+    assert "Same relay protocol as before" in rendered
+    assert "If notion-local-ops-mcp is unavailable" in rendered
+    assert rendered.endswith("Now add tests.")
+    # Continuation must NOT carry the full contract header.
+    assert "Completion contract:" not in rendered
+    assert "Do not only answer in the ChatGPT conversation." not in rendered
 
 
 class FakeResponse:

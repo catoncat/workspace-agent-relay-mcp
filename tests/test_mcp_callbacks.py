@@ -205,3 +205,42 @@ def test_record_plan_replaces_existing_plan(tmp_path: Path, monkeypatch) -> None
     )
     assert replaced["success"] is True
     assert [step["id"] for step in replaced["plan"]["steps"]] == ["a", "b"]
+
+
+def test_record_plan_revisions_emit_plan_event_sequence(tmp_path: Path, monkeypatch) -> None:
+    """UI 'revised' marker relies on >=2 plan events whose final payload matches
+    the current plan snapshot. See docs/superpowers/specs/2026-06-27-relay-turn-plan-semantics.md."""
+    from workspace_agent_relay_mcp import server
+
+    store = RelayStore(tmp_path / "relay.sqlite")
+    _seed_run(store)
+    monkeypatch.setattr(server, "store", store)
+
+    _call(
+        server.record_plan,
+        request_id="run_1",
+        callback_token="secret-callback",
+        conversation_key="research:sherlog",
+        steps=[{"id": "s1", "title": "Old direction"}],
+    )
+    replaced = _call(
+        server.record_plan,
+        request_id="run_1",
+        callback_token="secret-callback",
+        conversation_key="research:sherlog",
+        steps=[{"id": "a", "title": "New direction A"}, {"id": "b", "title": "New direction B"}],
+    )
+
+    run = store.get_run_by_request_id("run_1")
+    plan_events = [e for e in store.list_events(run["id"]) if e["event_type"] == "plan"]
+    assert len(plan_events) == 2
+    # Each plan event records the steps it set; the last one must equal the snapshot.
+    import json as _json
+
+    final_payload = _json.loads(plan_events[-1]["payload_json"])
+    final_step_ids = [step["id"] for step in final_payload["steps"]]
+    snapshot_step_ids = [step["id"] for step in replaced["plan"]["steps"]]
+    assert final_step_ids == snapshot_step_ids == ["a", "b"]
+    # The current plan snapshot (what the UI renders) must match the latest revision.
+    snapshot = store.get_plan(run["id"])
+    assert [step["id"] for step in snapshot["steps"]] == ["a", "b"]

@@ -593,6 +593,126 @@ def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> 
     assert store.list_events(run["id"]) == []
 
 
+def test_record_result_rejects_superseded_status(tmp_path: Path) -> None:
+    """`superseded` is system-only (set when a newer turn starts). Agents must not
+    be able to set it via record_result. See 2026-06-27-relay-turn-plan-semantics.md."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+
+    result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="superseded",
+        title="Replaced",
+        markdown="should not be stored",
+    )
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "invalid_status"
+    assert store.list_events(run["id"]) == []
+
+
+def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
+    """Starting a new turn closes out older non-terminal runs in the same
+    conversation: they become `superseded` (terminal), emit a system event, and
+    their late callbacks are rejected as run_closed."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+
+    first = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="first turn",
+        callback_token="secret-first",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    # Give the first run a plan so we can confirm it freezes rather than vanishes.
+    store.record_plan(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-first",
+        steps=[{"id": "s1", "title": "Old direction"}],
+    )
+    # Advance first run to an active, non-terminal status (mimics trigger accepted).
+    store.update_run_trigger_result(
+        request_id="run_1",
+        trigger_http_status=202,
+        trigger_x_request_id="req_api_1",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    assert store.get_run_by_request_id("run_1")["status"] == "accepted"
+
+    second = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="correcting direction",
+        callback_token="secret-second",
+        idempotency_key="run_2",
+        request_id="run_2",
+    )
+
+    first_after = store.get_run_by_request_id("run_1")
+    assert first_after["status"] == "superseded"
+    assert first_after["completed_at"] is not None
+    assert store.get_run_by_request_id("run_2")["status"] == "draft"
+
+    # A system event explains the supersede.
+    events = store.list_events(first["id"])
+    system_events = [e for e in events if e["event_type"] == "system"]
+    assert len(system_events) == 1
+    assert "Superseded" in (system_events[0]["title"] or "")
+
+    # The first run's plan is still readable (frozen snapshot, not deleted).
+    assert store.get_plan(first["id"]) is not None
+
+    # Late callback to the superseded run is rejected as run_closed.
+    late = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-first",
+        message="late",
+    )
+    assert late["success"] is False
+    assert late["error"]["code"] == "run_closed"
+
+    # Already-terminal runs are NOT touched by a third turn.
+    store.record_result(
+        request_id="run_2",
+        conversation_key="research:sherlog",
+        callback_token="secret-second",
+        status="done",
+        title="Done",
+        markdown="final",
+    )
+    third = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="third turn",
+        callback_token="secret-third",
+        idempotency_key="run_3",
+        request_id="run_3",
+    )
+    # run_2 was already terminal (done); it must not flip to superseded.
+    assert store.get_run_by_request_id("run_2")["status"] == "done"
+    assert third["status"] == "draft"
+
+
 def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

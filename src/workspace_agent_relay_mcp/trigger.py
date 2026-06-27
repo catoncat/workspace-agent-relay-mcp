@@ -53,21 +53,40 @@ def build_trigger_input(
     conversation_key: str,
     callback_token: str,
     user_input: str,
+    is_continuation: bool = False,
 ) -> str:
+    header = [
+        f"request_id: {request_id}",
+        f"conversation_key: {conversation_key}",
+        f"callback_token: {callback_token}",
+        "relay_mcp: workspace-agent-relay-mcp",
+    ]
+    if is_continuation:
+        # The agent has already seen the full protocol earlier in this
+        # conversation; long sessions may compact it away, so restate just
+        # enough to keep the workflow alive without bloating every turn.
+        return "\n".join(
+            [
+                *header,
+                "",
+                "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the new request_id/callback_token above. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
+                "",
+                "User task:",
+                user_input.strip(),
+            ]
+        )
     return "\n".join(
         [
-            f"request_id: {request_id}",
-            f"conversation_key: {conversation_key}",
-            f"callback_token: {callback_token}",
-            "relay_mcp: workspace-agent-relay-mcp",
+            *header,
             "",
             "Completion contract:",
             "The local operator CANNOT see your ChatGPT-side plan, tool calls, or reasoning. This relay is their only view of your work.",
+            "This trigger starts ONE turn (one request_id + callback_token scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",
             "Before working, call workspace-agent-relay-mcp.record_plan with your step plan (each step needs a stable id and a title).",
-            "Then call notion-local-ops-mcp.bind_relay_run with this request_id and the callback_token so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally.",
+            "Then call notion-local-ops-mcp.bind_relay_run with this request_id and the callback_token so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
             "After completing several steps, call workspace-agent-relay-mcp.record_progress with step_updates to batch-sync step statuses, optionally with a one-line message summarizing what you did.",
-            "If blocked on a human decision, call workspace-agent-relay-mcp.ask_user.",
-            "Before you finish, call workspace-agent-relay-mcp.record_result with the exact request_id, conversation_key, callback_token, status, title, and full Markdown result.",
+            "If you need a human decision to continue, call workspace-agent-relay-mcp.ask_user (the turn pauses; it is NOT finished).",
+            "Call workspace-agent-relay-mcp.record_result exactly once when this turn is truly over: status=done when delivered, status=failed on an execution error, status=blocked ONLY for an external hard blocker (missing access/resource/dependency) — never use blocked to mean 'the plan changed' or 'the user gave a new direction'.",
             "Do not only answer in the ChatGPT conversation.",
             "",
             "User task:",

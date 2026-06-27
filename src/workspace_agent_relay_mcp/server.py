@@ -56,10 +56,12 @@ LOCAL_STATE_TOOL = {
 }
 
 MCP_INSTRUCTIONS = (
-    "This server is the local operator's only window into your run. "
+    "This server is the local operator's only window into your current turn. "
     "The operator CANNOT see your ChatGPT-side plan, tool calls, reasoning, or partial answers — only what you write back here. "
     "Treat these tools as how you keep the human in the loop, not as optional logging.\n"
-    "Workflow: call record_plan once at the start with your step plan; call record_progress with step_updates in batches after each chunk of work; call ask_user when you genuinely need a human decision; call record_result exactly once when you finish. "
+    "Workflow: call record_plan at the start with your step plan; call record_plan again or record_progress(step_updates with skipped) when your direction changes — a plan change is NOT a finished turn; "
+    "call record_progress with step_updates in batches after each chunk of work; call ask_user when you need a human decision (the turn pauses, it does not end); "
+    "call record_result exactly once when this turn is truly over: status=done when delivered, status=failed on an execution error, status=blocked ONLY for an external hard blocker (missing access/resource/dependency) — never use blocked to mean 'the plan changed'.\n"
     "Every call returns the current plan snapshot so you stay oriented. Do not expect shell, filesystem, or git tools here."
 )
 
@@ -98,10 +100,10 @@ async def server_info() -> dict[str, Any]:
     title="Record Plan",
     annotations=LOCAL_STATE_TOOL,
     description=(
-        "Use this at the START of a run to share your step plan with the local operator. "
+        "Use this at the START of a turn to share your step plan with the local operator. "
         "The operator cannot see your ChatGPT-side plan, so this is their only way to know what you are about to do. "
-        "Call it once before doing work; call it again only if your plan meaningfully changes. "
         "Each step needs a stable id (reuse the same ids in record_progress step_updates) and a short title. "
+        "Call it again to REVISE your plan when the direction changes — a plan revision is NOT a finished turn, so do not call record_result for it; instead skip the old steps via record_progress or replace them here. "
         "Returns the current plan and run status.\n"
         "Example: steps=[{\"id\":\"s1\",\"title\":\"Confirm changed files\"}, {\"id\":\"s2\",\"title\":\"Fix Header sizing\"}, {\"id\":\"s3\",\"title\":\"Run build\"}]"
     ),
@@ -136,8 +138,8 @@ def record_plan(
     annotations=LOCAL_STATE_TOOL,
     description=(
         "Use this after completing a chunk of work to batch-sync plan step statuses back to the operator. "
-        "Pass step_updates to flip one or more step ids to a new status (done/in_progress/skipped); "
-        "optionally include a one-line message summarizing what you just did. "
+        "Pass step_updates to flip one or more step ids to a new status (done/in_progress/skipped) — use skipped to abandon a step when the direction changes, instead of ending the turn. "
+        "Optionally include a one-line message summarizing what you just did. "
         "Do not call this once per tiny tool call — batch several completed steps into one call. "
         "Unknown step ids are ignored and listed in the returned ignored_step_ids. "
         "Returns the updated plan and run status.\n"
@@ -177,9 +179,10 @@ def record_progress(
     title="Record Result",
     annotations=LOCAL_STATE_TOOL,
     description=(
-        "Use this EXACTLY ONCE when you finish the run. Records the final status, a title, and the full Markdown answer. "
+        "Use this EXACTLY ONCE when this turn is truly over. Records the final status, a title, and the full Markdown answer. "
         "This is what the operator reads as the result — do not only answer in the ChatGPT conversation. "
-        "status must be done, blocked, or failed. Attach text artifacts if useful. "
+        "status: done when delivered, failed on an execution error, blocked ONLY for an external hard blocker (missing access/resource/dependency) — never use blocked to mean 'the plan changed' (revise the plan with record_plan / step_updates instead). "
+        "Attach text artifacts if useful. "
         "Returns the final run status.\n"
         "Example: status=\"done\", title=\"UI fixes applied\", markdown=\"## Summary\\n...\", artifacts=[{\"name\":\"diff.md\",\"mime_type\":\"text/markdown\",\"content\":\"...\"}]"
     ),

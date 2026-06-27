@@ -103,11 +103,16 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         callback_token = generate_callback_token()
         input_markdown = str(payload.get("input_markdown") or "")
         conversation_key = str(conversation["conversation_key"])
+        # Continuation = this conversation already has prior runs, so the agent
+        # has seen the full protocol before. Send a compact reminder instead of
+        # the full contract to avoid bloating context every turn.
+        is_continuation = len(store.list_runs_for_conversation(int(conversation["id"]))) > 0
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,
             callback_token=callback_token,
             user_input=input_markdown,
+            is_continuation=is_continuation,
         )
         store.create_run(
             agent_id=int(agent["id"]),
