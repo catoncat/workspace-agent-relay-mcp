@@ -1,0 +1,89 @@
+frontend/src/components/RelaySidebar.tsx
+  s_e8f1ec30de454a::t_fcc207d1d9ffef 148
+  s_1a98f877b1591d::t_475b1c58fd49af 400
+  s_e8f1ec30de454a::t_4a41a8dadb6bfa 165
+  s_1a98f877b1591d::t_b2a97b863be2d5 100-106,108,110,112-118,123,137,144,161,173-191
+  s_e8f1ec30de454a::t_28b1ced1848521 345-353
+  s_e8f1ec30de454a::t_8d333ba4c4f194 307
+  s_e8f1ec30de454a::t_215bccb43e0f5c 59
+  s_e8f1ec30de454a::t_b37169b395af71 297,300
+  s_1a98f877b1591d::t_fea95a4ad69307 42
+  s_1a98f877b1591d::t_ceba01cac354cb 227
+  s_e8f1ec30de454a::t_c497dcc65d83e9 2
+  s_e8f1ec30de454a::t_d513933d92cf94 73
+  s_1a98f877b1591d::t_29df149dfd65e4 135-136
+  s_1a98f877b1591d::t_4c62468a2736b0 26
+  s_1a98f877b1591d::t_45d6649c732a34 38-41
+  s_1a98f877b1591d::t_2c214b5b166cfb 373
+  s_1a98f877b1591d::t_ff3bf5cc1e1513 199,205
+  s_e8f1ec30de454a::t_422199f76fbb5c 404,418-421
+  s_1a98f877b1591d::t_b8da929f14bd54 293
+  s_e8f1ec30de454a::t_8a3ddd7c3773a6 354
+frontend/src/components/SettingsSheet.tsx
+  s_e8f1ec30de454a::t_af8c71a8b6f72f 326-343
+  s_1a98f877b1591d::t_a59f59ea89338c 5
+  s_1a98f877b1591d::t_1f7a4a089554c6 133,135,138,169-185,196,198-239,250-269,271-325,353,359,365-369,375,396-408,410-417,419-426,428-436,438-446,448-451
+  s_e8f1ec30de454a::t_7facc529e4bb07 186-193,197
+  s_e8f1ec30de454a::t_a8a294f51d0e6a 89,109-113
+  s_e8f1ec30de454a::t_2ed15e540ee56e 243-245,247-248
+  s_e8f1ec30de454a::t_b92c97a01dd410 16-23,25
+  s_e8f1ec30de454a::t_b49a4c80c121b1 3
+  s_e8f1ec30de454a::t_c87631f43bcdc9 125-126,130-131,136
+  s_e8f1ec30de454a::t_bbcfb207d41182 194
+frontend/src/lib/runStatus.ts
+  s_1a98f877b1591d::t_f4923c699bc196 12
+frontend/src/components/ThemeMenu.tsx
+  s_1a98f877b1591d::t_6109a9c5a68ede 29
+frontend/src/pages/RelayPage.tsx
+  s_e8f1ec30de454a::t_04f689b09820b5 15
+  s_e8f1ec30de454a::t_b430b63fd2cf75 57
+  s_e8f1ec30de454a::t_ffa67c9ae4810c 134-140
+  s_e8f1ec30de454a::t_38a3ec8262af37 152
+frontend/src/api/types.ts
+  s_1a98f877b1591d::t_5118fc16ea149a 7
+  s_e8f1ec30de454a::t_5f2cf5178ea328 24
+frontend/src/features/relay/hooks.ts
+  s_1a98f877b1591d::t_8d16d91f3208c9 40
+  s_1a98f877b1591d::t_84b0c8d57d7027 15
+  s_e8f1ec30de454a::t_5391aef7de2ef9 8,13
+  s_1a98f877b1591d::t_b69f0e7cc464e9 158-172,192-199,260-267
+  s_e8f1ec30de454a::t_fbc9d357b57445 187-191
+  s_e8f1ec30de454a::t_4c8fab8ad1bb38 254-259
+  s_1a98f877b1591d::t_11c3870ae315d0 200
+  s_1a98f877b1591d::t_efdba6b10df395 268
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_1a98f877b1591d::t_8cbc6c1ef94bee 58,64-65,67,69,77-80
+  s_1a98f877b1591d::t_3b691a89aba0ab 25-28,31-33,37
+frontend/src/api/client.ts
+  s_e8f1ec30de454a::t_53ecb7600375ea 86-87
+  s_1a98f877b1591d::t_e590d74a3b7c92 27,29-30
+  s_e8f1ec30de454a::t_219d5488d6ef0c 84,88,102,104,108,112-124
+  s_1a98f877b1591d::t_04b97d29b0f7a5 56,59,67,72-75,78,82-83
+  s_e8f1ec30de454a::t_512573931d5800 85
+  s_e8f1ec30de454a::t_eba74ab43591a9 89
+  s_e8f1ec30de454a::t_098fc04299e61a 125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "b15a2e4caadc469acae2fa8b7b31ccc87fa6f803",
+  "prompts": {},
+  "sessions": {
+    "s_1a98f877b1591d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5cca5388-9895-4f52-9bf6-58e4cb67286b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e8f1ec30de454a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a3d70a80-687a-40aa-9fd0-c79fd066f6c6",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
