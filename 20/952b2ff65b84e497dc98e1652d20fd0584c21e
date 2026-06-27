@@ -1,0 +1,54 @@
+frontend/src/pages/RelayPage.tsx
+  s_1e516fc1f0128a::t_66d81a2de375c8 123-128,133
+  s_1e516fc1f0128a::t_0bfd0f0c9b94e9 24
+  s_1e516fc1f0128a::t_8f1f592e52018d 83-87
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_1e516fc1f0128a::t_0c94d85d8c18ac 39,45-47
+  s_1e516fc1f0128a::t_85ccfe6e81de84 84-88
+  s_1e516fc1f0128a::t_8cd9f3aafda194 159
+  s_1e516fc1f0128a::t_1f13fe52039582 9
+tests/test_relay_store.py
+  s_1e516fc1f0128a::t_dc80f6cd89cba9 1030-1093
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_1e516fc1f0128a::t_1588e1e393cbd2 629-635,639,642
+  s_1e516fc1f0128a::t_f258242f4163bf 19-23
+docs/superpowers/specs/2026-06-27-relay-steer-protocol.md
+  s_1e516fc1f0128a::t_21b2f9bf3797ff 4
+  s_1e516fc1f0128a::t_922f2b83992a5c 85
+  s_1e516fc1f0128a::t_1a882946ce504a 92,97
+  s_1e516fc1f0128a::t_f9d257b237c1e5 57-77
+frontend/src/lib/runStatus.ts
+  s_1e516fc1f0128a::t_11e6f20d880a38 38-47
+src/workspace_agent_relay_mcp/db.py
+  s_1e516fc1f0128a::t_a933b2c01d4334 7,16
+tests/test_trigger_payload.py
+  s_1e516fc1f0128a::t_2dd434e1698b56 95-123
+tests/test_web_api.py
+  s_1e516fc1f0128a::t_5e878acaad930b 404-471
+src/workspace_agent_relay_mcp/server.py
+  s_1e516fc1f0128a::t_c2a4b0385dc32e 64,66
+docs/agent-instructions.md
+  s_1e516fc1f0128a::t_01c1b099cf2de9 137-138
+  s_1e516fc1f0128a::t_4843d3f266cb13 103,105
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_1e516fc1f0128a::t_fdec20e36db980 13
+  s_1e516fc1f0128a::t_f56e2d60e185b0 196-199,223
+src/workspace_agent_relay_mcp/trigger.py
+  s_1e516fc1f0128a::t_c232c07f033b53 58,74-97,102-103,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "20952b2ff65b84e497dc98e1652d20fd0584c21e",
+  "prompts": {},
+  "sessions": {
+    "s_1e516fc1f0128a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8ab8ed62-66b7-440f-b3de-4a422e3f1eec",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
