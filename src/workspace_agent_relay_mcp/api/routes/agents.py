@@ -11,6 +11,7 @@ from ..errors import json_error
 from ..validation import (
     SUPPORTED_AGENT_TOKEN_REF,
     list_configured_token_refs,
+    missing_fields,
     validate_agent_token_ref,
     validate_trigger_url,
 )
@@ -47,8 +48,28 @@ def agent_routes(store: Any, config: Any) -> list[tuple]:
         )
         return JSONResponse(agent)
 
+    async def rename_agent(request: Request) -> JSONResponse:
+        agent_id = int(request.path_params["agent_id"])
+        try:
+            payload = await json_body(request)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        missing = missing_fields(payload, ("name",))
+        if missing:
+            return json_error(f"missing required field(s): {', '.join(missing)}", status_code=400)
+        try:
+            agent = store.rename_agent(agent_id, name=str(payload["name"]))
+        except KeyError as exc:
+            return json_error(str(exc), status_code=404)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        except sqlite3.IntegrityError:
+            return json_error("An agent with that name already exists", status_code=400)
+        return JSONResponse(agent)
+
     return [
         ("/api/agents", list_agents, ["GET"]),
         ("/api/agents/token-refs", list_token_refs, ["GET"]),
         ("/api/agents", create_agent, ["POST"]),
+        ("/api/agents/{agent_id:int}", rename_agent, ["PATCH"]),
     ]

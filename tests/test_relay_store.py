@@ -21,6 +21,18 @@ def test_store_creates_default_agent_from_env_config(tmp_path: Path) -> None:
     assert agent["token_ref"] == "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN"
 
 
+def test_store_rename_agent(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+    )
+    renamed = store.rename_agent(agent["id"], name="Work")
+    assert renamed["name"] == "Work"
+    assert store.list_agents()[0]["name"] == "Work"
+
+
 def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

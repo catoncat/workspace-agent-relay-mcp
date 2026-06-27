@@ -132,6 +132,22 @@ def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
     assert missing_response.status_code == 404
 
 
+def test_api_can_rename_agent(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        agent, _ = _seed_conversation(client)
+        rename_response = client.patch(
+            f"/api/agents/{agent['id']}",
+            json={"name": "Work agent"},
+        )
+        list_response = client.get("/api/agents")
+
+    assert rename_response.status_code == 200
+    assert rename_response.json()["name"] == "Work agent"
+    assert list_response.json()[0]["name"] == "Work agent"
+
+
 def test_api_uses_default_trigger_url_when_payload_leaves_it_blank(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 

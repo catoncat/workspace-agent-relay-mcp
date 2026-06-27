@@ -331,6 +331,20 @@ class RelayStore:
             raise KeyError(f"Conversation not found: {conversation_id}")
         return _row_to_dict(row) or {}
 
+    def rename_agent(self, agent_id: int, *, name: str) -> dict[str, Any]:
+        if not name or not name.strip():
+            raise ValueError("name must not be empty")
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            conn.execute(
+                "UPDATE agents SET name = ?, updated_at = ? WHERE id = ?",
+                (name.strip(), now, agent_id),
+            )
+            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Agent not found: {agent_id}")
+        return _row_to_dict(row) or {}
+
     def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
         if not name or not name.strip():
             raise ValueError("name must not be empty")
