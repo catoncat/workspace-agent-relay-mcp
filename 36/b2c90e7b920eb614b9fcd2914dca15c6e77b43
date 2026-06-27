@@ -1,0 +1,54 @@
+frontend/src/vite-env.d.ts
+  s_9724c343298a64::t_b4cbf541c400ff 1-10
+scripts/dev-dashboard.sh
+  s_9724c343298a64::t_6ee15e1a5ce2be 1-83
+frontend/src/api/client.ts
+  s_9724c343298a64::t_1b8fb982e8748e 7-11,13-15
+  s_34618028a38b2e::t_f3bb070248b8c9 155-163
+  s_e8f1ec30de454a::t_0c75b91c6bf214 31-32
+frontend/vite.config.ts
+  s_9724c343298a64::t_04d6059eadb6b5 2,6-19,21-23,26,28-41
+  s_9724c343298a64::t_ed7f813028765e 27
+AGENTS.md
+  s_9724c343298a64::t_8c5eb8a4162fc4 39-41,43-47,50
+  s_9724c343298a64::t_7b26a115851c02 51
+.env.example
+  s_9724c343298a64::t_6cf48dc296cfcc 6-7
+frontend/src/providers/AuthProvider.tsx
+  s_9724c343298a64::t_dd1eb1863162ff 7
+README.md
+  s_9724c343298a64::t_008edc45491ed5 40-65
+  s_9724c343298a64::t_cdc3f4a8f93dc3 146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "36b2c90e7b920eb614b9fcd2914dca15c6e77b43",
+  "prompts": {},
+  "sessions": {
+    "s_34618028a38b2e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1c85a1cf-b37a-4688-917a-8c4e4eaa260e",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_9724c343298a64": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f9382acd-1df5-4ef7-ad91-9ef9347189bf",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e8f1ec30de454a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a3d70a80-687a-40aa-9fd0-c79fd066f6c6",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
