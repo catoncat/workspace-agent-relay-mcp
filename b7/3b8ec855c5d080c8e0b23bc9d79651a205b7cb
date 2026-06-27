@@ -1,0 +1,57 @@
+src/workspace_agent_relay_mcp/api/validation.py
+  s_1a98f877b1591d::t_f7e8a83699275c 9-11,13,16-17,41-51,75-77,81,90-91,96-121,123,125-126
+tests/test_web_api.py
+  s_1a98f877b1591d::t_1d32f8eab87811 172,176-234
+  s_e8f1ec30de454a::t_d310fe5f1a26e6 123-126,133-134,141-156
+  s_e8f1ec30de454a::t_cde03463d1b669 157-158
+  s_1a98f877b1591d::t_6a9a6558c7b1f3 235-236
+src/workspace_agent_relay_mcp/api/routes/agents.py
+  s_1a98f877b1591d::t_688526b112dc65 13,21-27,30-31,41-44,46-48,53-68,70,76-77,79,82-93,98,112
+  s_e8f1ec30de454a::t_57c4c2017a14ea 100-106,113
+tests/test_agent_tokens.py
+  s_1a98f877b1591d::t_1ff78a4b8b78ef 11,13,17
+  s_1a98f877b1591d::t_c495137418c43e 30-63
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_1a98f877b1591d::t_e8d6edc3dcc3b1 278-359
+  s_e8f1ec30de454a::t_635dc198fcc7e2 275-277
+  s_e8f1ec30de454a::t_bf702b1f0b0c94 453-476
+  s_e8f1ec30de454a::t_2b7accbf7ccddd 409-415
+AGENTS.md
+  s_1a98f877b1591d::t_cfd4ecb4af00ca 70
+src/workspace_agent_relay_mcp/api/routes/conversations.py
+  s_e8f1ec30de454a::t_2733901e0bde1d 77
+  s_e8f1ec30de454a::t_e3ccedf6e0241c 36,42-43,45-57,62-63
+tests/test_relay_store.py
+  s_e8f1ec30de454a::t_b655182a71332b 97-127
+  s_1a98f877b1591d::t_115a59f06f3f3c 36-59
+src/workspace_agent_relay_mcp/server.py
+  s_1a98f877b1591d::t_65c2bc8439bc49 59-61
+  s_1a98f877b1591d::t_f4851428e62c23 62-65
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_1a98f877b1591d::t_b4435ccaf21353 24
+  s_1a98f877b1591d::t_b60b715d802ab6 98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "b73b8ec855c5d080c8e0b23bc9d79651a205b7cb",
+  "prompts": {},
+  "sessions": {
+    "s_1a98f877b1591d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5cca5388-9895-4f52-9bf6-58e4cb67286b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e8f1ec30de454a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a3d70a80-687a-40aa-9fd0-c79fd066f6c6",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
