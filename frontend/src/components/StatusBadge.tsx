@@ -13,7 +13,8 @@ const STATUS_META: Record<string, StatusMeta> = {
   pending: { label: 'Pending', token: '--status-pending' },
   running: { label: 'Running', token: '--status-running' },
   progress: { label: 'In progress', token: '--status-running' },
-  draft: { label: 'Draft', token: '--status-info' },
+  draft: { label: 'Triggering', token: '--status-pending' },
+  sent: { label: 'Triggering', token: '--status-pending' },
   done: { label: 'Done', token: '--status-done' },
   result: { label: 'Result', token: '--status-done' },
   failed: { label: 'Failed', token: '--status-failed' },
@@ -25,7 +26,7 @@ const STATUS_META: Record<string, StatusMeta> = {
   ask_user: { label: 'Needs user', token: '--status-info' },
 }
 
-const PULSE_STATUSES = new Set(['accepted', 'waiting', 'pending', 'running', 'progress'])
+const PULSE_STATUSES = new Set(['draft', 'sent', 'accepted', 'waiting', 'pending', 'running', 'progress'])
 
 export function StatusBadge({ status }: { status?: string }) {
   const key = status || 'unknown'

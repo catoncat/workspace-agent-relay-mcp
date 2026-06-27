@@ -11,6 +11,7 @@ import {
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatusBadge } from '@/components/StatusBadge'
 import { ThreadProse } from '@/components/ThreadProse'
 import { cn } from '@/lib/utils'
 import {
@@ -146,8 +147,9 @@ function RunThread({
 
   return (
     <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16 pl-0.5">
-      <div className="px-1 text-[11px] font-medium text-muted-foreground/70">
+      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
         <span className="tabular-nums">Turn {turnIndex}</span>
+        {run.status !== 'done' ? <StatusBadge status={run.status} /> : null}
       </div>
 
       <Message from="user">
@@ -679,6 +681,16 @@ function SystemEvent({ event, runStatus }: { event: RunEvent; runStatus: string 
 }
 
 function TerminalStatus({ run }: { run: Run }) {
+  if (run.status === 'superseded') {
+    return (
+      <RunTerminalMessage
+        status={run.status}
+        title="Superseded by newer turn"
+        description="A newer turn was sent before this one produced a final callback, so late updates from this run are ignored."
+      />
+    )
+  }
+
   // A failed run with no result and a failed/zero trigger usually means the
   // trigger HTTP call never got a 202 — but the ChatGPT agent may still have
   // been dispatched and tried to write back, only to be rejected because this
@@ -699,8 +711,8 @@ function TerminalStatus({ run }: { run: Run }) {
   return (
     <RunTerminalMessage
       status={run.status}
-      title="Run finished"
-      description="Run finished without a result event."
+      title="Closed without final callback"
+      description="No record_result callback was received for this run. In this relay UI that usually means the turn was manually closed or interrupted before the agent sent a final result."
     />
   )
 }
@@ -758,15 +770,18 @@ function ThreadLoadingSkeleton() {
 function phaseHint(detail: RunDetail): string | null {
   const run = detail.run
   if (detail.events.length > 0 || detail.plan) return null
+  if (run.status === 'draft' || run.trigger_status === 'draft') {
+    return 'Sending trigger to ChatGPT. Callback events can appear only after the Workspace Agent starts.'
+  }
   if (run.status === 'trigger_failed' || run.trigger_status === 'failed' || run.status === 'failed') {
     const reason = run.trigger_error?.trim()
-    const base = 'Trigger failed. The agent may still be running — waiting for a callback to confirm.'
+    const base = 'Trigger did not return a clean 202. This run stays open for late callbacks, but sending a newer turn will supersede it.'
     return reason ? `${base}\n${reason}` : base
   }
   if (run.trigger_status === 'accepted') {
-    return 'Trigger accepted (202). Waiting for the agent to call back via MCP.'
+    return 'Trigger accepted by ChatGPT. Waiting for the agent to call back through this relay MCP.'
   }
-  return `Trigger ${run.trigger_status || run.status || 'pending'}. Waiting for callback events.`
+  return `Trigger state: ${run.trigger_status || run.status || 'pending'}. Waiting for callback events.`
 }
 
 function eventPayload(event: RunEvent): RunEventPayload {
