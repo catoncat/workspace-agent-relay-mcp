@@ -138,6 +138,26 @@ def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
     assert missing_response.status_code == 404
 
 
+def test_api_can_pin_conversation_without_name(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        pin_response = client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"pinned": True},
+        )
+        unpin_response = client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"pinned": False},
+        )
+
+    assert pin_response.status_code == 200
+    assert pin_response.json()["pinned_at"] is not None
+    assert unpin_response.status_code == 200
+    assert unpin_response.json()["pinned_at"] is None
+
+
 def test_api_can_delete_agent(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
@@ -711,3 +731,47 @@ def test_run_stream_returns_snapshot_for_terminal_run(tmp_path: Path) -> None:
     payload = json.loads(data_line[6:])
     assert payload["run"]["status"] == "done"
     assert payload["events"][-1]["title"] == "Done"
+
+
+def test_api_dismiss_run_marks_stuck_run_done(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path, auth_token="local-secret")
+
+    with client:
+        from workspace_agent_relay_mcp import server
+
+        agent = server.store.upsert_agent(
+            name="default",
+            trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+            token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+        )
+        conversation = server.store.create_conversation(
+            agent_id=agent["id"],
+            name="Sherlog",
+            conversation_key="research:sherlog",
+        )
+        run = server.store.create_run(
+            agent_id=agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown="Research sherlog",
+            callback_token="secret-callback-token",
+            idempotency_key="idem_1",
+            request_id="run_1",
+        )
+        server.store.update_run_trigger_result(
+            request_id="run_1",
+            trigger_http_status=202,
+            trigger_x_request_id="req_1",
+            conversation_url="https://chatgpt.com/c/test",
+        )
+        response = client.post(
+            f"/api/runs/{run['id']}/dismiss",
+            headers={"Authorization": "Bearer local-secret"},
+            json={},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run"]["status"] == "done"
+    assert body["events"][-1]["event_type"] == "system"
+    assert body["events"][-1]["title"] == "Marked finished"

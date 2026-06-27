@@ -41,26 +41,19 @@ def conversation_routes(store: Any) -> list[tuple]:
             return json_error(str(exc), status_code=400)
         if not payload:
             return json_error("request body must not be empty", status_code=400)
+        allowed = {"name", "pinned"}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            return json_error(f"unsupported field(s): {', '.join(unknown)}", status_code=400)
+        updates = {key: payload[key] for key in allowed if key in payload}
+        if not updates:
+            return json_error("at least one of name, pinned is required", status_code=400)
         try:
-            store.get_conversation(conversation_id)
-        except KeyError as exc:
-            return json_error(str(exc), status_code=404)
-        conversation: dict[str, Any] | None = None
-        try:
-            if "name" in payload:
-                conversation = store.rename_conversation(
-                    conversation_id, name=str(payload["name"])
-                )
-            if "pinned" in payload:
-                conversation = store.set_conversation_pinned(
-                    conversation_id, pinned=bool(payload["pinned"])
-                )
+            conversation = store.update_conversation(conversation_id, **updates)
         except KeyError as exc:
             return json_error(str(exc), status_code=404)
         except ValueError as exc:
             return json_error(str(exc), status_code=400)
-        if conversation is None:
-            return json_error("no supported fields to update", status_code=400)
         return JSONResponse(conversation)
 
     async def delete_conversation(request: Request) -> JSONResponse:

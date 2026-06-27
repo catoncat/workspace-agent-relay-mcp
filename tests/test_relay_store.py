@@ -110,6 +110,17 @@ def test_pin_conversation_sorts_pinned_first(tmp_path: Path) -> None:
     assert store.get_conversation(older["id"])["pinned_at"] is None
 
 
+def test_update_conversation_can_rename_and_pin_together(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Old", conversation_key="old")
+
+    updated = store.update_conversation(conversation["id"], name="New", pinned=True)
+
+    assert updated["name"] == "New"
+    assert updated["pinned_at"] is not None
+
+
 def test_delete_agent_cascades_conversations(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.create_agent(
@@ -430,6 +441,80 @@ def test_terminal_run_rejects_later_callbacks_without_reopening(tmp_path: Path) 
     assert second_result["success"] is False
     assert second_result["error"]["code"] == "run_closed"
     assert store.get_run_by_request_id("run_1")["status"] == "done"
+
+
+def test_dismiss_run_marks_non_terminal_run_done(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    store.update_run_trigger_result(
+        request_id="run_1",
+        trigger_http_status=202,
+        trigger_x_request_id="req_1",
+        conversation_url="https://chatgpt.com/c/test",
+    )
+    store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        message="Still working",
+    )
+
+    dismissed = store.dismiss_run(int(run["id"]), note="Operator confirmed done in ChatGPT")
+
+    assert dismissed["status"] == "done"
+    assert dismissed["completed_at"] is not None
+    events = store.list_events(int(run["id"]))
+    assert events[-1]["event_type"] == "system"
+    assert events[-1]["title"] == "Marked finished"
+    assert events[-1]["markdown"] == "Operator confirmed done in ChatGPT"
+    assert events[-1]["payload_json"] == '{"reason": "operator_dismiss"}'
+
+    late = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="done",
+        title="Late",
+        markdown="Too late",
+    )
+    assert late["success"] is False
+    assert late["error"]["code"] == "run_closed"
+
+
+def test_dismiss_run_rejects_terminal_run(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="task",
+        callback_token="secret-callback",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-callback",
+        status="done",
+        title="Finished",
+        markdown="Final answer",
+    )
+
+    with pytest.raises(ValueError, match="already terminal"):
+        store.dismiss_run(int(run["id"]))
 
 
 def test_terminal_run_checks_callback_token_before_closed_status(tmp_path: Path) -> None:

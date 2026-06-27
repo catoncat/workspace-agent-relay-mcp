@@ -12,11 +12,13 @@ import {
   useCreateConversation,
   useCreateRun,
   useDeleteConversation,
+  useDismissRun,
   usePinConversation,
   useRenameConversation,
   useRunDetailStream,
   useRunDetails,
   useRuns,
+  useWorkingConversationIds,
 } from '@/features/relay/hooks'
 import { useAuth } from '@/providers/AuthContext'
 
@@ -51,6 +53,7 @@ export function RelayPage() {
   )
 
   const createRunMutation = useCreateRun(selectedConversationId)
+  const dismissRunMutation = useDismissRun(selectedConversationId)
   const createConversationMutation = useCreateConversation()
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
@@ -72,8 +75,17 @@ export function RelayPage() {
     () => runDetails.map((detail) => detail.run.conversation_url).find(Boolean) ?? null,
     [runDetails],
   )
-  const latestRunStatus = runDetails[runDetails.length - 1]?.run.status
+  const latestRun = runDetails[runDetails.length - 1]?.run
+  const latestRunStatus = latestRun?.status
   const composerMode = resolveComposerMode(latestRunStatus, createRunMutation.isPending)
+
+  const conversationIds = useMemo(() => conversations.map((c) => c.id), [conversations])
+  const workingConversationIds = useWorkingConversationIds(
+    conversationIds,
+    selectedConversationId,
+    latestRunStatus,
+    createRunMutation.isPending,
+  )
 
   useEffect(() => {
     if (conversations.length === 0) return
@@ -104,6 +116,11 @@ export function RelayPage() {
     },
     [createRunMutation, navigate, selectedConversationId],
   )
+
+  const handleDismiss = useCallback(async () => {
+    if (!latestRun?.id) return
+    await dismissRunMutation.mutateAsync(latestRun.id)
+  }, [dismissRunMutation, latestRun?.id])
 
   const handleCreateConversation = useCallback(
     async (values: CreateConversationInput) => {
@@ -152,6 +169,7 @@ export function RelayPage() {
         onPin={handlePinConversation}
         onOpenSettings={() => setSettingsOpen(true)}
         loading={bootstrapQuery.isLoading || bootstrapQuery.isFetching}
+        workingConversationIds={workingConversationIds}
       />
 
       <SidebarInset className="flex h-svh min-h-0 flex-col overflow-hidden">
@@ -170,7 +188,9 @@ export function RelayPage() {
         <ThreadComposer
           conversationKey={selectedConversation?.conversation_key}
           disabled={!selectedConversationId}
+          dismissing={dismissRunMutation.isPending}
           mode={composerMode}
+          onDismiss={handleDismiss}
           onSend={handleSend}
         />
       </SidebarInset>

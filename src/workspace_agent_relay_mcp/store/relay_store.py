@@ -436,23 +436,26 @@ class RelayStore:
             raise KeyError(f"Agent not found: {agent_id}")
         return _row_to_dict(row) or {}
 
-    def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
-        if not name or not name.strip():
-            raise ValueError("name must not be empty")
+    def update_conversation(self, conversation_id: int, **fields: Any) -> dict[str, Any]:
+        allowed = {"name", "pinned"}
+        unknown = sorted(set(fields) - allowed)
+        if unknown:
+            raise ValueError(f"unsupported field(s): {', '.join(unknown)}")
+        if not fields:
+            raise ValueError("no fields to update")
         now = _now()
-        with self._lock, self._connect(immediate=True) as conn:
-            conn.execute(
-                "UPDATE conversations SET name = ?, updated_at = ? WHERE id = ?",
-                (name.strip(), now, conversation_id),
-            )
-            row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
-        if row is None:
-            raise KeyError(f"Conversation not found: {conversation_id}")
-        return _row_to_dict(row) or {}
-
-    def set_conversation_pinned(self, conversation_id: int, *, pinned: bool) -> dict[str, Any]:
-        now = _now()
-        pinned_at = now if pinned else None
+        sets = ["updated_at = ?"]
+        params: list[Any] = [now]
+        if "name" in fields:
+            name = str(fields["name"]).strip()
+            if not name:
+                raise ValueError("name must not be empty")
+            sets.append("name = ?")
+            params.append(name)
+        if "pinned" in fields:
+            sets.append("pinned_at = ?")
+            params.append(now if bool(fields["pinned"]) else None)
+        params.append(conversation_id)
         with self._lock, self._connect(immediate=True) as conn:
             row = conn.execute(
                 "SELECT id FROM conversations WHERE id = ? AND archived_at IS NULL",
@@ -461,11 +464,17 @@ class RelayStore:
             if row is None:
                 raise KeyError(f"Conversation not found: {conversation_id}")
             conn.execute(
-                "UPDATE conversations SET pinned_at = ?, updated_at = ? WHERE id = ?",
-                (pinned_at, now, conversation_id),
+                f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
+                params,
             )
             row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
         return _row_to_dict(row) or {}
+
+    def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
+        return self.update_conversation(conversation_id, name=name)
+
+    def set_conversation_pinned(self, conversation_id: int, *, pinned: bool) -> dict[str, Any]:
+        return self.update_conversation(conversation_id, pinned=pinned)
 
     def delete_agent(self, agent_id: int) -> None:
         with self._lock, self._connect(immediate=True) as conn:
@@ -947,6 +956,32 @@ class RelayStore:
             )
         self._notify_run(int(run["id"]))
         return {"success": True, "run_status": status}
+
+    def dismiss_run(self, run_id: int, *, note: str | None = None) -> dict[str, Any]:
+        """Operator marks a non-terminal run finished when the agent never called record_result."""
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Run not found: {run_id}")
+            run = _row_to_dict(row) or {}
+            if run["status"] in TERMINAL_STATUSES:
+                raise ValueError("Run is already terminal.")
+            self._append_event_conn(
+                conn,
+                run_id=run_id,
+                request_id="dashboard",
+                event_type="system",
+                title="Marked finished",
+                markdown=note,
+                payload={"reason": "operator_dismiss"},
+            )
+            conn.execute(
+                "UPDATE runs SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, run_id),
+            )
+        self._notify_run(run_id)
+        return self.get_run(run_id)
 
     def list_events(self, run_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:

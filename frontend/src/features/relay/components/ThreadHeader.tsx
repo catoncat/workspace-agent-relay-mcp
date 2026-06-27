@@ -10,6 +10,7 @@ import {
   DropdownMenuLinkItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { sidebarHeaderIconClass } from '@/components/ThemeMenu'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 
@@ -50,7 +51,7 @@ export function ThreadHeader({
 
   return (
     <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-      <SidebarTrigger />
+      <SidebarTrigger className={sidebarHeaderIconClass} />
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-sm font-semibold" title={title}>
           {title}

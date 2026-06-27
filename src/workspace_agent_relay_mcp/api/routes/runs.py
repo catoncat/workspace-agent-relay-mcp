@@ -162,9 +162,25 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         )
         return JSONResponse(run)
 
+    async def dismiss_run(request: Request) -> JSONResponse:
+        run_id = int(request.path_params["run_id"])
+        try:
+            payload = await json_body(request)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        note = str(payload.get("note") or "").strip() or None
+        try:
+            store.dismiss_run(run_id, note=note)
+        except KeyError as exc:
+            return json_error(str(exc), status_code=404)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=409)
+        return JSONResponse(_run_detail(store, run_id))
+
     return [
         ("/api/conversations/{conversation_id:int}/runs", list_runs, ["GET"]),
         ("/api/conversations/{conversation_id:int}/runs", create_run, ["POST"]),
         ("/api/runs/{run_id:int}", get_run_detail, ["GET"]),
         ("/api/runs/{run_id:int}/stream", stream_run, ["GET"]),
+        ("/api/runs/{run_id:int}/dismiss", dismiss_run, ["POST"]),
     ]

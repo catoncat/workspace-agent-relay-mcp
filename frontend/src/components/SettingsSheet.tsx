@@ -323,8 +323,8 @@ function AgentRow({
           </Button>
         </div>
       )}
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="gap-3" showCloseButton={false}>
+          <DialogHeader className="gap-1.5">
             <DialogTitle>Delete agent?</DialogTitle>
             <DialogDescription>
               This permanently removes "{agent.name}" and all of its threads and run history from this
@@ -332,10 +332,20 @@ function AgentRow({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" disabled={deleting} onClick={() => setDeleteOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={deleting}
+              onClick={() => setDeleteOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" disabled={deleting} onClick={() => void handleDelete()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleting}
+              onClick={() => void handleDelete()}
+            >
               {deleting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>

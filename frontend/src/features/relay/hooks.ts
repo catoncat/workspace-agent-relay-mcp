@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   createAgent,
   createConversation,
   createRun,
+  dismissRun,
   deleteAgent,
   deleteConversation,
   getRunDetail,
@@ -22,6 +23,7 @@ import {
   tokenRefsOptions,
 } from '@/lib/queryClient'
 import { relayQueryKeys } from '@/features/relay/queryKeys'
+import { isConversationWorking, latestRunStatusFromRuns } from '@/lib/runStatus'
 
 export type BootstrapData = {
   agents: Agent[]
@@ -52,6 +54,43 @@ export function useRuns(conversationId: number | null) {
     ...runsOptions(conversationId ?? 0),
     enabled: conversationId !== null,
   })
+}
+
+/** Poll each conversation's run list; derive sidebar "working" from latest run status. */
+export function useWorkingConversationIds(
+  conversationIds: number[],
+  selectedConversationId: number | null,
+  selectedLatestStatus: string | undefined,
+  sendingRun: boolean,
+): ReadonlySet<number> {
+  const runListQueries = useQueries({
+    queries: conversationIds.map((id) => ({
+      ...runsOptions(id),
+      refetchInterval: (query: Query<Run[], Error, Run[], ReturnType<typeof relayQueryKeys.runs>>) => {
+        const status = latestRunStatusFromRuns(query.state.data)
+        return isConversationWorking(status) ? 5_000 : 30_000
+      },
+    })),
+  })
+
+  const runListData = runListQueries.map((query) => query.data)
+
+  return useMemo(() => {
+    const working = new Set<number>()
+    for (let index = 0; index < conversationIds.length; index += 1) {
+      const id = conversationIds[index]!
+      if (id === selectedConversationId && sendingRun) {
+        working.add(id)
+        continue
+      }
+      const status =
+        id === selectedConversationId && selectedLatestStatus !== undefined
+          ? selectedLatestStatus
+          : latestRunStatusFromRuns(runListData[index])
+      if (isConversationWorking(status)) working.add(id)
+    }
+    return working
+  }, [conversationIds, runListData, selectedConversationId, selectedLatestStatus, sendingRun])
 }
 
 export function useRunDetails(runs: Run[]) {
@@ -100,6 +139,27 @@ export function useRunDetailStream(runId: number | null) {
   }, [queryClient, runId])
 
   return { error }
+}
+
+export function useDismissRun(conversationId: number | null) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (runId: number) => dismissRun(runId),
+    onSuccess: (detail) => {
+      queryClient.setQueryData(relayQueryKeys.runDetail(detail.run.id), detail)
+      if (conversationId) {
+        queryClient.setQueryData<Run[]>(relayQueryKeys.runs(conversationId), (current) => {
+          const runs = current ?? []
+          return runs.map((run) => (run.id === detail.run.id ? detail.run : run))
+        })
+        void queryClient.invalidateQueries({ queryKey: relayQueryKeys.runs(conversationId) })
+      }
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
 }
 
 export function useCreateRun(conversationId: number | null) {
@@ -257,10 +317,34 @@ export function usePinConversation() {
   return useMutation({
     mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>
       setConversationPinned(id, pinned),
-    onSuccess: () => {
+    onMutate: async ({ id, pinned }) => {
+      await queryClient.cancelQueries({ queryKey: relayQueryKeys.bootstrap })
+      const previous = queryClient.getQueryData<BootstrapData>(relayQueryKeys.bootstrap)
+      queryClient.setQueryData<BootstrapData>(relayQueryKeys.bootstrap, (current) => {
+        if (!current) return current
+        const pinned_at = pinned ? new Date().toISOString() : null
+        const conversations = current.conversations
+          .map((conversation) =>
+            conversation.id === id ? { ...conversation, pinned_at } : conversation,
+          )
+          .sort((a, b) => {
+            const aPinned = a.pinned_at ? 0 : 1
+            const bPinned = b.pinned_at ? 0 : 1
+            if (aPinned !== bPinned) return aPinned - bPinned
+            return 0
+          })
+        return { ...current, conversations }
+      })
+      return { previous }
+    },
+    onSuccess: (_conversation, { pinned }) => {
+      toast.success(pinned ? 'Pinned' : 'Unpinned')
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
-    onError: (err) => {
+    onError: (err, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(relayQueryKeys.bootstrap, context.previous)
+      }
       toast.error(toError(err).message)
     },
   })

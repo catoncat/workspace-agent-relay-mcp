@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { useSendShortcut } from '@/features/relay/hooks'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { isComposerBusy, isUserReplyStatus } from '@/lib/runStatus'
-import { ArrowUpIcon, LoaderCircleIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { ArrowUpIcon, LoaderCircleIcon, SquareIcon } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 
 type ComposerMode = 'idle' | 'sending' | 'waiting'
@@ -10,27 +11,33 @@ type ComposerMode = 'idle' | 'sending' | 'waiting'
 type Props = {
   conversationKey?: string
   disabled?: boolean
+  dismissing?: boolean
   mode?: ComposerMode
+  onDismiss?: () => void | Promise<void>
   onSend: (text: string) => void | Promise<void>
 }
 
 export function ThreadComposer({
   conversationKey,
   disabled = false,
+  dismissing = false,
   mode = 'idle',
+  onDismiss,
   onSend,
 }: Props) {
   const [text, setText] = useState('')
-  const shortcut = useSendShortcut()
   const isSending = mode === 'sending'
   const isAgentWorking = mode === 'waiting'
   const hasText = Boolean(text.trim())
-  const showWorkingButton = isSending || (isAgentWorking && !hasText)
+  const isMultiline = text.includes('\n')
+  const showWorkingButton = isSending || dismissing || (isAgentWorking && !hasText)
 
   const placeholder =
     mode === 'sending'
       ? 'Sending…'
-      : 'Send a task to the Workspace Agent…'
+      : isMultiline
+        ? 'Send follow-up…'
+        : 'Send a task to the Workspace Agent…'
 
   const submit = async () => {
     const trimmed = text.trim()
@@ -40,50 +47,110 @@ export function ThreadComposer({
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (shortcut.matches(event)) {
-      event.preventDefault()
-      void submit()
-    }
+    if (event.key !== 'Enter') return
+    if (event.shiftKey) return
+    event.preventDefault()
+    void submit()
   }
+
+  const handleButtonClick = () => {
+    if (isAgentWorking && !hasText && !isSending && onDismiss) {
+      void onDismiss()
+      return
+    }
+    void submit()
+  }
+
+  const actionButton = (
+    <Button
+      type="button"
+      size="icon"
+      variant={showWorkingButton ? 'secondary' : 'default'}
+      disabled={disabled || isSending || dismissing || (!showWorkingButton && !hasText)}
+      onClick={handleButtonClick}
+      aria-label={
+        showWorkingButton
+          ? isAgentWorking && !hasText && !isSending
+            ? 'Mark turn finished'
+            : 'Agent working'
+          : 'Send'
+      }
+      className={cn(
+        'mb-0.5 size-8 shrink-0 rounded-full',
+        showWorkingButton && 'bg-muted text-muted-foreground',
+        !showWorkingButton && hasText && 'bg-primary text-primary-foreground hover:bg-primary/90',
+      )}
+    >
+      {showWorkingButton ? (
+        isAgentWorking && !hasText && !isSending && !dismissing ? (
+          <SquareIcon className="size-3 fill-current" strokeWidth={0} />
+        ) : (
+          <LoaderCircleIcon className="size-4 animate-spin" />
+        )
+      ) : (
+        <ArrowUpIcon className="size-4" strokeWidth={2.5} />
+      )}
+    </Button>
+  )
 
   return (
     <footer className="shrink-0 p-3">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-end gap-2 rounded-lg border border-input bg-background px-2 py-1.5 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+        <div
+          className={cn(
+            'flex items-end gap-2 border border-input bg-background px-3 py-2 shadow-xs transition-[border-radius,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
+            isMultiline ? 'rounded-2xl' : 'rounded-full',
+          )}
+        >
           <Textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
-            className="border-0 bg-transparent px-1.5 py-1.5 shadow-none ring-0 focus-visible:ring-0 disabled:opacity-60 dark:bg-transparent"
-          />
-          <Button
-            type="button"
-            size="icon-sm"
-            variant={showWorkingButton ? 'secondary' : 'default'}
-            disabled={disabled || isSending || !hasText}
-            onClick={() => void submit()}
-            aria-label={showWorkingButton ? 'Agent working' : 'Send'}
-          >
-            {showWorkingButton ? (
-              <LoaderCircleIcon className="size-4 animate-spin" />
-            ) : (
-              <ArrowUpIcon className="size-4" />
+            rows={isMultiline ? 2 : 1}
+            className={cn(
+              'border-0 bg-transparent px-0 py-1.5 shadow-none ring-0 focus-visible:ring-0 disabled:opacity-60 dark:bg-transparent',
+              isMultiline
+                ? 'field-sizing-content min-h-16 max-h-48 resize-none'
+                : 'min-h-0 h-9 max-h-9 resize-none overflow-hidden leading-normal',
             )}
-          </Button>
+          />
+          {isAgentWorking && !hasText && !isSending ? (
+            <TooltipProvider delay={200}>
+              <Tooltip>
+                <TooltipTrigger render={actionButton} />
+                <TooltipContent side="top" className="max-w-xs text-left font-sans">
+                  Trigger runs cannot be stopped remotely. Click to mark this turn finished when you
+                  know the agent is done.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            actionButton
+          )}
         </div>
         <div className="mt-1.5 px-1 text-xs text-muted-foreground">
           {isSending ? (
             <span>Triggering agent…</span>
+          ) : dismissing ? (
+            <span>Marking turn as finished…</span>
           ) : isAgentWorking && !hasText ? (
-            <span>Agent is working on this turn — type to steer or start a new turn</span>
+            <span>
+              Agent is working on this turn — type to steer, send a new turn, or click the spinner
+              to mark finished
+            </span>
           ) : (
             <>
               <kbd className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px]">
-                {shortcut.label}
+                Enter
               </kbd>
               <span className="ml-1.5">to send</span>
+              <span className="mx-1.5 text-muted-foreground/50">·</span>
+              <kbd className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px]">
+                Shift+Enter
+              </kbd>
+              <span className="ml-1.5">for new line</span>
               {conversationKey ? (
                 <span className="ml-2 text-muted-foreground/80">Thread linked</span>
               ) : (

@@ -3,6 +3,7 @@ import { ClipboardCopy, MessageSquarePlus, Pencil, Pin, PinOff, Settings, Trash2
 import { toast } from 'sonner'
 import type { Agent, Conversation } from '@/api/types'
 import { ThemeMenu, sidebarHeaderIconClass } from '@/components/ThemeMenu'
+import { WorkingIndicator } from '@/components/WorkingIndicator'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -37,8 +38,10 @@ import { cn } from '@/lib/utils'
 const threadButtonClass =
   'h-7 w-full rounded-md text-[13px] font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground data-active:bg-sidebar-accent data-active:font-normal data-active:text-sidebar-foreground'
 
-const threadIndentClass = 'pl-5 pr-2'
-const threadIndentSingleClass = 'pl-3.5 pr-2'
+const threadIndentClass = 'pl-8 pr-2'
+const threadIndentSingleClass = 'pl-7 pr-2'
+const threadStatusSlotClass = 'left-2'
+const threadStatusSlotSingleClass = 'left-1.5'
 const agentLabelClass = 'pl-2.5 pr-2 pb-0.5 text-[11px] font-normal text-muted-foreground/80'
 
 export type CreateConversationInput = {
@@ -59,6 +62,7 @@ type Props = {
   onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
   onOpenSettings?: () => void
   loading?: boolean
+  workingConversationIds?: ReadonlySet<number>
 }
 
 export function RelaySidebar({
@@ -73,6 +77,7 @@ export function RelaySidebar({
   onPin,
   onOpenSettings,
   loading = false,
+  workingConversationIds,
 }: Props) {
   const [isComposing, setIsComposing] = useState(false)
   const grouped = useMemo(() => groupConversations(agents, conversations), [agents, conversations])
@@ -107,7 +112,7 @@ export function RelaySidebar({
               disabled={creating}
               title="New thread"
               onClick={handleStartCreate}
-              className="h-7 w-full justify-start gap-2 px-2 text-[13px] font-normal text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="h-7 w-full cursor-pointer justify-start gap-2 px-2 text-[13px] font-normal text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
             >
               <MessageSquarePlus className="size-3.5 shrink-0 opacity-70" />
               <span>New thread</span>
@@ -141,7 +146,9 @@ export function RelaySidebar({
                         key={item.id}
                         item={item}
                         isActive={item.id === selectedId}
+                        isWorking={workingConversationIds?.has(item.id) ?? false}
                         indentClass={threadIndentClass}
+                        statusSlotClass={threadStatusSlotClass}
                         onSelect={onSelect}
                         onRename={onRename}
                         onDelete={onDelete}
@@ -158,7 +165,9 @@ export function RelaySidebar({
                     key={item.id}
                     item={item}
                     isActive={item.id === selectedId}
+                    isWorking={workingConversationIds?.has(item.id) ?? false}
                     indentClass={threadIndentSingleClass}
+                    statusSlotClass={threadStatusSlotSingleClass}
                     onSelect={onSelect}
                     onRename={onRename}
                     onDelete={onDelete}
@@ -290,14 +299,26 @@ function groupConversations(
 type RowProps = {
   item: Conversation
   isActive: boolean
+  isWorking?: boolean
   indentClass: string
+  statusSlotClass: string
   onSelect: (id: number) => void
   onRename?: (id: number, name: string) => void | Promise<unknown>
   onDelete?: (id: number) => void | Promise<unknown>
   onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
 }
 
-function ConversationRow({ item, isActive, indentClass, onSelect, onRename, onDelete, onPin }: RowProps) {
+function ConversationRow({
+  item,
+  isActive,
+  isWorking = false,
+  indentClass,
+  statusSlotClass,
+  onSelect,
+  onRename,
+  onDelete,
+  onPin,
+}: RowProps) {
   const [isRenaming, setIsRenaming] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -342,14 +363,9 @@ function ConversationRow({ item, isActive, indentClass, onSelect, onRename, onDe
     [],
   )
 
-  const handlePin = useCallback(async () => {
+  const handlePin = useCallback(() => {
     if (!onPin) return
-    try {
-      await onPin(item.id, !isPinned)
-      toast.success(isPinned ? 'Unpinned' : 'Pinned')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Pin update failed')
-    }
+    void onPin(item.id, !isPinned)
   }, [isPinned, item.id, onPin])
 
   const handleDelete = useCallback(async () => {
@@ -391,6 +407,20 @@ function ConversationRow({ item, isActive, indentClass, onSelect, onRename, onDe
           </div>
         ) : (
           <ContextMenu>
+            {isWorking || isPinned ? (
+              <span
+                className={cn(
+                  'pointer-events-none absolute top-1/2 z-[1] flex size-3 -translate-y-1/2 items-center justify-center',
+                  statusSlotClass,
+                )}
+              >
+                {isWorking ? (
+                  <WorkingIndicator className="text-primary" />
+                ) : (
+                  <Pin className="size-3 opacity-70" />
+                )}
+              </span>
+            ) : null}
             <ContextMenuTrigger
               render={
                 <SidebarMenuButton
@@ -401,8 +431,8 @@ function ConversationRow({ item, isActive, indentClass, onSelect, onRename, onDe
                 />
               }
             >
-              {isPinned ? <Pin className="size-3 shrink-0 opacity-70" /> : null}
               <span className="truncate">{displayName}</span>
+              {isWorking ? <span className="sr-only">Agent working</span> : null}
             </ContextMenuTrigger>
             <ContextMenuContent className="w-60">
               <div className="flex items-baseline justify-between gap-3 px-2 py-1.5">
@@ -438,18 +468,28 @@ function ConversationRow({ item, isActive, indentClass, onSelect, onRename, onDe
             </ContextMenuContent>
           </ContextMenu>
         )}
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="gap-3" showCloseButton={false}>
+          <DialogHeader className="gap-1.5">
             <DialogTitle>Delete conversation?</DialogTitle>
             <DialogDescription>
               This removes "{displayName}" from the conversation list. Existing run history is archived with it.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" disabled={isDeleting} onClick={() => setDeleteOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isDeleting}
+              onClick={() => setDeleteOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" disabled={!onDelete || isDeleting} onClick={() => void handleDelete()}>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={!onDelete || isDeleting}
+              onClick={() => void handleDelete()}
+            >
               {isDeleting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>

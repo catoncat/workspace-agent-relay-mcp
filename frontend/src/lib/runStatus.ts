@@ -19,6 +19,23 @@ export function isComposerBusy(status: string | undefined): boolean {
   return RUN_COMPOSER_BUSY_STATUSES.has(status)
 }
 
+/** Latest run is in-flight (matches ThreadComposer "waiting" / agent working). */
+export function isConversationWorking(status: string | undefined): boolean {
+  if (!status) return false
+  return isComposerBusy(status) && !isUserReplyStatus(status)
+}
+
+export function latestRunStatusFromRuns(
+  runs: ReadonlyArray<{ id: number; status: string }> | undefined,
+): string | undefined {
+  if (!runs?.length) return undefined
+  let latest = runs[0]!
+  for (const run of runs) {
+    if (run.id > latest.id) latest = run
+  }
+  return latest.status
+}
+
 export function isUserReplyStatus(status: string | undefined): boolean {
   if (!status) return false
   return RUN_USER_REPLY_STATUSES.has(status)
