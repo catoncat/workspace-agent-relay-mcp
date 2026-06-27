@@ -61,6 +61,7 @@ MCP_INSTRUCTIONS = (
     "(and local tool traces after bind_relay_run on your local-ops MCP).\n"
     "Relay workflow: record_plan first → bind_relay_run on your local execution MCP → batch record_progress(step_updates) → "
     "record_result once when the turn truly ends (done/failed/blocked). Plan changes use record_plan or skipped steps, not record_result. "
+    "Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as steps unless debugging that plumbing. "
     "ask_user pauses the turn; it is not completion. blocked is for external hard blockers only.\n"
     "Every call returns the current plan snapshot. No shell/filesystem/git on this server — use your local-ops MCP for execution."
 )
@@ -103,6 +104,7 @@ async def server_info() -> dict[str, Any]:
         "Use this at the START of a turn to share your step plan with the local operator. "
         "The operator cannot see your ChatGPT-side plan, so this is their only way to know what you are about to do. "
         "Each step needs a stable id (reuse the same ids in record_progress step_updates) and a short title. "
+        "Use user-visible work steps; do not include relay binding, server_info, or routine tool setup unless that plumbing is the task. "
         "Call it again to REVISE your plan when the direction changes — a plan revision is NOT a finished turn, so do not call record_result for it; instead skip the old steps via record_progress or replace them here. "
         "Returns the current plan and run status.\n"
         "Example: steps=[{\"id\":\"s1\",\"title\":\"Confirm changed files\"}, {\"id\":\"s2\",\"title\":\"Fix Header sizing\"}, {\"id\":\"s3\",\"title\":\"Run build\"}]"

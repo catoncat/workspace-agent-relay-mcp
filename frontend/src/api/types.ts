@@ -29,6 +29,9 @@ export type Run = {
   request_id: string
   status: string
   conversation_key: string
+  parent_run_id?: number | null
+  superseded_by_run_id?: number | null
+  supersede_reason?: string | null
   input_markdown: string
   trigger_status?: string
   trigger_http_status?: number

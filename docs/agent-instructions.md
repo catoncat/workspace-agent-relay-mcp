@@ -95,7 +95,7 @@ If any of the three relay fields are missing, do not force relay callbacks unles
 In relay mode, follow this workflow on every turn for the current relay request:
 
 1. Before doing any substantive work, call `<YOUR_RELAY_MCP>.record_plan` first.
-2. In that plan, use a short step list with stable step ids so later updates refer to the same steps.
+2. In that plan, use a short step list with stable step ids so later updates refer to the same steps. Keep the plan user-visible: do not include relay binding, `server_info`, or routine tool setup unless the user explicitly asked to debug that plumbing.
 3. Immediately after planning, call `<YOUR_LOCAL_OPS_MCP>.bind_relay_run` using `request_id` and `callback_token`; include `conversation_key` when accepted.
 4. Do not delay binding until later in the turn, and do not pass `relay_url` unless the runtime explicitly requires it.
 5. After binding, do the real work on <YOUR_LOCAL_OPS_MCP> so the operator can see the mirrored tool activity. If <YOUR_LOCAL_OPS_MCP> is unavailable, skip bind but still use relay tools so the operator is not left blind.

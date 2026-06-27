@@ -31,9 +31,11 @@ import { useEffect, useMemo, useState } from 'react'
 
 const ACTIVE_STATUSES = RUN_ACTIVE_STATUSES
 const TERMINAL_STATUSES = RUN_TERMINAL_STATUSES
+const INFRA_TRACE_TOOLS = new Set(['bind_relay_run', 'clear_relay_run', 'server_info'])
 
+type TraceSegmentKind = 'traces' | 'infra'
 type TimelineSegment =
-  | { kind: 'traces'; events: RunEvent[] }
+  | { kind: TraceSegmentKind; events: RunEvent[] }
   | { kind: 'narration'; event: RunEvent }
 
 /** Split progress events at narration boundaries so tool batches and notes
@@ -41,22 +43,30 @@ type TimelineSegment =
 export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
   let traceBatch: RunEvent[] = []
+  let traceKind: TraceSegmentKind | null = null
+
+  const flushTraceBatch = () => {
+    if (traceBatch.length > 0 && traceKind) {
+      segments.push({ kind: traceKind, events: traceBatch })
+    }
+    traceBatch = []
+    traceKind = null
+  }
 
   for (const event of events) {
     if (isTraceEvent(event)) {
+      const nextKind: TraceSegmentKind =
+        isInfrastructureTraceEvent(event) && !isFailedTraceEvent(event) ? 'infra' : 'traces'
+      if (traceKind && traceKind !== nextKind) flushTraceBatch()
+      traceKind = nextKind
       traceBatch.push(event)
       continue
     }
-    if (traceBatch.length > 0) {
-      segments.push({ kind: 'traces', events: traceBatch })
-      traceBatch = []
-    }
+    flushTraceBatch()
     segments.push({ kind: 'narration', event })
   }
 
-  if (traceBatch.length > 0) {
-    segments.push({ kind: 'traces', events: traceBatch })
-  }
+  flushTraceBatch()
 
   return segments
 }
@@ -69,6 +79,10 @@ type Props = {
 
 export function ThreadView({ details, loading = false, onSend }: Props) {
   const activeDetail = useMemo(() => pickActiveRunDetail(details), [details])
+  const turnIndexByRunId = useMemo(
+    () => new Map(details.map((detail, index) => [detail.run.id, index + 1])),
+    [details],
+  )
 
   if (loading) {
     return (
@@ -108,6 +122,7 @@ export function ThreadView({ details, loading = false, onSend }: Props) {
             onSend={onSend}
             authoritativeRunId={activeDetail?.run.id ?? null}
             turnIndex={index + 1}
+            turnIndexByRunId={turnIndexByRunId}
           />
         ))}
       </ConversationContent>
@@ -121,11 +136,13 @@ function RunThread({
   onSend,
   authoritativeRunId,
   turnIndex,
+  turnIndexByRunId,
 }: {
   detail: RunDetail
   onSend?: (text: string) => void | Promise<void>
   authoritativeRunId: number | null
   turnIndex: number
+  turnIndexByRunId: Map<number, number>
 }) {
   const run = detail.run
   const isActive = ACTIVE_STATUSES.has(run.status)
@@ -144,11 +161,26 @@ function RunThread({
     (event) => event.event_type === 'system' && (event.markdown || event.title),
   )
   const hasSystemEvent = systemEvents.length > 0
+  const supersededByTurnIndex = run.superseded_by_run_id
+    ? turnIndexByRunId.get(run.superseded_by_run_id) ?? null
+    : null
+
+  if (run.status === 'superseded' && supersededByTurnIndex) {
+    return (
+      <SupersededRunSummary
+        detail={detail}
+        turnIndex={turnIndex}
+        supersededByTurnIndex={supersededByTurnIndex}
+      />
+    )
+  }
 
   return (
     <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16 pl-0.5">
       <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
-        <span className="tabular-nums">Turn {turnIndex}</span>
+        <span className="tabular-nums">
+          Turn {turnIndex}{run.parent_run_id ? ' · follow-up' : ''}
+        </span>
         {run.status !== 'done' ? <StatusBadge status={run.status} /> : null}
       </div>
 
@@ -218,6 +250,45 @@ function RunThread({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function SupersededRunSummary({
+  detail,
+  turnIndex,
+  supersededByTurnIndex,
+}: {
+  detail: RunDetail
+  turnIndex: number
+  supersededByTurnIndex: number
+}) {
+  const run = detail.run
+  const plan = detail.plan
+  const progress = plan ? planProgress(plan) : null
+
+  return (
+    <div id={`run-${run.id}`} className="flex flex-col gap-2 scroll-mt-16 pl-0.5">
+      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
+        <span className="tabular-nums">Turn {turnIndex}</span>
+        <StatusBadge status={run.status} />
+      </div>
+      <div className="rounded-lg border border-dashed border-border/70 px-3 py-2.5 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+          <span>Continued in Turn {supersededByTurnIndex}</span>
+          {progress ? (
+            <span className="tabular-nums text-muted-foreground/80">
+              Plan {progress.doneCount}/{progress.total}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 max-h-16 overflow-hidden whitespace-pre-wrap text-foreground/75">
+          {run.input_markdown || '(empty message)'}
+        </p>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          This attempt was folded into your newer follow-up, so late callbacks from it are ignored.
+        </p>
+      </div>
     </div>
   )
 }
@@ -447,6 +518,15 @@ function RunProgressTimeline({
           )
         }
 
+        if (segment.kind === 'infra') {
+          return (
+            <InfrastructureTraceBatch
+              key={`infra-${segment.events[0]?.id ?? index}`}
+              events={segment.events}
+            />
+          )
+        }
+
         const isLiveBatch = isActive && !hasResultEvent && index === lastTraceSegmentIndex
         return (
           <ToolTraceBatch
@@ -456,6 +536,35 @@ function RunProgressTimeline({
           />
         )
       })}
+    </div>
+  )
+}
+
+function InfrastructureTraceBatch({ events }: { events: RunEvent[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const label = events.length === 1 ? '1 setup tool hidden' : `${events.length} setup tools hidden`
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground/80 transition-colors hover:text-foreground"
+      >
+        {expanded ? (
+          <ChevronUpIcon className="size-3.5 shrink-0" />
+        ) : (
+          <ChevronDownIcon className="size-3.5 shrink-0" />
+        )}
+        <span>{label}</span>
+      </button>
+      {expanded ? (
+        <ul className="my-1 list-none space-y-1 pl-0 text-sm text-muted-foreground">
+          {events.map((event, index) => (
+            <ToolTraceListItem key={`infra-trace-${event.id ?? index}`} event={event} />
+          ))}
+        </ul>
+      ) : null}
     </div>
   )
 }
@@ -809,6 +918,14 @@ function stringValue(value: JsonValue | undefined): string {
 
 function isTraceEvent(event: RunEvent): boolean {
   return eventPayload(event).trace === true
+}
+
+function isInfrastructureTraceEvent(event: RunEvent): boolean {
+  return INFRA_TRACE_TOOLS.has(traceFields(event).tool)
+}
+
+function isFailedTraceEvent(event: RunEvent): boolean {
+  return traceFields(event).ok === false
 }
 
 function traceFields(event: RunEvent): ToolTraceFields {

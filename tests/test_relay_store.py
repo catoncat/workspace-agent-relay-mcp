@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import json
 import threading
 
 import pytest
@@ -714,7 +715,8 @@ def test_existing_database_gets_trigger_error_column_via_migration(tmp_path: Pat
     check = _sqlite3.connect(db)
     cols = {row[1] for row in check.execute("PRAGMA table_info(runs)")}
     check.close()
-    assert "trigger_error" in cols
+    for column in ("trigger_error", "parent_run_id", "superseded_by_run_id", "supersede_reason"):
+        assert column in cols
 
 
 def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> None:
@@ -821,13 +823,21 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     first_after = store.get_run_by_request_id("run_1")
     assert first_after["status"] == "superseded"
     assert first_after["completed_at"] is not None
+    assert first_after["superseded_by_run_id"] == second["id"]
+    assert first_after["supersede_reason"] == "follow_up_started"
     assert store.get_run_by_request_id("run_2")["status"] == "draft"
+    assert first["parent_run_id"] is None
+    assert second["parent_run_id"] == first["id"]
 
     # A system event explains the supersede.
     events = store.list_events(first["id"])
     system_events = [e for e in events if e["event_type"] == "system"]
     assert len(system_events) == 1
     assert "Superseded" in (system_events[0]["title"] or "")
+    system_payload = json.loads(system_events[0]["payload_json"])
+    assert system_payload["reason"] == "follow_up_started"
+    assert system_payload["superseded_by_run_id"] == second["id"]
+    assert system_payload["superseded_by_request_id"] == "run_2"
 
     # The first run's plan is still readable (frozen snapshot, not deleted).
     assert store.get_plan(first["id"]) is not None
@@ -863,6 +873,7 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     # run_2 was already terminal (done); it must not flip to superseded.
     assert store.get_run_by_request_id("run_2")["status"] == "done"
     assert third["status"] == "draft"
+    assert third["parent_run_id"] is None
 
 
 def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -> None:

@@ -226,6 +226,9 @@ class RelayStore:
                     agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
                     conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                     conversation_key TEXT NOT NULL,
+                    parent_run_id INTEGER,
+                    superseded_by_run_id INTEGER,
+                    supersede_reason TEXT,
                     callback_token_hash TEXT NOT NULL,
                     idempotency_key TEXT NOT NULL,
                     input_markdown TEXT NOT NULL,
@@ -270,8 +273,15 @@ class RelayStore:
             # a table_info check. New databases get the column via the path below
             # too (cheaper than branching on fresh-vs-existing).
             cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
-            if "trigger_error" not in cols:
-                conn.execute("ALTER TABLE runs ADD COLUMN trigger_error TEXT")
+            run_migrations = {
+                "trigger_error": "TEXT",
+                "parent_run_id": "INTEGER",
+                "superseded_by_run_id": "INTEGER",
+                "supersede_reason": "TEXT",
+            }
+            for column, column_type in run_migrations.items():
+                if column not in cols:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {column} {column_type}")
             conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
             if "pinned_at" not in conv_cols:
                 conn.execute("ALTER TABLE conversations ADD COLUMN pinned_at TEXT")
@@ -511,7 +521,7 @@ class RelayStore:
         now = _now()
         redacted_input_markdown = _redact_callback_token(input_markdown, callback_token)
         superseded_run_ids: list[int] = []
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connect(immediate=True) as conn:
             conversation = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
             if conversation is None:
                 raise ValueError(f"Conversation not found: {conversation_id}")
@@ -525,33 +535,18 @@ class RelayStore:
             # polluting the new turn. `superseded` is system-only — agents cannot
             # set it via record_result.
             existing_rows = conn.execute(
-                "SELECT id, status FROM runs WHERE conversation_id = ?",
+                "SELECT id, status FROM runs WHERE conversation_id = ? ORDER BY id",
                 (conversation_id,),
             ).fetchall()
-            for row in existing_rows:
-                if row["status"] in TERMINAL_STATUSES:
-                    continue
-                conn.execute(
-                    "UPDATE runs SET status = 'superseded', completed_at = ?, updated_at = ? WHERE id = ?",
-                    (now, now, int(row["id"])),
-                )
-                self._append_event_conn(
-                    conn,
-                    run_id=int(row["id"]),
-                    request_id="system",
-                    event_type="system",
-                    title="Superseded by newer turn",
-                    markdown=None,
-                    payload={"reason": "newer_turn_started"},
-                )
-                superseded_run_ids.append(int(row["id"]))
+            active_run_ids = [int(row["id"]) for row in existing_rows if row["status"] not in TERMINAL_STATUSES]
+            parent_run_id = active_run_ids[-1] if active_run_ids else None
             conn.execute(
                 """
                 INSERT INTO runs (
                     request_id, agent_id, conversation_id, conversation_key, callback_token_hash,
-                    idempotency_key, input_markdown, status, trigger_status, created_at, updated_at
+                    idempotency_key, input_markdown, parent_run_id, status, trigger_status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
                 """,
                 (
                     request_id,
@@ -561,13 +556,38 @@ class RelayStore:
                     _hash_token(callback_token),
                     idempotency_key,
                     redacted_input_markdown,
+                    parent_run_id,
                     now,
                     now,
                 ),
             )
             row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-        payload = _row_to_dict(row) or {}
-        payload.pop("callback_token_hash", None)
+            new_run_id = int(row["id"])
+            for run_id in active_run_ids:
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = 'superseded', completed_at = ?, updated_at = ?,
+                        superseded_by_run_id = ?, supersede_reason = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, new_run_id, "follow_up_started", run_id),
+                )
+                self._append_event_conn(
+                    conn,
+                    run_id=run_id,
+                    request_id="system",
+                    event_type="system",
+                    title="Superseded by follow-up",
+                    markdown=None,
+                    payload={
+                        "reason": "follow_up_started",
+                        "superseded_by_run_id": new_run_id,
+                        "superseded_by_request_id": request_id,
+                    },
+                )
+                superseded_run_ids.append(run_id)
+        payload = self._redact_run(_row_to_dict(row) or {})
         for rid in superseded_run_ids:
             self._notify_run(rid)
         self._notify_run(int(payload["id"]))

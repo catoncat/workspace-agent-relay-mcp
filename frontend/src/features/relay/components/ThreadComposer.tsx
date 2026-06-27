@@ -35,6 +35,8 @@ export function ThreadComposer({
   const placeholder =
     mode === 'sending'
       ? 'Sending…'
+      : isAgentWorking
+        ? 'Add instruction to current work…'
       : isMultiline
         ? 'Send follow-up…'
         : 'Send a task to the Workspace Agent…'
@@ -74,7 +76,9 @@ export function ThreadComposer({
           ? isAgentWorking && !hasText && !isSending
             ? 'Mark turn finished'
             : 'Agent working'
-          : 'Send'
+          : isAgentWorking
+            ? 'Send follow-up instruction'
+            : 'Send'
       }
       className={cn(
         'mb-0.5 size-8 shrink-0 rounded-full',
@@ -138,8 +142,8 @@ export function ThreadComposer({
             <span>Marking turn as finished…</span>
           ) : isAgentWorking && !hasText ? (
             <span>
-              Agent is working on this turn — type to steer, send a new turn, or click the spinner
-              to mark finished
+              Agent is working — type to add guidance to the current work, or click the square when
+              you know it finished
             </span>
           ) : (
             <>

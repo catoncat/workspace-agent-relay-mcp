@@ -69,7 +69,7 @@ def build_trigger_input(
             [
                 *header,
                 "",
-                "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the new request_id/callback_token above. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
+                "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the new request_id/callback_token above. Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as plan steps. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
                 "",
                 "User task:",
                 user_input.strip(),
@@ -83,6 +83,7 @@ def build_trigger_input(
             "The local operator CANNOT see your ChatGPT-side plan, tool calls, or reasoning. This relay is their only view of your work.",
             "This trigger starts ONE turn (one request_id + callback_token scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",
             "Before working, call workspace-agent-relay-mcp.record_plan with your step plan (each step needs a stable id and a title).",
+            "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps unless the user explicitly asked to debug that plumbing.",
             "Then call notion-local-ops-mcp.bind_relay_run with this request_id and the callback_token so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
             "After completing several steps, call workspace-agent-relay-mcp.record_progress with step_updates to batch-sync step statuses, optionally with a one-line message summarizing what you did.",
             "If you need a human decision to continue, call workspace-agent-relay-mcp.ask_user (the turn pauses; it is NOT finished).",
