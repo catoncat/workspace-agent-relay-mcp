@@ -1,0 +1,95 @@
+frontend/src/components/ThreadView.tsx
+  s_1a98f877b1591d::t_b4e4432e812426 604-606
+  s_ed4cdca51a78f5::t_992287673ea4c1 232,242-245,248-251,256,260,263-281,283-288,291-305,307-321
+  s_ed4cdca51a78f5::t_f623456a1f29d4 155-156
+  s_613e228a2e9c01::t_f38f8b74025f36 259
+  s_1a98f877b1591d::t_7a77c441ea58f0 145
+  s_5b6a0d5cf6c61c::t_9d64e8829b96ef 449,458-461
+  s_1a98f877b1591d::t_b561c9209e60eb 241
+  s_5b6a0d5cf6c61c::t_8bfbf2ef3d7625 409-414
+  s_1a98f877b1591d::t_73ce3507badec3 31-32
+  s_ed4cdca51a78f5::t_09328d1c8f5208 71
+  s_ed4cdca51a78f5::t_93d48a36e5c651 95
+  s_5b6a0d5cf6c61c::t_d175674620a6cd 426,431
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_1a98f877b1591d::t_9802072f1b568e 5,8-9,13,17-22,25-32,36,56-58,63-64,66,68,76-90,96-103,105
+  s_1a98f877b1591d::t_7f71d38280a57e 4
+  s_1a98f877b1591d::t_a7c4a75cd998ed 104
+  s_1a98f877b1591d::t_05e93e4a0ec1ae 106
+frontend/src/pages/RelayPage.tsx
+  s_1a98f877b1591d::t_3706fb956b1bdb 57-59,61-64,66-68,77,82,86,119,136,150
+  s_1a98f877b1591d::t_f6fcd44be49dc5 73-74
+  s_a83a203a5ef7f2::t_ba56aefd792b67 143
+  s_1a98f877b1591d::t_6463eecb93fce1 8
+  s_1a98f877b1591d::t_eef9e1f56d892e 78-81,85,88
+  s_1a98f877b1591d::t_d1e2e6925252f7 113-117
+  s_1a98f877b1591d::t_b7115400d1e016 3,107-112,139-140
+  s_1a98f877b1591d::t_5f087587dcbe40 163
+frontend/src/features/relay/components/ThreadHeader.tsx
+  s_a83a203a5ef7f2::t_ce78d0d313b19d 68-71
+  s_a83a203a5ef7f2::t_0145ac9c7e97dc 2,6-12,34-37,50,58-59,63-66,73-87
+  s_1a98f877b1591d::t_08a06409329f1f 52
+  s_a83a203a5ef7f2::t_89d9c26e152685 14
+  s_1a98f877b1591d::t_c1070717a59ed9 54-57,61
+  s_1a98f877b1591d::t_fba9e15bc3983f 4
+  s_a83a203a5ef7f2::t_83133f5d5b882d 1
+  s_a83a203a5ef7f2::t_439bdc205f772b 49
+  s_1a98f877b1591d::t_dbf338c9a294ad 18,26
+  s_a83a203a5ef7f2::t_6ea7cacb10d6da 67
+  s_a83a203a5ef7f2::t_4a5a4012297d83 72
+tests/test_web_api.py
+  s_1a98f877b1591d::t_18673545357540 236
+frontend/src/components/ThreadProse.tsx
+  s_5b6a0d5cf6c61c::t_a78f107903053f 35,38-41
+  s_5b6a0d5cf6c61c::t_932edbd51f2e9b 24-25
+frontend/src/lib/runStatus.ts
+  s_1a98f877b1591d::t_ffa10eacb60fdb 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "f17e33fb042b4e2ffac84d7fe4045951e40bbb9a",
+  "prompts": {},
+  "sessions": {
+    "s_1a98f877b1591d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5cca5388-9895-4f52-9bf6-58e4cb67286b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_5b6a0d5cf6c61c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "737eac2a-b19d-4b72-8186-df58158e345d",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_613e228a2e9c01": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1357b1c8-e6ed-4482-adfc-a3bd8c1e9bb9",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a83a203a5ef7f2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "46741cc5-bfde-4744-9ad9-27bee775ff51",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_ed4cdca51a78f5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "908fb34e-7387-4c4c-91cd-952c7ae801d1",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
