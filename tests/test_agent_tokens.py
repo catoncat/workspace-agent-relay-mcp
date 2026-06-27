@@ -8,10 +8,13 @@ from starlette.testclient import TestClient
 
 from workspace_agent_relay_mcp.api.validation import (
     agent_token,
+    agent_token_configured,
     list_configured_token_refs,
+    resolve_agent_token,
     validate_agent_token_ref,
 )
 from workspace_agent_relay_mcp.config import RelayConfig
+from workspace_agent_relay_mcp.store.relay_store import RelayStore
 
 # Reuse the web-api test harness instead of duplicating it.
 from tests.test_web_api import _client
@@ -22,6 +25,40 @@ SECOND = "WORKSPACE_AGENT_RELAY_AGENT_TOKEN_2"
 
 def _cfg(agent_tokens: dict[str, str] | None = None, default_agent_token: str = "") -> RelayConfig:
     return RelayConfig(agent_tokens=agent_tokens or {}, default_agent_token=default_agent_token)
+
+
+def test_validate_accepts_local_token_ref() -> None:
+    validate_agent_token_ref("local:1")
+    validate_agent_token_ref("local:42")
+
+
+@pytest.mark.parametrize("bad", ["local:0", "local:-1", "local:abc", "local:"])
+def test_validate_rejects_invalid_local_token_ref(bad: str) -> None:
+    with pytest.raises(ValueError):
+        validate_agent_token_ref(bad)
+
+
+def test_resolve_agent_token_reads_local_store(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.create_agent(
+        name="work",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_work/trigger",
+        access_token="at-local",
+    )
+    cfg = _cfg()
+    assert resolve_agent_token(cfg, store, agent["token_ref"]) == "at-local"
+    assert agent_token_configured(cfg, store, agent) is True
+
+
+def test_agent_token_configured_false_when_local_token_missing(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="legacy",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+    )
+    cfg = _cfg(agent_tokens={}, default_agent_token="")
+    assert agent_token_configured(cfg, store, agent) is False
 
 
 def test_validate_accepts_default_token_ref() -> None:

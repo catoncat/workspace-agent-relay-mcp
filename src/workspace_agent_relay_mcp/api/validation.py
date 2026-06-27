@@ -6,16 +6,15 @@ from urllib.parse import urlparse
 from ..config import AGENT_TOKEN_ENV_PREFIX
 
 
-# token_ref grammar: "env:<VAR_NAME>". The relay resolves an agent's access
-# token at trigger time by reading that env var. VAR_NAME is constrained to the
-# relay's own namespace so a token_ref can never coerce the server into reading
-# an arbitrary env var (e.g. secrets unrelated to agent tokens).
+# token_ref grammar:
+# - "env:<VAR_NAME>" — legacy; resolved from RelayConfig.agent_tokens snapshot
+# - "local:<agent_id>" — token stored in relay SQLite (dashboard-managed)
 TOKEN_REF_PREFIX = "env:"
+LOCAL_TOKEN_REF_PREFIX = "local:"
 TOKEN_ENV_VAR_PREFIX = AGENT_TOKEN_ENV_PREFIX
 
-# The default token_ref: resolves to WORKSPACE_AGENT_RELAY_AGENT_TOKEN. This is
-# what the dashboard bootstraps the first agent with, and what existing single-
-# agent deployments already have configured in .env.
+# The default token_ref: resolves to WORKSPACE_AGENT_RELAY_AGENT_TOKEN. Kept for
+# existing single-agent deployments that bootstrap from .env.
 SUPPORTED_AGENT_TOKEN_REF = f"{TOKEN_REF_PREFIX}{TOKEN_ENV_VAR_PREFIX}"
 
 WORKSPACE_AGENT_TRIGGER_HOST = "api.chatgpt.com"
@@ -37,6 +36,17 @@ def validate_trigger_url(trigger_url: str) -> None:
         or parsed.fragment
     ):
         raise ValueError("trigger_url must be a ChatGPT Workspace Agent trigger endpoint")
+
+
+def _local_agent_id_from_token_ref(token_ref: str) -> int:
+    if not token_ref.startswith(LOCAL_TOKEN_REF_PREFIX):
+        raise ValueError(
+            f"unsupported token_ref: {token_ref!r} (expected format '{LOCAL_TOKEN_REF_PREFIX}<agent_id>')"
+        )
+    raw = token_ref[len(LOCAL_TOKEN_REF_PREFIX) :]
+    if not raw.isdigit() or int(raw) <= 0:
+        raise ValueError(f"unsupported token_ref: {token_ref!r} (invalid local agent id)")
+    return int(raw)
 
 
 def _env_var_from_token_ref(token_ref: str) -> str:
@@ -62,17 +72,13 @@ def _env_var_from_token_ref(token_ref: str) -> str:
 
 
 def validate_agent_token_ref(token_ref: str) -> None:
+    if token_ref.startswith(LOCAL_TOKEN_REF_PREFIX):
+        _local_agent_id_from_token_ref(token_ref)
+        return
     _env_var_from_token_ref(token_ref)
 
 
-def agent_token(config: Any, token_ref: str) -> str:
-    # Tokens are resolved from the config snapshot (RelayConfig.agent_tokens),
-    # which load_config() populates from every WORKSPACE_AGENT_RELAY_AGENT_TOKEN*
-    # env var at startup. Reading from the snapshot (not live os.environ) keeps
-    # resolution deterministic and insulates it from runtime env mutation and
-    # test dotenv side effects. For the default token_ref only, fall back to
-    # config.default_agent_token so existing single-agent deployments and tests
-    # that inject the token via default_agent_token keep working.
+def _agent_token_from_env(config: Any, token_ref: str) -> str:
     var_name = _env_var_from_token_ref(token_ref)
     agent_tokens = getattr(config, "agent_tokens", {}) or {}
     token = str(agent_tokens.get(var_name, "") or "").strip()
@@ -81,19 +87,43 @@ def agent_token(config: Any, token_ref: str) -> str:
     if not token:
         raise ValueError(
             f"{var_name} is not configured on the relay server. "
-            "Set this ChatGPT Workspace Agent access token in .env and restart "
-            "workspace-agent-relay-mcp. This is not the dashboard API token "
-            "(WORKSPACE_AGENT_RELAY_AUTH_TOKEN)."
+            "Paste the Workspace Agent access token in Settings, or set it in .env "
+            "and restart workspace-agent-relay-mcp."
         )
     return token
 
 
-def list_configured_token_refs(config: Any) -> list[dict[str, Any]]:
-    """Return token_refs that have a non-empty value in the config snapshot.
+def resolve_agent_token(config: Any, store: Any, token_ref: str) -> str:
+    if token_ref.startswith(LOCAL_TOKEN_REF_PREFIX):
+        agent_id = _local_agent_id_from_token_ref(token_ref)
+        token = store.get_agent_access_token(agent_id)
+        if not token:
+            raise ValueError(
+                "This agent has no access token configured. "
+                "Open Settings and paste the Workspace Agent access token."
+            )
+        return token
+    return _agent_token_from_env(config, token_ref)
 
-    Used by GET /api/agents/token-refs to populate the "create agent" form's
-    token_ref dropdown. Only the refs are returned — never the token values.
-    The default token_ref is listed first, the rest alphabetically.
+
+def agent_token(config: Any, token_ref: str) -> str:
+    """Resolve env-backed token_refs only. Prefer resolve_agent_token in routes."""
+    return _agent_token_from_env(config, token_ref)
+
+
+def agent_token_configured(config: Any, store: Any, agent: dict[str, Any]) -> bool:
+    try:
+        resolve_agent_token(config, store, str(agent["token_ref"]))
+    except ValueError:
+        return False
+    return True
+
+
+def list_configured_token_refs(config: Any) -> list[dict[str, Any]]:
+    """Return env-backed token_refs that have a non-empty value in the config snapshot.
+
+    Legacy helper for deployments that still manage tokens via .env. Dashboard
+    create-agent flows should prefer `access_token` (stored as local:<id>).
     """
     agent_tokens = getattr(config, "agent_tokens", {}) or {}
     refs: list[dict[str, Any]] = []

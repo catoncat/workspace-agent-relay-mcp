@@ -21,7 +21,7 @@ from ...trigger import (
 )
 from ..deps import json_body
 from ..errors import json_error
-from ..validation import agent_token, validate_trigger_url
+from ..validation import resolve_agent_token, validate_trigger_url
 
 logger = logging.getLogger("workspace_agent_relay_mcp.trigger")
 
@@ -95,7 +95,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         trigger_url = str(agent["trigger_url"])
         try:
             validate_trigger_url(trigger_url)
-            access_token = agent_token(config, str(agent["token_ref"]))
+            access_token = resolve_agent_token(config, store, str(agent["token_ref"]))
         except ValueError as exc:
             return json_error(str(exc), status_code=400)
         request_id = generate_request_id()

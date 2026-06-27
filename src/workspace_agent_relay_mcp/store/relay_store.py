@@ -272,6 +272,91 @@ class RelayStore:
             cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
             if "trigger_error" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN trigger_error TEXT")
+            conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+            if "pinned_at" not in conv_cols:
+                conn.execute("ALTER TABLE conversations ADD COLUMN pinned_at TEXT")
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS agent_secrets (
+                    agent_id INTEGER PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+                    access_token TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+
+    def get_agent(self, agent_id: int) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Agent not found: {agent_id}")
+        return _row_to_dict(row) or {}
+
+    def get_agent_access_token(self, agent_id: int) -> str:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT access_token FROM agent_secrets WHERE agent_id = ?",
+                (agent_id,),
+            ).fetchone()
+        if row is None:
+            return ""
+        return str(row["access_token"] or "").strip()
+
+    def set_agent_access_token(self, agent_id: int, *, access_token: str) -> None:
+        token = access_token.strip()
+        if not token:
+            raise ValueError("access_token must not be empty")
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Agent not found: {agent_id}")
+            conn.execute(
+                """
+                INSERT INTO agent_secrets (agent_id, access_token, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    access_token = excluded.access_token,
+                    updated_at = excluded.updated_at
+                """,
+                (agent_id, token, now),
+            )
+            conn.execute(
+                "UPDATE agents SET token_ref = ?, updated_at = ? WHERE id = ?",
+                (f"local:{agent_id}", now, agent_id),
+            )
+
+    def create_agent(self, *, name: str, trigger_url: str, access_token: str) -> dict[str, Any]:
+        token = access_token.strip()
+        if not token:
+            raise ValueError("access_token must not be empty")
+        now = _now()
+        trigger_id = _extract_trigger_id(trigger_url)
+        with self._lock, self._connect(immediate=True) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO agents (name, trigger_url, trigger_id, token_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (name, trigger_url, trigger_id, "local:pending", now, now),
+            )
+            agent_id = int(cursor.lastrowid)
+            token_ref = f"local:{agent_id}"
+            conn.execute(
+                "UPDATE agents SET token_ref = ? WHERE id = ?",
+                (token_ref, agent_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO agent_secrets (agent_id, access_token, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (agent_id, token, now),
+            )
+            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"Agent not found: {agent_id}")
+        return _row_to_dict(row) or {}
 
     def upsert_agent(self, *, name: str, trigger_url: str, token_ref: str) -> dict[str, Any]:
         now = _now()
@@ -321,7 +406,13 @@ class RelayStore:
 
     def list_conversations(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
-            rows = conn.execute("SELECT * FROM conversations WHERE archived_at IS NULL ORDER BY updated_at DESC").fetchall()
+            rows = conn.execute(
+                """
+                SELECT * FROM conversations
+                WHERE archived_at IS NULL
+                ORDER BY (pinned_at IS NULL) ASC, pinned_at DESC, updated_at DESC
+                """
+            ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]
 
     def get_conversation(self, conversation_id: int) -> dict[str, Any]:
@@ -358,6 +449,30 @@ class RelayStore:
         if row is None:
             raise KeyError(f"Conversation not found: {conversation_id}")
         return _row_to_dict(row) or {}
+
+    def set_conversation_pinned(self, conversation_id: int, *, pinned: bool) -> dict[str, Any]:
+        now = _now()
+        pinned_at = now if pinned else None
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute(
+                "SELECT id FROM conversations WHERE id = ? AND archived_at IS NULL",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Conversation not found: {conversation_id}")
+            conn.execute(
+                "UPDATE conversations SET pinned_at = ?, updated_at = ? WHERE id = ?",
+                (pinned_at, now, conversation_id),
+            )
+            row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+        return _row_to_dict(row) or {}
+
+    def delete_agent(self, agent_id: int) -> None:
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Agent not found: {agent_id}")
+            conn.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
 
     def delete_conversation(self, conversation_id: int) -> None:
         now = _now()

@@ -120,16 +120,40 @@ def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
             f"/api/conversations/{conversation['id']}",
             json={"name": "Renamed"},
         )
+        pin_response = client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"pinned": True},
+        )
         delete_response = client.delete(f"/api/conversations/{conversation['id']}")
         list_response = client.get("/api/conversations")
         missing_response = client.delete("/api/conversations/999")
 
     assert rename_response.status_code == 200
     assert rename_response.json()["name"] == "Renamed"
+    assert pin_response.status_code == 200
+    assert pin_response.json()["pinned_at"] is not None
     assert delete_response.status_code == 200
     assert delete_response.json()["success"] is True
     assert list_response.json() == []
     assert missing_response.status_code == 404
+
+
+def test_api_can_delete_agent(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        agent, conversation = _seed_conversation(client)
+        delete_response = client.delete(f"/api/agents/{agent['id']}")
+        agents_response = client.get("/api/agents")
+        conversations_response = client.get("/api/conversations")
+        missing_response = client.delete("/api/agents/999")
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["success"] is True
+    assert agents_response.json() == []
+    assert conversations_response.json() == []
+    assert missing_response.status_code == 404
+    assert conversation["id"]  # seeded conversation removed with agent
 
 
 def test_api_can_rename_agent(tmp_path: Path) -> None:
@@ -145,7 +169,69 @@ def test_api_can_rename_agent(tmp_path: Path) -> None:
 
     assert rename_response.status_code == 200
     assert rename_response.json()["name"] == "Work agent"
+    assert rename_response.json()["token_configured"] is True
     assert list_response.json()[0]["name"] == "Work agent"
+
+
+def test_api_create_agent_with_access_token(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        agent_response = client.post(
+            "/api/agents",
+            json={
+                "name": "work",
+                "trigger_url": "https://api.chatgpt.com/v1/workspace_agents/agtch_work/trigger",
+                "access_token": "at-ui-token",
+            },
+        )
+        conversation = client.post(
+            "/api/conversations",
+            json={"agent_id": agent_response.json()["id"], "name": "t", "conversation_key": "k:work"},
+        ).json()
+        run_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "hello"},
+        )
+
+    assert agent_response.status_code == 200
+    agent = agent_response.json()
+    assert agent["token_ref"] == f"local:{agent['id']}"
+    assert agent["token_configured"] is True
+    assert run_response.status_code == 200
+    assert trigger_client.calls[0]["access_token"] == "at-ui-token"
+
+
+def test_api_update_agent_access_token(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        agent = client.post(
+            "/api/agents",
+            json={
+                "name": "work",
+                "trigger_url": "https://api.chatgpt.com/v1/workspace_agents/agtch_work/trigger",
+                "token_ref": "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+            },
+        ).json()
+        assert agent["token_configured"] is True
+        patch_response = client.patch(
+            f"/api/agents/{agent['id']}",
+            json={"access_token": "at-patched"},
+        )
+        conversation = client.post(
+            "/api/conversations",
+            json={"agent_id": agent["id"], "name": "t", "conversation_key": "k:patch"},
+        ).json()
+        run_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "hello"},
+        )
+
+    assert patch_response.status_code == 200
+    assert patch_response.json()["token_ref"] == f"local:{agent['id']}"
+    assert run_response.status_code == 200
+    assert trigger_client.calls[0]["access_token"] == "at-patched"
 
 
 def test_api_uses_default_trigger_url_when_payload_leaves_it_blank(tmp_path: Path) -> None:

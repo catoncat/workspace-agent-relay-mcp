@@ -56,13 +56,13 @@ LOCAL_STATE_TOOL = {
 }
 
 MCP_INSTRUCTIONS = (
-    "This server is the local operator's only window into your current turn. "
-    "The operator CANNOT see your ChatGPT-side plan, tool calls, reasoning, or partial answers — only what you write back here. "
-    "Treat these tools as how you keep the human in the loop, not as optional logging.\n"
-    "Workflow: call record_plan at the start with your step plan; call record_plan again or record_progress(step_updates with skipped) when your direction changes — a plan change is NOT a finished turn; "
-    "call record_progress with step_updates in batches after each chunk of work; call ask_user when you need a human decision (the turn pauses, it does not end); "
-    "call record_result exactly once when this turn is truly over: status=done when delivered, status=failed on an execution error, status=blocked ONLY for an external hard blocker (missing access/resource/dependency) — never use blocked to mean 'the plan changed'.\n"
-    "Every call returns the current plan snapshot so you stay oriented. Do not expect shell, filesystem, or git tools here."
+    "This server (workspace-agent-relay-mcp) is the local operator's only window into the current turn. "
+    "They cannot see ChatGPT-side planning, reasoning, or chat replies — only what you write here "
+    "(and local tool traces after bind_relay_run on your local-ops MCP).\n"
+    "Relay workflow: record_plan first → bind_relay_run on your local execution MCP → batch record_progress(step_updates) → "
+    "record_result once when the turn truly ends (done/failed/blocked). Plan changes use record_plan or skipped steps, not record_result. "
+    "ask_user pauses the turn; it is not completion. blocked is for external hard blockers only.\n"
+    "Every call returns the current plan snapshot. No shell/filesystem/git on this server — use your local-ops MCP for execution."
 )
 
 mcp = FastMCP(APP_NAME, instructions=MCP_INSTRUCTIONS)

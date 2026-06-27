@@ -33,6 +33,30 @@ def test_store_rename_agent(tmp_path: Path) -> None:
     assert store.list_agents()[0]["name"] == "Work"
 
 
+def test_store_create_agent_stores_local_access_token(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.create_agent(
+        name="work",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_work/trigger",
+        access_token="at-secret",
+    )
+    assert agent["token_ref"] == f"local:{agent['id']}"
+    assert store.get_agent_access_token(int(agent["id"])) == "at-secret"
+
+
+def test_store_set_agent_access_token_migrates_to_local_ref(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="legacy",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+    )
+    store.set_agent_access_token(int(agent["id"]), access_token="at-new")
+    updated = store.get_agent(int(agent["id"]))
+    assert updated["token_ref"] == f"local:{agent['id']}"
+    assert store.get_agent_access_token(int(agent["id"])) == "at-new"
+
+
 def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
@@ -68,6 +92,37 @@ def test_delete_conversation_archives_it_from_lists(tmp_path: Path) -> None:
     assert store.list_conversations() == []
     with pytest.raises(KeyError):
         store.delete_conversation(conversation["id"])
+
+
+def test_pin_conversation_sorts_pinned_first(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
+    older = store.create_conversation(agent_id=agent["id"], name="Older", conversation_key="older")
+    newer = store.create_conversation(agent_id=agent["id"], name="Newer", conversation_key="newer")
+
+    store.set_conversation_pinned(older["id"], pinned=True)
+
+    listed = store.list_conversations()
+    assert [item["id"] for item in listed] == [older["id"], newer["id"]]
+    assert listed[0]["pinned_at"] is not None
+
+    store.set_conversation_pinned(older["id"], pinned=False)
+    assert store.get_conversation(older["id"])["pinned_at"] is None
+
+
+def test_delete_agent_cascades_conversations(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.create_agent(
+        name="work",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_work/trigger",
+        access_token="at-token",
+    )
+    store.create_conversation(agent_id=agent["id"], name="Thread", conversation_key="work:thread")
+
+    store.delete_agent(agent["id"])
+
+    assert store.list_agents() == []
+    assert store.list_conversations() == []
 
 
 def test_create_run_redacts_callback_token_echo_from_input_markdown(tmp_path: Path) -> None:
