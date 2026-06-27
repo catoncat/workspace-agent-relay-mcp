@@ -1,4 +1,4 @@
-import type { Agent, Conversation, Run, RunDetail, RunEventPayload } from './types'
+import type { Agent, Conversation, Run, RunDetail, RunEventPayload, TokenRef } from './types'
 
 // This dashboard is a local/admin surface. localStorage keeps setup simple, but it is not
 // XSS-hardened like an httpOnly cookie, so the API token should stay scoped to this relay.
@@ -67,6 +67,20 @@ export async function ensureDefaultAgent(): Promise<Agent[]> {
     agents = await listAgents()
   }
   return agents
+}
+
+// Token_refs the relay can resolve (from its config snapshot). Used to populate
+// the "create agent" form's token_ref dropdown. Only refs are returned.
+export async function listTokenRefs(): Promise<TokenRef[]> {
+  return api('/api/agents/token-refs')
+}
+
+export async function createAgent(body: {
+  name: string
+  trigger_url: string
+  token_ref: string
+}): Promise<Agent> {
+  return api('/api/agents', { method: 'POST', body: JSON.stringify(body) })
 }
 
 export async function listConversations(): Promise<Conversation[]> {

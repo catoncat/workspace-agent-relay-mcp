@@ -59,7 +59,7 @@ export function ThreadHeader({
   }, [conversationKey])
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
       <SidebarTrigger />
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={title}>
         {title}

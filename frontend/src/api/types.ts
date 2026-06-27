@@ -6,6 +6,15 @@ export type Agent = {
   token_ref: string
 }
 
+// A token_ref the relay knows how to resolve (from its config snapshot). The
+// "create agent" form lists these in a dropdown so the user never types a raw
+// env var name. Only the ref/env var name is exposed — never the token value.
+export type TokenRef = {
+  token_ref: string
+  env_var: string
+  is_default: boolean
+}
+
 export type Conversation = {
   id: number
   agent_id: number

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 
@@ -8,6 +8,14 @@ from pathlib import Path
 APP_NAME = "workspace-agent-relay-mcp"
 DEFAULT_SCOPE = "workspace-agent-relay"
 _DOTENV_LOADED = False
+
+# Env var namespace for ChatGPT Workspace Agent access tokens. The default
+# token lives in WORKSPACE_AGENT_RELAY_AGENT_TOKEN; additional agents use
+# WORKSPACE_AGENT_RELAY_AGENT_TOKEN_<suffix>. load_config() snapshots every
+# non-empty var in this namespace into RelayConfig.agent_tokens so that
+# per-agent token resolution is config-driven and insulated from runtime
+# os.environ mutation (and from test dotenv side effects).
+AGENT_TOKEN_ENV_PREFIX = "WORKSPACE_AGENT_RELAY_AGENT_TOKEN"
 
 
 def _parse_dotenv_line(line: str) -> tuple[str, str] | None:
@@ -89,6 +97,11 @@ class RelayConfig:
     default_agent_name: str = "default"
     default_trigger_url: str = ""
     default_agent_token: str = ""
+    # env var name -> token value, populated by load_config() from every
+    # non-empty WORKSPACE_AGENT_RELAY_AGENT_TOKEN* env var. agent_token() and
+    # list_configured_token_refs() read from this snapshot instead of live
+    # os.environ, so token resolution is deterministic and test-isolated.
+    agent_tokens: dict[str, str] = field(default_factory=dict)
 
     @property
     def database_path(self) -> Path:
@@ -116,6 +129,14 @@ def load_config() -> RelayConfig:
         for scope in os.environ.get("WORKSPACE_AGENT_RELAY_OAUTH_SCOPES", DEFAULT_SCOPE).split()
         if scope
     )
+    agent_tokens: dict[str, str] = {}
+    for key in os.environ:
+        if key != AGENT_TOKEN_ENV_PREFIX and not key.startswith(AGENT_TOKEN_ENV_PREFIX + "_"):
+            continue
+        value = os.environ.get(key, "").strip()
+        if value:
+            agent_tokens[key] = value
+    default_agent_token = os.environ.get("WORKSPACE_AGENT_RELAY_AGENT_TOKEN", "").strip()
     return RelayConfig(
         host=os.environ.get("WORKSPACE_AGENT_RELAY_HOST", "127.0.0.1").strip() or "127.0.0.1",
         port=int(os.environ.get("WORKSPACE_AGENT_RELAY_PORT", "8799")),
@@ -134,5 +155,6 @@ def load_config() -> RelayConfig:
         debug_mcp_logging=_env_flag("WORKSPACE_AGENT_RELAY_DEBUG_MCP_LOGGING", default=False),
         default_agent_name=os.environ.get("WORKSPACE_AGENT_RELAY_AGENT_NAME", "default").strip() or "default",
         default_trigger_url=os.environ.get("WORKSPACE_AGENT_RELAY_TRIGGER_URL", "").strip(),
-        default_agent_token=os.environ.get("WORKSPACE_AGENT_RELAY_AGENT_TOKEN", "").strip(),
+        default_agent_token=default_agent_token,
+        agent_tokens=agent_tokens,
     )

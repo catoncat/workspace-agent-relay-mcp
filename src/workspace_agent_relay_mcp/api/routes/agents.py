@@ -10,8 +10,7 @@ from ..deps import json_body
 from ..errors import json_error
 from ..validation import (
     SUPPORTED_AGENT_TOKEN_REF,
-    agent_token,
-    missing_fields,
+    list_configured_token_refs,
     validate_agent_token_ref,
     validate_trigger_url,
 )
@@ -20,6 +19,12 @@ from ..validation import (
 def agent_routes(store: Any, config: Any) -> list[tuple]:
     async def list_agents(_: Request) -> JSONResponse:
         return JSONResponse(store.list_agents())
+
+    async def list_token_refs(_: Request) -> JSONResponse:
+        # Returns token_refs that have a non-empty value in the config snapshot,
+        # for the "create agent" form's token_ref dropdown. Only refs (env var
+        # names) are returned — never the token values themselves.
+        return JSONResponse(list_configured_token_refs(config))
 
     async def create_agent(request: Request) -> JSONResponse:
         try:
@@ -44,5 +49,6 @@ def agent_routes(store: Any, config: Any) -> list[tuple]:
 
     return [
         ("/api/agents", list_agents, ["GET"]),
+        ("/api/agents/token-refs", list_token_refs, ["GET"]),
         ("/api/agents", create_agent, ["POST"]),
     ]

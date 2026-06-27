@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
+  createAgent,
   createConversation,
   createRun,
   deleteConversation,
@@ -9,6 +10,7 @@ import {
   ensureDefaultConversation,
   getRunDetail,
   listRuns,
+  listTokenRefs,
   renameConversation,
   streamRun,
 } from '@/api/client'
@@ -21,8 +23,15 @@ export type BootstrapData = {
 }
 
 export type CreateConversationInput = {
+  agentId: number
   name: string
   key: string
+}
+
+export type CreateAgentInput = {
+  name: string
+  trigger_url: string
+  token_ref: string
 }
 
 const EMPTY_RUNS: Run[] = []
@@ -137,14 +146,36 @@ export function useCreateRun(conversationId: number | null) {
   })
 }
 
-export function useCreateConversation(agents: Agent[]) {
+export function useTokenRefs() {
+  return useQuery({
+    queryKey: relayQueryKeys.tokenRefs,
+    queryFn: () => listTokenRefs(),
+    staleTime: 60 * 1000,
+  })
+}
+
+export function useCreateAgent() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ name, key }: CreateConversationInput) => {
-      const agent = agents[0]
-      if (!agent) throw new Error('No agents available.')
-      return createConversation({ agent_id: agent.id, name, conversation_key: key })
+    mutationFn: (input: CreateAgentInput) => createAgent(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.tokenRefs })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useCreateConversation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ agentId, name, key }: CreateConversationInput) => {
+      if (!agentId) throw new Error('Select an agent before creating a conversation.')
+      return createConversation({ agent_id: agentId, name, conversation_key: key })
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })

@@ -46,6 +46,7 @@ def _client(
     *,
     auth_token: str = "",
     trigger_client: Any | None = None,
+    agent_tokens: dict[str, str] | None = None,
 ) -> tuple[TestClient, Any]:
     from workspace_agent_relay_mcp import server
 
@@ -54,6 +55,7 @@ def _client(
         auth_token=auth_token,
         default_agent_token="agent-token",
         default_trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        agent_tokens=agent_tokens or {},
     )
     server.store = RelayStore(server.config.database_path)
     app = server.build_http_app()

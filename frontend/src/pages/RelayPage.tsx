@@ -28,6 +28,19 @@ const EMPTY_AGENTS: Agent[] = []
 const EMPTY_CONVERSATIONS: Conversation[] = []
 const EMPTY_RUNS: Run[] = []
 
+const SELECTED_AGENT_KEY = 'relaySelectedAgentId'
+
+function loadSelectedAgentId(): number | null {
+  const raw = localStorage.getItem(SELECTED_AGENT_KEY)
+  if (!raw) return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function saveSelectedAgentId(id: number): void {
+  localStorage.setItem(SELECTED_AGENT_KEY, String(id))
+}
+
 export function RelayPage() {
   const params = useParams<{ conversationId?: string; runId?: string }>()
   const navigate = useNavigate()
@@ -39,10 +52,34 @@ export function RelayPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [debugOpen, setDebugOpen] = useState(false)
   const [newConversationOpen, setNewConversationOpen] = useState(false)
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(loadSelectedAgentId)
 
   const bootstrapQuery = useBootstrap()
   const agents = bootstrapQuery.data?.agents ?? EMPTY_AGENTS
   const conversations = bootstrapQuery.data?.conversations ?? EMPTY_CONVERSATIONS
+
+  // Keep selectedAgentId valid: once agents load, fall back to the first one if
+  // the stored selection no longer exists (or was never set).
+  useEffect(() => {
+    if (agents.length === 0) return
+    if (agents.some((agent) => agent.id === selectedAgentId)) return
+    const next = agents[0].id
+    setSelectedAgentId(next)
+    saveSelectedAgentId(next)
+  }, [agents, selectedAgentId])
+
+  const handleSelectAgent = useCallback((id: number) => {
+    setSelectedAgentId(id)
+    saveSelectedAgentId(id)
+  }, [])
+
+  const filteredConversations = useMemo(
+    () =>
+      selectedAgentId
+        ? conversations.filter((conversation) => conversation.agent_id === selectedAgentId)
+        : conversations,
+    [conversations, selectedAgentId],
+  )
 
   const runsQuery = useRuns(selectedConversationId)
   const runs = runsQuery.data ?? EMPTY_RUNS
@@ -57,13 +94,13 @@ export function RelayPage() {
   )
 
   const createRunMutation = useCreateRun(selectedConversationId)
-  const createConversationMutation = useCreateConversation(agents)
+  const createConversationMutation = useCreateConversation()
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
 
   const selectedConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
-    [conversations, selectedConversationId],
+    () => filteredConversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
+    [filteredConversations, selectedConversationId],
   )
   const selectedDetail = useMemo(
     () => runDetails.find((detail) => detail.run.id === selectedRunId) ?? null,
@@ -76,11 +113,14 @@ export function RelayPage() {
   )
 
   useEffect(() => {
-    const firstConversation = conversations[0]
-    if (!selectedConversationId && firstConversation) {
-      navigate(`/c/${firstConversation.id}`, { replace: true })
+    if (filteredConversations.length === 0) return
+    const stillSelected = filteredConversations.some(
+      (conversation) => conversation.id === selectedConversationId,
+    )
+    if (!selectedConversationId || !stillSelected) {
+      navigate(`/c/${filteredConversations[0].id}`, { replace: true })
     }
-  }, [conversations, navigate, selectedConversationId])
+  }, [filteredConversations, navigate, selectedConversationId])
 
   useEffect(() => {
     if (!selectedConversationId || selectedRunId || runDetails.length === 0) return
@@ -100,14 +140,18 @@ export function RelayPage() {
 
   const handleCreateConversation = useCallback(
     (values: NewConversationValues) => {
-      createConversationMutation.mutate(values, {
-        onSuccess: (conversation) => {
-          setNewConversationOpen(false)
-          navigate(`/c/${conversation.id}`)
+      if (!selectedAgentId) return
+      createConversationMutation.mutate(
+        { agentId: selectedAgentId, name: values.name, key: values.key },
+        {
+          onSuccess: (conversation) => {
+            setNewConversationOpen(false)
+            navigate(`/c/${conversation.id}`)
+          },
         },
-      })
+      )
     },
-    [createConversationMutation, navigate],
+    [createConversationMutation, navigate, selectedAgentId],
   )
 
   const handleDeleteConversation = useCallback(
@@ -123,7 +167,10 @@ export function RelayPage() {
   return (
     <SidebarProvider>
       <RelaySidebar
-        conversations={conversations}
+        agents={agents}
+        selectedAgentId={selectedAgentId}
+        onSelectAgent={handleSelectAgent}
+        conversations={filteredConversations}
         selectedId={selectedConversationId}
         onSelect={(id) => navigate(`/c/${id}`)}
         onNew={() => setNewConversationOpen(true)}

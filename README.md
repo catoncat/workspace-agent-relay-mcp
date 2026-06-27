@@ -145,6 +145,40 @@ If you want the **Tool calls** panel to stream the agent's real file/git/shell a
 2. Send a short task from the dashboard (e.g. "create /tmp/hello.txt with one line, then read it back").
 3. Watch the plan checklist appear, tool traces stream in, then the final result.
 
+## Multiple agents (multiple ChatGPT accounts)
+
+A single relay can drive Workspace Agents from **different ChatGPT accounts** at the same time. Each agent binds its own access token through a `token_ref` that names an env var in the relay's namespace.
+
+### `token_ref` protocol
+
+An agent record stores a **reference** to a token, never the token itself. The format is:
+
+```
+env:<VAR_NAME>
+```
+
+`<VAR_NAME>` must be `WORKSPACE_AGENT_RELAY_AGENT_TOKEN` (the default) or start with `WORKSPACE_AGENT_RELAY_AGENT_TOKEN_` — e.g. `env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN_2`. Anything outside this namespace (like `env:HOME`) is rejected, so a `token_ref` can never coerce the relay into reading an unrelated secret. Token **values** never leave the server: the dashboard only ever sees the env var name, and `GET /api/agents/token-refs` lists the configured refs (not values).
+
+Tokens are snapshotted from the environment once at startup into `RelayConfig.agent_tokens`, so adding/rotating a token means editing `.env` and restarting the relay.
+
+### Setup
+
+1. Put each extra account's Workspace Agent access token in `.env` under a namespaced var:
+
+   ```bash
+   WORKSPACE_AGENT_RELAY_AGENT_TOKEN=account-one-access-token
+   WORKSPACE_AGENT_RELAY_AGENT_TOKEN_2=account-two-access-token
+   # WORKSPACE_AGENT_RELAY_AGENT_TOKEN_THIRD=account-three-access-token
+   ```
+
+2. Restart the relay.
+
+3. In the dashboard, open **Settings → Register another agent**. Enter a display name, paste that agent's **Trigger URL** (`https://api.chatgpt.com/v1/workspace_agents/agtch_<id>/trigger`), and pick the matching env var from the **Token** dropdown. The dropdown only lists vars that actually have a value on the server.
+
+4. Switch agents with the **Agent** dropdown in the sidebar. The conversation list filters to that agent; new conversations and runs go to the selected agent.
+
+Each agent then needs its own ChatGPT-side MCP connector + Instructions pointing at the same relay (the `bind_relay_run` / callback protocol is identical). Runs triggered for agent A use account one's token; runs for agent B use account two's — the relay picks the token from the agent record's `token_ref` at trigger time.
+
 ## Pairing with notion-local-ops-mcp
 
 This relay only exposes **reporting** tools (plan/progress/result) — it deliberately has no shell, file, or git access. To let the agent actually *do* work and have those actions show up live in the dashboard, pair it with its sibling project:

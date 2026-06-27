@@ -1,12 +1,13 @@
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { ClipboardCopy, Hash, MessageSquarePlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { ClipboardCopy, MessageSquarePlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Conversation } from '@/api/types'
+import type { Agent, Conversation } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -33,6 +34,9 @@ import {
 } from '@/components/ui/sidebar'
 
 type Props = {
+  agents: Agent[]
+  selectedAgentId: number | null
+  onSelectAgent: (id: number) => void
   conversations: Conversation[]
   selectedId: number | null
   onSelect: (id: number) => void
@@ -44,6 +48,9 @@ type Props = {
 }
 
 export function RelaySidebar({
+  agents,
+  selectedAgentId,
+  onSelectAgent,
   conversations,
   selectedId,
   onSelect,
@@ -55,7 +62,7 @@ export function RelaySidebar({
 }: Props) {
   return (
     <Sidebar collapsible="offcanvas">
-      <SidebarHeader className="border-b border-sidebar-border">
+      <SidebarHeader className="border-b border-sidebar-border p-0">
         <div className="flex h-12 items-center gap-2 px-3">
           <div className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold leading-none text-primary-foreground">
             AR
@@ -75,6 +82,23 @@ export function RelaySidebar({
       </SidebarHeader>
 
       <SidebarContent>
+        {agents.length > 0 && (
+          <div className="px-3 pb-2 pt-3">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Agent</label>
+            <select
+              value={selectedAgentId ?? ''}
+              onChange={(event) => onSelectAgent(Number(event.target.value))}
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/50"
+              aria-label="Select workspace agent"
+            >
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <SidebarGroup>
           <SidebarGroupLabel>Conversations</SidebarGroupLabel>
           <SidebarGroupAction title="New conversation" onClick={onNew}>
@@ -197,9 +221,6 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
       if (modifier && key === 'c') {
         event.preventDefault()
         void handleCopy(item.conversation_key, 'Continuation key')
-      } else if (modifier && key === 'i') {
-        event.preventDefault()
-        void handleCopy(String(item.id), 'Conversation ID')
       } else if (event.key === 'F2' && onRename) {
         event.preventDefault()
         setIsRenaming(true)
@@ -208,7 +229,7 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
         setDeleteOpen(true)
       }
     },
-    [handleCopy, item.conversation_key, item.id, onDelete, onRename],
+    [handleCopy, item.conversation_key, onDelete, onRename],
   )
 
   return (
@@ -238,32 +259,26 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
               </div>
             ) : (
               <SidebarMenuButton
-                size="lg"
                 isActive={isActive}
                 onClick={() => onSelect(item.id)}
                 onKeyDown={handleRowKeyDown}
                 tooltip={item.name}
-                aria-keyshortcuts="Control+C Meta+C Control+I Meta+I F2 Delete Backspace"
+                aria-keyshortcuts="Control+C Meta+C F2 Delete Backspace"
               >
-                <span className="min-w-0 flex flex-col gap-0.5">
-                  <span className="truncate font-medium">{item.name}</span>
-                  <span className="truncate text-[11px] font-normal text-sidebar-foreground/60">
-                    #{item.id}
-                  </span>
-                </span>
+                <span className="truncate font-medium">{item.name}</span>
               </SidebarMenuButton>
             )}
           </ContextMenuTrigger>
           <ContextMenuContent className="w-60">
+            <ContextMenuLabel className="flex items-baseline justify-between gap-3 px-2 py-1.5">
+              <span className="min-w-0 truncate font-medium text-foreground">{item.name}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground/70">#{item.id}</span>
+            </ContextMenuLabel>
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => void handleCopy(item.conversation_key, 'Continuation key')}>
               <ClipboardCopy />
               <span>Copy key</span>
               <MenuShortcut>Ctrl/Cmd+C</MenuShortcut>
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => void handleCopy(String(item.id), 'Conversation ID')}>
-              <Hash />
-              <span>Copy ID</span>
-              <MenuShortcut>Ctrl/Cmd+I</MenuShortcut>
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem disabled={!onRename} onClick={() => setIsRenaming(true)}>

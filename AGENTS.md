@@ -67,6 +67,7 @@ cd frontend && npm run build             # 前端，TS 与构建均须零错误
 - **plan**：`record_plan` 写入 `plans` 表（`steps_json`）。每个 step 包含稳定 `id`、`title`、`status`。`record_progress` 的 `step_updates` 通过相同 `id` 更新状态。
 - **progress event**：`event_type="progress"`；payload 中 `trace: true` 表示由 notion-local-ops 自动镜像的工具调用，否则为 agent 主动写入的 narration。前端 `ThreadView` 依此标志分流渲染。
 - **trace payload**：`{trace, tool, title, args_summary, result_summary, started_at, duration_ms, ok, error}`。`/internal/tool-trace` 使用 body 中的 `callback_token` 鉴权（非 dashboard bearer），对已关闭的 run 返回 409。
+- **agent token_ref**：agent 记录只存 `env:<VAR_NAME>` 形式的引用，不存 token 值。`VAR_NAME` 必须为 `WORKSPACE_AGENT_RELAY_AGENT_TOKEN` 或以 `WORKSPACE_AGENT_RELAY_AGENT_TOKEN_` 开头（白名单，见 `api/validation.py`），越权值（如 `env:HOME`）一律拒绝。`agent_token(config, token_ref)` 在 trigger 时按 ref 解析 token；token 值仅在启动时从环境快照进 `RelayConfig.agent_tokens`，不入库、不回前端。`GET /api/agents/token-refs` 只返回已配置的 ref（env var 名），不含 token 值，供前端「创建 agent」表单下拉。新增/轮换 token 须改 `.env` 并重启 relay。
 
 ## 6. 文档沉淀
 
