@@ -18,7 +18,6 @@ type Props = {
 }
 
 export function ThreadComposer({
-  conversationKey,
   disabled = false,
   dismissing = false,
   mode = 'idle',
@@ -31,6 +30,11 @@ export function ThreadComposer({
   const hasText = Boolean(text.trim())
   const isMultiline = text.includes('\n')
   const showWorkingButton = isSending || dismissing || (isAgentWorking && !hasText)
+  const statusText = isSending
+    ? 'Triggering agent…'
+    : dismissing
+      ? 'Marking turn as finished…'
+      : null
 
   const placeholder =
     mode === 'sending'
@@ -135,35 +139,7 @@ export function ThreadComposer({
             actionButton
           )}
         </div>
-        <div className="mt-1.5 px-1 text-xs text-muted-foreground">
-          {isSending ? (
-            <span>Triggering agent…</span>
-          ) : dismissing ? (
-            <span>Marking turn as finished…</span>
-          ) : isAgentWorking && !hasText ? (
-            <span>
-              Agent is working — type to add guidance to the current work, or click the square when
-              you know it finished
-            </span>
-          ) : (
-            <>
-              <kbd className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px]">
-                Enter
-              </kbd>
-              <span className="ml-1.5">to send</span>
-              <span className="mx-1.5 text-muted-foreground/50">·</span>
-              <kbd className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px]">
-                Shift+Enter
-              </kbd>
-              <span className="ml-1.5">for new line</span>
-              {conversationKey ? (
-                <span className="ml-2 text-muted-foreground/80">Thread linked</span>
-              ) : (
-                <span className="ml-2 text-muted-foreground/80">No thread selected</span>
-              )}
-            </>
-          )}
-        </div>
+        {statusText ? <div className="mt-1.5 px-1 text-xs text-muted-foreground">{statusText}</div> : null}
       </div>
     </footer>
   )
