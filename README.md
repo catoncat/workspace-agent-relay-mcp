@@ -2,7 +2,7 @@
 
 A local relay + dashboard that lets a ChatGPT **Workspace Agent** report its plan, progress, tool calls, questions, and final result back to your machine — in real time, while it works.
 
-![Relay dashboard mirroring a ChatGPT Workspace Agent run](./assets/dashboard-mirror.png)
+![Relay dashboard mirroring a ChatGPT Workspace Agent run](https://github.com/user-attachments/assets/cea599fe-9c2f-499e-86d5-c43ea170cc7d)
 
 The left side is the relay dashboard: the user's message, the agent's **plan checklist** (all steps done), the **tool calls** it ran locally (`write_file`, `run_command` with durations), and the final result. The right side is the ChatGPT Workspace Agent itself — which the local operator otherwise cannot see. The relay mirrors the agent's work into a live, readable view.
 
