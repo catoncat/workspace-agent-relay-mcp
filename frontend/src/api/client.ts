@@ -4,8 +4,15 @@ import type { Agent, Conversation, Run, RunDetail, RunEventPayload, TokenRef } f
 // XSS-hardened like an httpOnly cookie, so the API token should stay scoped to this relay.
 const TOKEN_KEY = 'relayAuthToken'
 
+function devAuthTokenFromEnv(): string {
+  if (!import.meta.env.DEV) return ''
+  return import.meta.env.VITE_RELAY_AUTH_TOKEN?.trim() ?? ''
+}
+
 export function getAuthToken(): string {
-  return localStorage.getItem(TOKEN_KEY) || ''
+  const stored = localStorage.getItem(TOKEN_KEY)?.trim()
+  if (stored) return stored
+  return devAuthTokenFromEnv()
 }
 
 export function setAuthToken(token: string): void {
@@ -21,8 +28,8 @@ function headers(): HeadersInit {
 
 function formatApiError(text: string): string {
   try {
-    const body = JSON.parse(text) as { error?: string }
-    const message = body.error?.trim()
+    const body = JSON.parse(text) as { error?: string; detail?: string }
+    const message = body.error?.trim() || body.detail?.trim()
     if (!message) return text || 'Request failed'
     if (message.includes('access token') || message.includes('WORKSPACE_AGENT_RELAY_AGENT_TOKEN')) {
       return (
@@ -143,6 +150,15 @@ export async function listRuns(conversationId: number): Promise<Run[]> {
 
 export async function getRunDetail(runId: number): Promise<RunDetail> {
   return normalizeRunDetail(await api(`/api/runs/${runId}`))
+}
+
+export async function dismissRun(runId: number, note?: string): Promise<RunDetail> {
+  return normalizeRunDetail(
+    await api(`/api/runs/${runId}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify(note ? { note } : {}),
+    }),
+  )
 }
 
 export type CreateRunResponse = {

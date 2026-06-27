@@ -37,6 +37,32 @@ Open `http://127.0.0.1:8799/`, enter the relay **access password** (`WORKSPACE_A
 
 Tunnel (optional): `./scripts/dev-tunnel.sh`
 
+## Local development (recommended)
+
+For day-to-day UI work you do **not** need `pnpm run build`. The Python server serves a static `frontend/dist` bundle on `:8799` — that path is production-like and requires a rebuild after every change.
+
+Instead, run the backend and the Vite dev server separately:
+
+```bash
+# Terminal 1 — API + MCP + SSE (launchd/dev-tunnel is fine too)
+.venv/bin/python -m workspace_agent_relay_mcp.server
+
+# Terminal 2 — dashboard with HMR
+./scripts/dev-dashboard.sh
+```
+
+Open **`http://127.0.0.1:5173`** for the dashboard. ChatGPT MCP stays on **`http://127.0.0.1:8799/mcp`** (or your tunnel URL).
+
+`dev-dashboard.sh` checks that the relay is healthy, then starts Vite. It reads `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` from the repo `.env` and seeds the browser token automatically — no need to paste it again on `:5173`.
+
+| URL | Purpose |
+| --- | --- |
+| `http://127.0.0.1:5173` | Dashboard while editing frontend (HMR) |
+| `http://127.0.0.1:8799` | API, MCP, SSE; static dashboard if `frontend/dist` exists |
+| tunnel `/mcp` | ChatGPT Workspace Agent connector |
+
+Run `cd frontend && pnpm run build` only before CI or when you want the single-port `:8799` dashboard without Vite.
+
 ## ChatGPT Workspace Agent setup (required)
 
 Without these four steps the dashboard stays empty.
@@ -117,6 +143,7 @@ src/workspace_agent_relay_mcp/   server, MCP tools, API, SQLite store, trigger c
 frontend/                        React dashboard
 docs/agent-instructions.md       paste block for ChatGPT Instructions
 scripts/dev-tunnel.sh            cloudflared supervisor
+scripts/dev-dashboard.sh         Vite HMR dashboard (proxies /api → relay)
 tests/
 ```
 

@@ -4,7 +4,7 @@ import { getAuthToken, setAuthToken } from '@/api/client'
 import { AuthContext } from '@/providers/AuthContext'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState(getAuthToken)
+  const [token, setToken] = useState(() => getAuthToken())
 
   useEffect(() => {
     setAuthToken(token)

@@ -36,12 +36,18 @@
 # 带 cloudflared tunnel + supervisor（支持 rolling-reload）：
 ./scripts/dev-tunnel.sh        # 子命令：start | reload | status
 
-# 前端 dashboard 开发模式：
-cd frontend && npm run dev
+# 前端 dashboard 开发模式（推荐日常改 UI 时使用）：
+./scripts/dev-dashboard.sh     # 检查后端健康 → Vite :5173，/api 代理到 :8799
+# 从仓根 .env 自动注入 WORKSPACE_AGENT_RELAY_AUTH_TOKEN，无需在 :5173 再粘贴
 
-# 前端构建（输出至 frontend/dist，由后端托管）：
-cd frontend && npm run build   # 等价于 tsc -b && vite build
+# 等价手动启动：
+cd frontend && pnpm dev
+
+# 前端构建（输出至 frontend/dist，由后端 :8799 托管；仅 CI 或需要单端口 dashboard 时）：
+cd frontend && pnpm run build   # 等价于 tsc -b && vite build
 ```
+
+日常开发：**后端 :8799 常驻 + `./scripts/dev-dashboard.sh` 打开 :5173**。不必每次改 UI 都 build。
 
 本机两个服务通常由 launchd 托管：
 - `com.workspace-agent-relay.dev-tunnel`
