@@ -6,15 +6,17 @@ import {
   createConversation,
   createRun,
   deleteConversation,
-  ensureDefaultAgent,
-  ensureDefaultConversation,
   getRunDetail,
-  listRuns,
-  listTokenRefs,
   renameConversation,
   streamRun,
 } from '@/api/client'
 import type { Agent, Conversation, Run, RunDetail } from '@/api/types'
+import {
+  bootstrapOptions,
+  runDetailOptions,
+  runsOptions,
+  tokenRefsOptions,
+} from '@/lib/queryClient'
 import { relayQueryKeys } from '@/features/relay/queryKeys'
 
 export type BootstrapData = {
@@ -34,39 +36,23 @@ export type CreateAgentInput = {
   token_ref: string
 }
 
-const EMPTY_RUNS: Run[] = []
-
 export function useBootstrap() {
-  return useQuery({
-    queryKey: relayQueryKeys.bootstrap,
-    queryFn: async (): Promise<BootstrapData> => {
-      const agents = await ensureDefaultAgent()
-      const firstAgent = agents[0]
-      const conversations = firstAgent ? await ensureDefaultConversation(firstAgent.id) : []
-      return { agents, conversations }
-    },
-    staleTime: 5 * 60 * 1000,
-    retry: 1,
-  })
+  // Not useSuspenseQuery: a missing/invalid dashboard token yields 401 on first
+  // run, and we want the shell to render so the user can open Settings and enter
+  // a token. Suspense would throw into the route error boundary instead.
+  return useQuery(bootstrapOptions)
 }
 
 export function useRuns(conversationId: number | null) {
   return useQuery({
-    queryKey: relayQueryKeys.runs(conversationId ?? 0),
-    queryFn: () => listRuns(conversationId!),
+    ...runsOptions(conversationId ?? 0),
     enabled: conversationId !== null,
-    placeholderData: (previous) => previous ?? EMPTY_RUNS,
-    refetchInterval: 30_000,
   })
 }
 
 export function useRunDetails(runs: Run[]) {
   const detailQueries = useQueries({
-    queries: runs.map((run) => ({
-      queryKey: relayQueryKeys.runDetail(run.id),
-      queryFn: () => getRunDetail(run.id),
-      staleTime: 30_000,
-    })),
+    queries: runs.map((run) => runDetailOptions(run.id)),
   })
 
   const details = useMemo(
@@ -147,11 +133,7 @@ export function useCreateRun(conversationId: number | null) {
 }
 
 export function useTokenRefs() {
-  return useQuery({
-    queryKey: relayQueryKeys.tokenRefs,
-    queryFn: () => listTokenRefs(),
-    staleTime: 60 * 1000,
-  })
+  return useQuery(tokenRefsOptions)
 }
 
 export function useCreateAgent() {
@@ -221,4 +203,19 @@ function emptyRunDetail(run: Run | undefined): RunDetail {
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err))
+}
+
+type SendShortcut = {
+  label: string
+  matches: (event: { key: string; metaKey: boolean; ctrlKey: boolean }) => boolean
+}
+
+export function useSendShortcut(): SendShortcut {
+  const isMac =
+    typeof navigator !== 'undefined' &&
+    /mac|iphone|ipad/i.test(navigator.platform)
+  const label = isMac ? 'Cmd+Enter' : 'Ctrl+Enter'
+  const matches = (event: { key: string; metaKey: boolean; ctrlKey: boolean }) =>
+    event.key === 'Enter' && (event.metaKey || event.ctrlKey)
+  return { label, matches }
 }

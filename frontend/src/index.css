@@ -58,10 +58,10 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.553 0.195 38.402);
+  --primary-foreground: oklch(0.98 0.016 73.684);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
@@ -72,8 +72,8 @@
   --ring: oklch(0.708 0 0);
   --sidebar-background: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.646 0.222 41.116);
+  --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
@@ -100,9 +100,9 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --primary: oklch(0.47 0.157 37.304);
+  --primary-foreground: oklch(0.98 0.016 73.684);
+  --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
@@ -114,8 +114,8 @@
   --ring: oklch(0.556 0 0);
   --sidebar-background: oklch(0.1 0.01 240);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.705 0.213 47.604);
+  --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
@@ -150,73 +150,7 @@
   }
 }
 
-/* ── Markdown prose ──────────────────────────────────────────────────── */
-@layer components {
-  .prose-relay {
-    @apply text-[13px] leading-relaxed text-foreground;
-  }
-  .prose-relay h1,
-  .prose-relay h2,
-  .prose-relay h3 {
-    @apply font-semibold mt-3 mb-1;
-  }
-  .prose-relay h1 {
-    @apply text-lg;
-  }
-  .prose-relay h2 {
-    @apply text-base;
-  }
-  .prose-relay h3 {
-    @apply text-sm;
-  }
-  .prose-relay p {
-    @apply my-2;
-  }
-  .prose-relay ul,
-  .prose-relay ol {
-    @apply my-2 pl-5;
-  }
-  .prose-relay ul {
-    @apply list-disc;
-  }
-  .prose-relay ol {
-    @apply list-decimal;
-  }
-  .prose-relay li {
-    @apply my-0.5;
-  }
-  .prose-relay code {
-    @apply rounded bg-muted px-1 py-0.5 text-[12px] font-mono text-foreground;
-  }
-  .prose-relay pre {
-    @apply my-2 overflow-x-auto rounded-md border border-border bg-card p-3 text-[12px];
-  }
-  .prose-relay pre code {
-    @apply bg-transparent p-0;
-  }
-  .prose-relay a {
-    @apply text-primary underline-offset-2 hover:underline;
-  }
-  .prose-relay blockquote {
-    @apply border-l-2 border-primary pl-3 text-muted-foreground;
-  }
-  .prose-relay table {
-    @apply my-2 w-full text-[12px] border-collapse;
-  }
-  .prose-relay th {
-    @apply border border-border bg-muted px-2 py-1 text-left font-semibold text-muted-foreground;
-  }
-  .prose-relay td {
-    @apply border border-border px-2 py-1;
-  }
-  .prose-relay tr:nth-child(even) td {
-    @apply bg-muted/50;
-  }
-  .prose-relay del {
-    @apply text-muted-foreground;
-  }
-}
-
+/* ── Animations ─────────────────────────────────────────────────────── */
 @keyframes fade-in-up {
   from {
     opacity: 0;

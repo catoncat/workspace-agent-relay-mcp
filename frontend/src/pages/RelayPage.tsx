@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { DebugSheet } from '@/components/DebugSheet'
 import { RelaySidebar } from '@/components/RelaySidebar'
 import { SettingsSheet } from '@/components/SettingsSheet'
-import { ThreadView, pickActiveRunDetail } from '@/components/ThreadView'
+import { ThreadView } from '@/components/ThreadView'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import type { Agent, Conversation, Run } from '@/api/types'
 import {
@@ -42,7 +42,7 @@ function saveSelectedAgentId(id: number): void {
 }
 
 export function RelayPage() {
-  const params = useParams<{ conversationId?: string; runId?: string }>()
+  const params = useParams({ strict: false })
   const navigate = useNavigate()
   const { token, setToken } = useAuth()
 
@@ -106,7 +106,6 @@ export function RelayPage() {
     () => runDetails.find((detail) => detail.run.id === selectedRunId) ?? null,
     [runDetails, selectedRunId],
   )
-  const activeDetail = useMemo(() => pickActiveRunDetail(runDetails), [runDetails])
   const recentUrl = useMemo(
     () => runDetails.map((detail) => detail.run.conversation_url).find(Boolean) ?? null,
     [runDetails],
@@ -118,14 +117,14 @@ export function RelayPage() {
       (conversation) => conversation.id === selectedConversationId,
     )
     if (!selectedConversationId || !stillSelected) {
-      navigate(`/c/${filteredConversations[0].id}`, { replace: true })
+      navigate({ to: '/c/$conversationId', params: { conversationId: String(filteredConversations[0].id) }, replace: true })
     }
   }, [filteredConversations, navigate, selectedConversationId])
 
   useEffect(() => {
     if (!selectedConversationId || selectedRunId || runDetails.length === 0) return
     const latest = runDetails[runDetails.length - 1]
-    navigate(`/c/${selectedConversationId}/r/${latest.run.id}`, { replace: true })
+    navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(selectedConversationId), runId: String(latest.run.id) }, replace: true })
   }, [navigate, runDetails, selectedConversationId, selectedRunId])
 
   const handleSend = useCallback(
@@ -133,7 +132,7 @@ export function RelayPage() {
       const trimmed = text.trim()
       if (!trimmed || !selectedConversationId) return
       const detail = await createRunMutation.mutateAsync(trimmed)
-      navigate(`/c/${selectedConversationId}/r/${detail.run.id}`)
+      navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(selectedConversationId), runId: String(detail.run.id) } })
     },
     [createRunMutation, navigate, selectedConversationId],
   )
@@ -146,7 +145,7 @@ export function RelayPage() {
         {
           onSuccess: (conversation) => {
             setNewConversationOpen(false)
-            navigate(`/c/${conversation.id}`)
+            navigate({ to: '/c/$conversationId', params: { conversationId: String(conversation.id) } })
           },
         },
       )
@@ -158,7 +157,7 @@ export function RelayPage() {
     async (id: number) => {
       await deleteConversationMutation.mutateAsync(id)
       if (selectedConversationId === id) {
-        navigate('/', { replace: true })
+        navigate({ to: '/', replace: true })
       }
     },
     [deleteConversationMutation, navigate, selectedConversationId],
@@ -172,7 +171,7 @@ export function RelayPage() {
         onSelectAgent={handleSelectAgent}
         conversations={filteredConversations}
         selectedId={selectedConversationId}
-        onSelect={(id) => navigate(`/c/${id}`)}
+        onSelect={(id) => navigate({ to: '/c/$conversationId', params: { conversationId: String(id) } })}
         onNew={() => setNewConversationOpen(true)}
         onRefresh={() => void bootstrapQuery.refetch()}
         onRename={(id, name) => renameConversationMutation.mutateAsync({ id, name })}
@@ -192,7 +191,7 @@ export function RelayPage() {
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ThreadView details={runDetails} loading={threadLoading} onSend={handleSend} activeDetail={activeDetail} />
+          <ThreadView details={runDetails} loading={threadLoading} onSend={handleSend} />
         </div>
 
         <ThreadComposer

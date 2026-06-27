@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ClipboardCopy, MessageSquarePlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Agent, Conversation } from '@/api/types'
@@ -7,7 +7,6 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
@@ -213,25 +212,6 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
     }
   }, [item.id, onDelete])
 
-  const handleRowKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase()
-      const modifier = event.metaKey || event.ctrlKey
-
-      if (modifier && key === 'c') {
-        event.preventDefault()
-        void handleCopy(item.conversation_key, 'Continuation key')
-      } else if (event.key === 'F2' && onRename) {
-        event.preventDefault()
-        setIsRenaming(true)
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && onDelete) {
-        event.preventDefault()
-        setDeleteOpen(true)
-      }
-    },
-    [handleCopy, item.conversation_key, onDelete, onRename],
-  )
-
   return (
     <SidebarMenuItem>
       <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
@@ -261,30 +241,26 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
               <SidebarMenuButton
                 isActive={isActive}
                 onClick={() => onSelect(item.id)}
-                onKeyDown={handleRowKeyDown}
                 tooltip={item.name}
-                aria-keyshortcuts="Control+C Meta+C F2 Delete Backspace"
               >
                 <span className="truncate font-medium">{item.name}</span>
               </SidebarMenuButton>
             )}
           </ContextMenuTrigger>
           <ContextMenuContent className="w-60">
-            <ContextMenuLabel className="flex items-baseline justify-between gap-3 px-2 py-1.5">
-              <span className="min-w-0 truncate font-medium text-foreground">{item.name}</span>
-              <span className="shrink-0 tabular-nums text-muted-foreground/70">#{item.id}</span>
-            </ContextMenuLabel>
+            <div className="flex items-baseline justify-between gap-3 px-2 py-1.5">
+              <span className="min-w-0 truncate text-sm font-medium text-foreground">{item.name}</span>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">#{item.id}</span>
+            </div>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={() => void handleCopy(item.conversation_key, 'Continuation key')}>
               <ClipboardCopy />
               <span>Copy key</span>
-              <MenuShortcut>Ctrl/Cmd+C</MenuShortcut>
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem disabled={!onRename} onClick={() => setIsRenaming(true)}>
               <Pencil />
               <span>Rename</span>
-              <MenuShortcut>F2</MenuShortcut>
             </ContextMenuItem>
             <ContextMenuItem
               disabled={!onDelete}
@@ -294,7 +270,6 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
             >
               <Trash2 />
               <span>Delete</span>
-              <MenuShortcut>Del</MenuShortcut>
               <span id={deleteHintId} className="sr-only">
                 Opens a confirmation dialog before deleting this conversation.
               </span>
@@ -320,8 +295,4 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
       </Dialog>
     </SidebarMenuItem>
   )
-}
-
-function MenuShortcut({ children }: { children: string }) {
-  return <span className="ml-auto pl-4 text-xs text-muted-foreground">{children}</span>
 }

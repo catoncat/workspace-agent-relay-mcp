@@ -7,42 +7,71 @@ import {
 import {
   Message,
   MessageContent,
-  MessageResponse,
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Badge } from '@/components/ui/badge'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ThreadProse } from '@/components/ThreadProse'
 import { cn } from '@/lib/utils'
 import type { JsonValue, Plan, PlanStep, PlanStepStatus, Run, RunDetail, RunEvent, RunEventPayload, ToolTraceFields } from '@/api/types'
 import {
   CheckIcon,
   ChevronDownIcon,
+  ChevronUpIcon,
   CircleIcon,
-  ClockIcon,
   LoaderCircleIcon,
   MinusIcon,
-  WrenchIcon,
-  XCircleIcon,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const ACTIVE_STATUSES = new Set(['pending', 'running', 'accepted', 'waiting', 'needs_user', 'trigger_failed'])
-const TERMINAL_STATUSES = new Set(['done', 'blocked', 'failed'])
+const TERMINAL_STATUSES = new Set(['done', 'blocked', 'failed', 'superseded'])
+
+type TimelineSegment =
+  | { kind: 'traces'; events: RunEvent[] }
+  | { kind: 'narration'; event: RunEvent }
+
+/** Split progress events at narration boundaries so tool batches and notes
+ * render in causal order instead of two fixed buckets. */
+export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
+  const segments: TimelineSegment[] = []
+  let traceBatch: RunEvent[] = []
+
+  for (const event of events) {
+    if (isTraceEvent(event)) {
+      traceBatch.push(event)
+      continue
+    }
+    if (traceBatch.length > 0) {
+      segments.push({ kind: 'traces', events: traceBatch })
+      traceBatch = []
+    }
+    segments.push({ kind: 'narration', event })
+  }
+
+  if (traceBatch.length > 0) {
+    segments.push({ kind: 'traces', events: traceBatch })
+  }
+
+  return segments
+}
 
 type Props = {
   details: RunDetail[]
   loading?: boolean
   onSend?: (text: string) => void | Promise<void>
-  activeDetail?: RunDetail | null
 }
 
-export function ThreadView({ details, loading = false, onSend, activeDetail }: Props) {
+export function planAnchorId(runId: number): string {
+  return `plan-anchor-${runId}`
+}
+
+export function ThreadView({ details, loading = false, onSend }: Props) {
+  const activeDetail = useMemo(() => pickActiveRunDetail(details), [details])
+  const planAnchorVisible = usePlanAnchorVisible(
+    activeDetail ? planAnchorId(activeDetail.run.id) : null,
+  )
   if (loading) {
     return (
       <Conversation className="h-full">
@@ -66,10 +95,22 @@ export function ThreadView({ details, loading = false, onSend, activeDetail }: P
 
   return (
     <Conversation className="h-full">
+      {activeDetail && !planAnchorVisible ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-background from-60% via-background/90 to-transparent px-4 pb-6 pt-4">
+          <div className="mx-auto max-w-3xl">
+            <StickyPlanBar detail={activeDetail} />
+          </div>
+        </div>
+      ) : null}
       <ConversationContent className="mx-auto max-w-3xl gap-6">
-        {activeDetail ? <StickyPlanBar detail={activeDetail} /> : null}
-        {details.map((detail) => (
-          <RunThread key={detail.run.id} detail={detail} onSend={onSend} />
+        {details.map((detail, index) => (
+          <RunThread
+            key={detail.run.id}
+            detail={detail}
+            onSend={onSend}
+            authoritativeRunId={activeDetail?.run.id ?? null}
+            turnIndex={index + 1}
+          />
         ))}
       </ConversationContent>
       <ConversationScrollButton />
@@ -77,50 +118,62 @@ export function ThreadView({ details, loading = false, onSend, activeDetail }: P
   )
 }
 
-function RunThread({ detail, onSend }: { detail: RunDetail; onSend?: (text: string) => void | Promise<void> }) {
+function RunThread({
+  detail,
+  onSend,
+  authoritativeRunId,
+  turnIndex,
+}: {
+  detail: RunDetail
+  onSend?: (text: string) => void | Promise<void>
+  authoritativeRunId: number | null
+  turnIndex: number
+}) {
   const run = detail.run
   const isActive = ACTIVE_STATUSES.has(run.status)
+  const isAuthoritative = authoritativeRunId === run.id
+  const planSuperseded =
+    run.status === 'superseded' ||
+    Boolean(isActive && detail.plan && authoritativeRunId != null && !isAuthoritative)
+  const planEventCount = detail.events.filter((event) => event.event_type === 'plan').length
+  const planRevised = planEventCount >= 2
+  const planActive = isActive && isAuthoritative
   const hasResultEvent = detail.events.some((event) => event.event_type === 'result')
   const progressEvents = detail.events.filter(
     (event) => event.event_type === 'progress' && (event.markdown || event.title),
   )
-  const traceEvents = useMemo(
-    () => progressEvents.filter((event) => isTraceEvent(event)),
-    [progressEvents],
-  )
-  const narrationEvents = useMemo(
-    () => progressEvents.filter((event) => !isTraceEvent(event)),
-    [progressEvents],
-  )
-  const hasTraces = traceEvents.length > 0
-  const hasNarrations = narrationEvents.length > 0
-  // While the run is actively working and the agent hasn't added any narration
-  // yet, keep traces expanded so the operator can watch tool calls stream in.
-  // Once narrations land or the run finishes, collapse traces to keep focus on
-  // the higher-signal notes / result.
-  const tracesDefaultOpen = isActive && !hasNarrations && !hasResultEvent
 
   return (
-    <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16">
+    <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16 pl-0.5">
+      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
+        <span className="tabular-nums">Turn {turnIndex}</span>
+        <span className="text-muted-foreground/40">·</span>
+        <StatusBadge status={run.status} />
+      </div>
+
       <Message from="user">
         <MessageContent>
-          <MessageResponse>{run.input_markdown || '(empty message)'}</MessageResponse>
+          <ThreadProse>{run.input_markdown || '(empty message)'}</ThreadProse>
         </MessageContent>
       </Message>
 
-      {detail.plan ? <PlanChecklist plan={detail.plan} active={isActive} /> : null}
+      {detail.plan ? (
+        <PlanChecklist
+          plan={detail.plan}
+          active={planActive}
+          superseded={planSuperseded}
+          revised={planRevised}
+          anchorId={isAuthoritative ? planAnchorId(run.id) : undefined}
+        />
+      ) : null}
 
       <RunPhaseHint detail={detail} />
 
-      {hasTraces ? (
-        <ToolTraceList events={traceEvents} defaultOpen={tracesDefaultOpen} />
-      ) : null}
-
-      {hasNarrations ? (
-        <ProgressLog
-          events={narrationEvents}
-          active={isActive}
-          label={hasTraces ? 'Notes' : undefined}
+      {progressEvents.length > 0 ? (
+        <RunProgressTimeline
+          events={progressEvents}
+          isActive={isActive}
+          hasResultEvent={hasResultEvent}
         />
       ) : null}
 
@@ -183,17 +236,78 @@ export function pickActiveRunDetail(details: RunDetail[]): RunDetail | null {
   return null
 }
 
-function PlanChecklist({ plan, active }: { plan: Plan; active: boolean }) {
+function usePlanAnchorVisible(anchorId: string | null): boolean {
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    if (!anchorId) {
+      setVisible(true)
+      return
+    }
+
+    let observer: IntersectionObserver | null = null
+    let cancelled = false
+
+    const attach = () => {
+      if (cancelled) return
+      const element = document.getElementById(anchorId)
+      if (!element) {
+        setVisible(true)
+        return
+      }
+      observer?.disconnect()
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          if (!cancelled) setVisible(entry.isIntersecting)
+        },
+        { threshold: 0, rootMargin: '-8px 0px 0px 0px' },
+      )
+      observer.observe(element)
+    }
+
+    attach()
+    const retry = window.setTimeout(attach, 0)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(retry)
+      observer?.disconnect()
+    }
+  }, [anchorId])
+
+  return visible
+}
+
+function PlanChecklist({
+  plan,
+  active,
+  superseded = false,
+  revised = false,
+  anchorId,
+}: {
+  plan: Plan
+  active: boolean
+  superseded?: boolean
+  revised?: boolean
+  anchorId?: string
+}) {
   const { doneCount, inProgress, total, allDone } = planProgress(plan)
 
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+    <div
+      id={anchorId}
+      className={cn('scroll-mt-20 border-l-2 border-border pl-3', superseded && 'opacity-70')}
+    >
+      <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-foreground/80">
         <span>Plan</span>
         <span className="tabular-nums">
           {doneCount}/{total}
         </span>
-        {active && inProgress && !allDone ? (
+        {superseded ? (
+          <span className="text-[11px] text-muted-foreground/80">superseded</span>
+        ) : revised ? (
+          <span className="text-[11px] text-muted-foreground/80">revised</span>
+        ) : active && inProgress && !allDone ? (
           <span className="flex items-center gap-1 text-foreground">
             <LoaderCircleIcon className="size-3 animate-spin" />
             <span className="text-[11px]">working</span>
@@ -205,7 +319,7 @@ function PlanChecklist({ plan, active }: { plan: Plan; active: boolean }) {
           <PlanStepRow
             key={step.id}
             step={step}
-            staggered={active}
+            live={active}
             delayMs={index * 80}
           />
         ))}
@@ -218,11 +332,10 @@ function StickyPlanBar({ detail }: { detail: RunDetail }) {
   const run = detail.run
   const plan = detail.plan
   if (!plan) return null
-  const { doneCount, total, inProgress, currentStep } = planProgress(plan)
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
+  const { doneCount, inProgress, total, allDone, currentStep } = planProgress(plan)
 
   const handleClick = () => {
-    const el = document.getElementById(`run-${run.id}`)
+    const el = document.getElementById(planAnchorId(run.id))
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -230,34 +343,55 @@ function StickyPlanBar({ detail }: { detail: RunDetail }) {
     <button
       type="button"
       onClick={handleClick}
-      className="sticky top-0 z-10 flex w-full items-center gap-3 rounded-lg border bg-background/95 px-3 py-2 text-left text-sm shadow-sm backdrop-blur transition-colors hover:bg-accent/40"
+      className="pointer-events-auto group w-full rounded-xl border border-border/70 bg-background/95 p-3 text-left shadow-md backdrop-blur-md transition-[border-color,box-shadow,background-color] hover:border-border hover:bg-background hover:shadow-lg"
     >
-      <span className="shrink-0 font-medium text-muted-foreground">
-        Plan <span className="tabular-nums text-foreground">{doneCount}/{total}</span>
-      </span>
-      <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-        <span
-          className="absolute inset-y-0 left-0 rounded-full bg-primary transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <span>Plan</span>
+        <span className="tabular-nums text-foreground">
+          {doneCount}/{total}
+        </span>
+        {inProgress && !allDone ? (
+          <span className="flex items-center gap-1 text-foreground">
+            <LoaderCircleIcon className="size-3 animate-spin" />
+            <span className="text-[11px]">working</span>
+          </span>
+        ) : null}
+        <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground/80 transition-colors group-hover:text-muted-foreground">
+          <span className="hidden sm:inline">View plan</span>
+          <ChevronUpIcon className="size-3.5 shrink-0" />
+        </span>
+      </div>
+
+      <p className="truncate text-sm leading-snug text-foreground">
         {currentStep ? currentStep.title : 'Working…'}
-      </span>
-      {inProgress ? (
-        <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-foreground" />
-      ) : null}
+      </p>
+
+      <div className="mt-2.5 flex items-center gap-1" aria-hidden="true">
+        {plan.steps.map((step) => (
+          <span
+            key={step.id}
+            className={cn(
+              'h-1 min-w-0 flex-1 rounded-full transition-colors',
+              step.status === 'done' && 'bg-primary/70',
+              step.status === 'in_progress' && 'bg-primary',
+              step.status === 'skipped' && 'bg-muted-foreground/25',
+              step.status === 'pending' && 'bg-muted',
+            )}
+          />
+        ))}
+      </div>
     </button>
   )
 }
 
-function PlanStepRow({ step, staggered, delayMs }: { step: PlanStep; staggered: boolean; delayMs: number }) {
-  const { icon, className } = stepVisual(step.status)
+function PlanStepRow({ step, live, delayMs }: { step: PlanStep; live: boolean; delayMs: number }) {
+  const displayStatus = !live && step.status === 'in_progress' ? 'pending' : step.status
+  const { icon, className } = stepVisual(displayStatus)
   return (
     <li className="flex items-start gap-2.5 text-sm">
       <span
         className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center transition-all', className)}
-        style={staggered ? { transitionDelay: `${delayMs}ms` } : undefined}
+        style={live ? { transitionDelay: `${delayMs}ms` } : undefined}
       >
         {icon}
       </span>
@@ -265,10 +399,10 @@ function PlanStepRow({ step, staggered, delayMs }: { step: PlanStep; staggered: 
         <span
           className={cn(
             'transition-colors',
-            step.status === 'done' && 'text-muted-foreground line-through decoration-muted-foreground/40',
-            step.status === 'skipped' && 'text-muted-foreground/60 line-through',
-            step.status === 'pending' && 'text-foreground/80',
-            step.status === 'in_progress' && 'text-foreground',
+            displayStatus === 'done' && 'text-muted-foreground line-through decoration-muted-foreground/40',
+            displayStatus === 'skipped' && 'text-muted-foreground/60 line-through',
+            displayStatus === 'pending' && 'text-foreground/80',
+            displayStatus === 'in_progress' && 'text-foreground',
           )}
         >
           {step.title}
@@ -312,136 +446,163 @@ function RunPhaseHint({ detail }: { detail: RunDetail }) {
   if (!hint) return null
   const isActive = ACTIVE_STATUSES.has(run.status)
   return (
-    <Message from="assistant">
-      <MessageContent>
-        {isActive ? (
-          <Shimmer className="text-sm" duration={1.5}>
-            {hint}
-          </Shimmer>
-        ) : (
-          <p className="whitespace-pre-line text-sm text-muted-foreground">{hint}</p>
-        )}
-      </MessageContent>
-    </Message>
-  )
-}
-
-function ProgressLog({
-  events,
-  active,
-  label,
-}: {
-  events: RunEvent[]
-  active: boolean
-  label?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const latest = events[events.length - 1]
-  const resolvedLabel = label ?? (active ? 'Working…' : 'Work log')
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="not-prose">
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
-        <span>{resolvedLabel}</span>
-        <span className="truncate text-foreground/70">{latest?.title || latest?.markdown?.slice(0, 60) || ''}</span>
-        <ChevronDownIcon className={cn('ml-auto size-3.5 transition-transform', open && 'rotate-180')} />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="mt-1.5 space-y-2 border-l-2 border-border pl-3">
-          {events.map((event, index) => (
-            <div key={`prog-${event.id ?? index}`} className="text-sm">
-              {event.title ? (
-                <p className="text-xs font-medium text-muted-foreground">{event.title}</p>
-              ) : null}
-              {event.markdown ? (
-                <MessageResponse className="text-sm text-muted-foreground">
-                  {event.markdown}
-                </MessageResponse>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-function ToolTraceList({
-  events,
-  defaultOpen,
-}: {
-  events: RunEvent[]
-  defaultOpen: boolean
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="not-prose">
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
-        <WrenchIcon className="size-3.5" />
-        <span>Tool calls</span>
-        <span className="tabular-nums text-foreground/60">· {events.length}</span>
-        <ChevronDownIcon className={cn('ml-auto size-3.5 transition-transform', open && 'rotate-180')} />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="mt-1.5 space-y-1.5">
-          {events.map((event, index) => (
-            <ToolTraceRow key={`trace-${event.id ?? index}`} event={event} />
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-function ToolTraceRow({ event }: { event: RunEvent }) {
-  const [open, setOpen] = useState(false)
-  const fields = traceFields(event)
-  const ok = fields.ok
-  const label = fields.title || fields.tool || 'tool call'
-
-  return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn(
-        'rounded-md border bg-muted/30 transition-colors',
-        ok ? 'border-border/60' : 'border-red-500/40 border-l-2 border-l-red-500/60',
+    <div className="text-sm text-muted-foreground">
+      {isActive ? (
+        <Shimmer className="text-sm" duration={1.5}>
+          {hint}
+        </Shimmer>
+      ) : (
+        <p className="whitespace-pre-line">{hint}</p>
       )}
-    >
-      <CollapsibleTrigger className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/50">
-        <span className="flex size-4 shrink-0 items-center justify-center">
-          {ok ? (
-            <CheckIcon className="size-3.5 text-green-600 dark:text-green-500" />
-          ) : (
-            <XCircleIcon className="size-3.5 text-red-600 dark:text-red-500" />
-          )}
-        </span>
-        <span className="shrink-0 font-mono text-[11px] text-foreground/80">{fields.tool}</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">{label}</span>
-        {fields.durationMs != null ? (
-          <span className="flex shrink-0 items-center gap-1 tabular-nums text-muted-foreground/70">
-            <ClockIcon className="size-3" />
-            {fields.durationMs}ms
-          </span>
-        ) : null}
-        <ChevronDownIcon className={cn('size-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="space-y-2 border-t border-border/50 px-2.5 py-2 text-xs">
-          {fields.argsSummary ? (
-            <SummaryList title="Args" entries={fields.argsSummary} />
-          ) : null}
-          {fields.resultSummary ? (
-            <SummaryList title="Result" entries={fields.resultSummary} />
-          ) : null}
-          {fields.error ? (
-            <p className="font-medium text-red-600 dark:text-red-400">{fields.error}</p>
-          ) : null}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    </div>
   )
+}
+
+function RunProgressTimeline({
+  events,
+  isActive,
+  hasResultEvent,
+}: {
+  events: RunEvent[]
+  isActive: boolean
+  hasResultEvent: boolean
+}) {
+  const segments = useMemo(() => buildTimelineSegments(events), [events])
+  const lastTraceSegmentIndex = useMemo(() => {
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      if (segments[index]?.kind === 'traces') return index
+    }
+    return -1
+  }, [segments])
+
+  return (
+    <div className="flex flex-col gap-4">
+      {segments.map((segment, index) => {
+        if (segment.kind === 'narration') {
+          return (
+            <NarrationItem
+              key={`narr-${segment.event.id ?? index}`}
+              event={segment.event}
+            />
+          )
+        }
+
+        const isLiveBatch = isActive && !hasResultEvent && index === lastTraceSegmentIndex
+        return (
+          <ToolTraceBatch
+            key={`traces-${segment.events[0]?.id ?? index}`}
+            events={segment.events}
+            defaultExpanded={isLiveBatch}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function NarrationItem({ event }: { event: RunEvent }) {
+  const titleDuplicatesMarkdown =
+    !!event.title && !!event.markdown && event.title.trim() === event.markdown.trim()
+  return (
+    <div className="space-y-1">
+      {event.title && !titleDuplicatesMarkdown ? (
+        <p className="text-sm font-medium text-foreground">{event.title}</p>
+      ) : null}
+      {event.markdown ? (
+        <ThreadProse className={event.title && !titleDuplicatesMarkdown ? 'mt-1' : undefined}>
+          {event.markdown}
+        </ThreadProse>
+      ) : null}
+    </div>
+  )
+}
+
+function ToolTraceBatch({
+  events,
+  defaultExpanded,
+}: {
+  events: RunEvent[]
+  defaultExpanded: boolean
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+
+  useEffect(() => {
+    if (defaultExpanded) setExpanded(true)
+  }, [defaultExpanded])
+
+  if (!expanded && events.length > 1) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDownIcon className="size-3.5 shrink-0" />
+        <span>{events.length} tool calls</span>
+      </button>
+    )
+  }
+
+  return (
+    <ul className="my-1 list-none space-y-1 pl-0 text-sm text-muted-foreground">
+      {events.map((event, index) => (
+        <ToolTraceListItem key={`trace-${event.id ?? index}`} event={event} />
+      ))}
+    </ul>
+  )
+}
+
+function ToolTraceListItem({ event }: { event: RunEvent }) {
+  const [showDetails, setShowDetails] = useState(false)
+  const fields = traceFields(event)
+  const hasDetails = Boolean(fields.argsSummary || fields.resultSummary || fields.error)
+  const label = formatToolCallLabel(fields)
+
+  return (
+    <li className={cn('flex gap-2.5 py-0.5', !fields.ok && 'text-destructive')}>
+      <span
+        aria-hidden
+        className={cn(
+          'mt-2 size-1 shrink-0 rounded-full bg-muted-foreground/45',
+          !fields.ok && 'bg-destructive/60',
+        )}
+      />
+      <span className="min-w-0 flex-1">
+        <button
+          type="button"
+          disabled={!hasDetails}
+          onClick={() => setShowDetails((value) => !value)}
+          className={cn(
+            'text-left transition-colors',
+            hasDetails && 'cursor-pointer hover:text-foreground',
+            !hasDetails && 'cursor-default',
+          )}
+        >
+          {label}
+          {!fields.ok ? ' · failed' : null}
+        </button>
+        {showDetails && hasDetails ? (
+          <div className="mt-1 space-y-1.5 text-xs text-muted-foreground">
+            {fields.argsSummary ? (
+              <SummaryList title="Args" entries={fields.argsSummary} />
+            ) : null}
+            {fields.resultSummary ? (
+              <SummaryList title="Result" entries={fields.resultSummary} />
+            ) : null}
+            {fields.error ? (
+              <p className="text-destructive">{fields.error}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </span>
+    </li>
+  )
+}
+
+function formatToolCallLabel(fields: ToolTraceFields): string {
+  if (fields.title.trim()) return fields.title
+  const tool = fields.tool.replace(/_/g, ' ')
+  return `Calling ${tool}`
 }
 
 function SummaryList({
@@ -455,14 +616,12 @@ function SummaryList({
   if (keys.length === 0) return null
   return (
     <div>
-      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-        {title}
-      </p>
-      <dl className="flex flex-col gap-0.5 font-mono text-[11px] text-muted-foreground">
+      <p className="mb-1 text-[11px] text-muted-foreground/80">{title}</p>
+      <dl className="flex flex-col gap-0.5 text-[11px]">
         {keys.map((key) => (
           <div key={key} className="flex gap-2">
-            <dt className="shrink-0 text-muted-foreground/60">{key}:</dt>
-            <dd className="break-all text-foreground/80">{formatJsonValue(entries[key])}</dd>
+            <dt className="shrink-0 text-muted-foreground/70">{key}</dt>
+            <dd className="min-w-0 break-all text-foreground/80">{formatJsonValue(entries[key])}</dd>
           </div>
         ))}
       </dl>
@@ -492,53 +651,49 @@ function QuestionEvent({
   }
 
   return (
-    <Message from="assistant">
-      <MessageContent>
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status="needs_user" />
-            <span className="text-xs font-medium text-muted-foreground">
-              {event.title || 'User input needed'}
-            </span>
-          </div>
-          {event.markdown ? <MessageResponse>{event.markdown}</MessageResponse> : null}
-          {context ? <p className="text-sm text-muted-foreground">{context}</p> : null}
-          {choices.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {choices.map((choice) => {
-                const isPicked = picked === choice
-                const disabled = !answerable || (picked !== null && !isPicked)
-                return (
-                  <button
-                    key={choice}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => handlePick(choice)}
-                    className={cn(
-                      'max-w-full whitespace-normal rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                      isPicked
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : answerable
-                          ? 'border-border bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                          : 'border-border bg-secondary/50 text-muted-foreground',
-                      answerable && !isPicked && 'cursor-pointer',
-                      disabled && 'cursor-not-allowed opacity-70',
-                    )}
-                  >
-                    {choice}
-                  </button>
-                )
-              })}
-            </div>
-          ) : null}
-          {!answerable && choices.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Reply below to answer the agent.
-            </p>
-          ) : null}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge status="needs_user" />
+        <span className="text-xs font-medium text-muted-foreground">
+          {event.title || 'User input needed'}
+        </span>
+      </div>
+      {event.markdown ? <ThreadProse>{event.markdown}</ThreadProse> : null}
+      {context ? <p className="text-sm text-muted-foreground">{context}</p> : null}
+      {choices.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {choices.map((choice) => {
+            const isPicked = picked === choice
+            const disabled = !answerable || (picked !== null && !isPicked)
+            return (
+              <button
+                key={choice}
+                type="button"
+                disabled={disabled}
+                onClick={() => handlePick(choice)}
+                className={cn(
+                  'max-w-full whitespace-normal rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                  isPicked
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : answerable
+                      ? 'border-border bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                      : 'border-border bg-secondary/50 text-muted-foreground',
+                  answerable && !isPicked && 'cursor-pointer',
+                  disabled && 'cursor-not-allowed opacity-70',
+                )}
+              >
+                {choice}
+              </button>
+            )
+          })}
         </div>
-      </MessageContent>
-    </Message>
+      ) : null}
+      {!answerable && choices.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Reply below to answer the agent.
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -593,21 +748,26 @@ function RunTerminalMessage({
   markdown?: string
   description?: string
 }) {
+  const isFailed = status === 'failed' || status === 'trigger_failed' || status === 'blocked'
+  const titleDuplicatesMarkdown =
+    !!markdown && !!title && title.trim() === markdown.trim()
   return (
-    <Message from="assistant">
-      <MessageContent>
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={status} />
-            <span className="text-xs font-medium text-muted-foreground">{title}</span>
-          </div>
-          {markdown ? <MessageResponse>{markdown}</MessageResponse> : null}
-          {!markdown && description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
-          ) : null}
-        </div>
-      </MessageContent>
-    </Message>
+    <div className="space-y-1.5">
+      {title && !titleDuplicatesMarkdown ? (
+        <p
+          className={cn(
+            'text-xs font-medium',
+            isFailed ? 'text-destructive' : 'text-muted-foreground',
+          )}
+        >
+          {title}
+        </p>
+      ) : null}
+      {markdown ? <ThreadProse>{markdown}</ThreadProse> : null}
+      {!markdown && description ? (
+        <p className="text-sm text-muted-foreground">{description}</p>
+      ) : null}
+    </div>
   )
 }
 

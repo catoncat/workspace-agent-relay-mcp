@@ -112,7 +112,7 @@ function defaultConversationKey(name: string): string {
     name
       .trim()
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ':')
+      .replace(/[^\p{L}\p{N}]+/gu, ':')
       .replace(/^:|:$/g, '') || 'conversation'
   return `${slug}:${new Date().toISOString().slice(0, 10)}`
 }
