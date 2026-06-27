@@ -65,6 +65,33 @@ def test_build_trigger_input_continuation_is_compact() -> None:
     assert "Do not only answer in the ChatGPT conversation." not in rendered
 
 
+def test_build_trigger_input_steer_reuses_request_id_with_rotated_token() -> None:
+    """A mid-turn follow-up (steer) reuses the same request_id but hands the
+    agent a freshly rotated callback_token, and asks it to continue the current
+    turn (record_plan revision) rather than start over."""
+    rendered = build_trigger_input(
+        request_id="relay_789",
+        conversation_key="research:sherlog",
+        callback_token="callback-rotated",
+        user_input="You didn't push.",
+        mode="steer",
+    )
+
+    assert "request_id: relay_789" in rendered
+    assert "conversation_key: research:sherlog" in rendered
+    assert "callback_token: callback-rotated" in rendered
+    # Steer must reference same-turn continuation and plan revision.
+    assert "SAME turn" in rendered
+    assert "freshly rotated" in rendered
+    assert "record_plan" in rendered
+    assert "do not start a new turn" in rendered.lower() or "Do NOT start a new turn" in rendered
+    assert "Operator added:" in rendered
+    assert rendered.endswith("You didn't push.")
+    # Steer must NOT carry the initial contract or the continuation reminder.
+    assert "Completion contract:" not in rendered
+    assert "Same relay protocol as before" not in rendered
+
+
 class FakeResponse:
     def __init__(self, status: int, body: bytes, headers: dict[str, str]) -> None:
         self.status = status

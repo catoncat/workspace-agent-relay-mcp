@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import {
   RUN_ACTIVE_STATUSES,
   RUN_TERMINAL_STATUSES,
+  shouldShowHeaderStatusBadge,
 } from '@/lib/runStatus'
 import type { JsonValue, Plan, PlanStep, PlanStepStatus, Run, RunDetail, RunEvent, RunEventPayload, ToolTraceFields } from '@/api/types'
 import {
@@ -37,9 +38,12 @@ type TraceSegmentKind = 'traces' | 'infra'
 type TimelineSegment =
   | { kind: TraceSegmentKind; events: RunEvent[] }
   | { kind: 'narration'; event: RunEvent }
+  | { kind: 'user_message'; event: RunEvent }
 
 /** Split progress events at narration boundaries so tool batches and notes
- * render in causal order instead of two fixed buckets. */
+ * render in causal order instead of two fixed buckets. `user_message` events
+ * (steer follow-ups) are emitted as their own segment so they render as user
+ * bubbles inline with the agent's progress. */
 export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
   let traceBatch: RunEvent[] = []
@@ -54,6 +58,11 @@ export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
   }
 
   for (const event of events) {
+    if (event.event_type === 'user_message') {
+      flushTraceBatch()
+      segments.push({ kind: 'user_message', event })
+      continue
+    }
     if (isTraceEvent(event)) {
       const nextKind: TraceSegmentKind =
         isInfrastructureTraceEvent(event) && !isFailedTraceEvent(event) ? 'infra' : 'traces'
@@ -79,10 +88,6 @@ type Props = {
 
 export function ThreadView({ details, loading = false, onSend }: Props) {
   const activeDetail = useMemo(() => pickActiveRunDetail(details), [details])
-  const turnIndexByRunId = useMemo(
-    () => new Map(details.map((detail, index) => [detail.run.id, index + 1])),
-    [details],
-  )
 
   if (loading) {
     return (
@@ -115,14 +120,12 @@ export function ThreadView({ details, loading = false, onSend }: Props) {
         </div>
       ) : null}
       <ConversationContent className="mx-auto max-w-3xl gap-6">
-        {details.map((detail, index) => (
+        {details.map((detail) => (
           <RunThread
             key={detail.run.id}
             detail={detail}
             onSend={onSend}
             authoritativeRunId={activeDetail?.run.id ?? null}
-            turnIndex={index + 1}
-            turnIndexByRunId={turnIndexByRunId}
           />
         ))}
       </ConversationContent>
@@ -135,14 +138,10 @@ function RunThread({
   detail,
   onSend,
   authoritativeRunId,
-  turnIndex,
-  turnIndexByRunId,
 }: {
   detail: RunDetail
   onSend?: (text: string) => void | Promise<void>
   authoritativeRunId: number | null
-  turnIndex: number
-  turnIndexByRunId: Map<number, number>
 }) {
   const run = detail.run
   const isActive = ACTIVE_STATUSES.has(run.status)
@@ -154,35 +153,23 @@ function RunThread({
   const planRevised = planEventCount >= 2
   const planActive = isActive && isAuthoritative
   const hasResultEvent = detail.events.some((event) => event.event_type === 'result')
-  const progressEvents = detail.events.filter(
-    (event) => event.event_type === 'progress' && (event.markdown || event.title),
+  const timelineEvents = detail.events.filter(
+    (event) =>
+      event.event_type === 'user_message' ||
+      (event.event_type === 'progress' && (event.markdown || event.title)),
   )
   const systemEvents = detail.events.filter(
     (event) => event.event_type === 'system' && (event.markdown || event.title),
   )
   const hasSystemEvent = systemEvents.length > 0
-  const supersededByTurnIndex = run.superseded_by_run_id
-    ? turnIndexByRunId.get(run.superseded_by_run_id) ?? null
-    : null
-
-  if (run.status === 'superseded' && supersededByTurnIndex) {
-    return (
-      <SupersededRunSummary
-        detail={detail}
-        turnIndex={turnIndex}
-        supersededByTurnIndex={supersededByTurnIndex}
-      />
-    )
-  }
 
   return (
     <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16 pl-0.5">
-      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
-        <span className="tabular-nums">
-          Turn {turnIndex}{run.parent_run_id ? ' · follow-up' : ''}
-        </span>
-        {run.status !== 'done' ? <StatusBadge status={run.status} /> : null}
-      </div>
+      {shouldShowHeaderStatusBadge(run.status) ? (
+        <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
+          <StatusBadge status={run.status} />
+        </div>
+      ) : null}
 
       <Message from="user">
         <MessageContent>
@@ -200,9 +187,9 @@ function RunThread({
 
       <RunPhaseHint detail={detail} />
 
-      {progressEvents.length > 0 ? (
+      {timelineEvents.length > 0 ? (
         <RunProgressTimeline
-          events={progressEvents}
+          events={timelineEvents}
           isActive={isActive}
           hasResultEvent={hasResultEvent}
         />
@@ -250,45 +237,6 @@ function RunThread({
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function SupersededRunSummary({
-  detail,
-  turnIndex,
-  supersededByTurnIndex,
-}: {
-  detail: RunDetail
-  turnIndex: number
-  supersededByTurnIndex: number
-}) {
-  const run = detail.run
-  const plan = detail.plan
-  const progress = plan ? planProgress(plan) : null
-
-  return (
-    <div id={`run-${run.id}`} className="flex flex-col gap-2 scroll-mt-16 pl-0.5">
-      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
-        <span className="tabular-nums">Turn {turnIndex}</span>
-        <StatusBadge status={run.status} />
-      </div>
-      <div className="rounded-lg border border-dashed border-border/70 px-3 py-2.5 text-sm">
-        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-          <span>Continued in Turn {supersededByTurnIndex}</span>
-          {progress ? (
-            <span className="tabular-nums text-muted-foreground/80">
-              Plan {progress.doneCount}/{progress.total}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-1 max-h-16 overflow-hidden whitespace-pre-wrap text-foreground/75">
-          {run.input_markdown || '(empty message)'}
-        </p>
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          This attempt was folded into your newer follow-up, so late callbacks from it are ignored.
-        </p>
-      </div>
     </div>
   )
 }
@@ -507,6 +455,16 @@ function RunProgressTimeline({
   return (
     <div className="flex flex-col gap-4">
       {segments.map((segment, index) => {
+        if (segment.kind === 'user_message') {
+          return (
+            <Message key={`user-${segment.event.id ?? index}`} from="user">
+              <MessageContent>
+                <ThreadProse>{segment.event.markdown || ''}</ThreadProse>
+              </MessageContent>
+            </Message>
+          )
+        }
+
         if (segment.kind === 'narration') {
           const live = isActive && !hasResultEvent && index === lastNarrationIndex
           return (

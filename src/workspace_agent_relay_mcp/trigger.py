@@ -54,6 +54,7 @@ def build_trigger_input(
     callback_token: str,
     user_input: str,
     is_continuation: bool = False,
+    mode: str = "initial",
 ) -> str:
     header = [
         f"request_id: {request_id}",
@@ -61,6 +62,27 @@ def build_trigger_input(
         f"callback_token: {callback_token}",
         "relay_mcp: workspace-agent-relay-mcp",
     ]
+    if mode == "steer":
+        # Mid-turn follow-up: the operator appended guidance to THIS turn. We can
+        # only send triggers, so this is another trigger to the same conversation,
+        # bookkept on the same run (same request_id, freshly rotated callback_token
+        # above). Ask the agent to continue the current turn rather than start over:
+        # revise the plan via record_plan or skip old steps, and keep using the
+        # request_id/callback_token above for callbacks. Do NOT call record_result
+        # to signal a direction change.
+        return "\n".join(
+            [
+                *header,
+                "",
+                "This is a follow-up instruction appended to the SAME turn you are already working on (same request_id as before; the callback_token above is freshly rotated — use it for all further callbacks).",
+                "Continue the current turn: if the direction changed, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. Do NOT start a new turn, and do NOT use record_result to signal a plan change.",
+                "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps.",
+                "If notion-local-ops-mcp was bound earlier this turn, keep using it; if it is unavailable, still call record_progress/record_result so the operator stays informed.",
+                "",
+                "Operator added:",
+                user_input.strip(),
+            ]
+        )
     if is_continuation:
         # The agent has already seen the full protocol earlier in this
         # conversation; long sessions may compact it away, so restate just

@@ -41,8 +41,6 @@ export function ThreadComposer({
       ? 'Sending…'
       : isAgentWorking
         ? 'Add instruction to current work…'
-      : isMultiline
-        ? 'Send follow-up…'
         : 'Send a task to the Workspace Agent…'
 
   const submit = async () => {

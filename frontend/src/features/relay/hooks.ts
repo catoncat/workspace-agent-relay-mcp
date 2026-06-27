@@ -12,6 +12,7 @@ import {
   renameAgent,
   renameConversation,
   setConversationPinned,
+  steerConversation,
   streamRun,
   updateAgent,
 } from '@/api/client'
@@ -187,6 +188,39 @@ export function useCreateRun(conversationId: number | null) {
           if (runs.some((run) => run.id === detail.run.id)) return runs
           return [...runs, detail.run].sort((a, b) => a.id - b.id)
         })
+        void queryClient.invalidateQueries({ queryKey: relayQueryKeys.runs(conversationId) })
+      }
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useSteer(conversationId: number | null) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (input: string) => {
+      if (!conversationId) throw new Error('Select a conversation before sending a task.')
+      // steerConversation falls back to createRun on 409 (no active run), so
+      // this returns a RunDetail either way.
+      const { run, triggerFailed, warning } = await steerConversation(conversationId, input)
+      const detail = await getRunDetail(run.id)
+      if (triggerFailed) {
+        toast.warning(
+          warning
+            ? `${warning}. Your message was saved — open the run to review or retry.`
+            : 'Your message was saved, but triggering the agent failed. Open the run to review or retry.',
+        )
+      }
+      return detail
+    },
+    onSuccess: (detail) => {
+      queryClient.setQueryData(relayQueryKeys.runDetail(detail.run.id), detail)
+      if (conversationId) {
+        // Steer reuses an existing run, so it is already in the list; still
+        // invalidate so status/trigger fields refresh.
         void queryClient.invalidateQueries({ queryKey: relayQueryKeys.runs(conversationId) })
       }
     },

@@ -61,6 +61,7 @@ MCP_INSTRUCTIONS = (
     "(and local tool traces after bind_relay_run on your local-ops MCP).\n"
     "Relay workflow: record_plan first → bind_relay_run on your local execution MCP → batch record_progress(step_updates) → "
     "record_result once when the turn truly ends (done/failed/blocked). Plan changes use record_plan or skipped steps, not record_result. "
+    "A mid-turn follow-up (steer) arrives as another trigger with the SAME request_id and a freshly rotated callback_token (use the new token for all further callbacks); treat it as guidance on the CURRENT turn — update the plan, do not start a new turn. "
     "Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as steps unless debugging that plumbing. "
     "ask_user pauses the turn; it is not completion. blocked is for external hard blockers only.\n"
     "Every call returns the current plan snapshot. No shell/filesystem/git on this server — use your local-ops MCP for execution."

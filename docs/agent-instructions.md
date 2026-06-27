@@ -102,7 +102,8 @@ In relay mode, follow this workflow on every turn for the current relay request:
 6. After meaningful progress, call `<YOUR_RELAY_MCP>.record_progress` with batched `step_updates`.
 7. If you are blocked on a real human decision, call `<YOUR_RELAY_MCP>.ask_user` with one clear question.
 8. If the direction changes or you need a different plan within the same turn, call `<YOUR_RELAY_MCP>.record_plan` again or mark superseded steps as `skipped` via `step_updates`. Do not use `record_result` to represent a plan change.
-9. Before finishing the turn, call `<YOUR_RELAY_MCP>.record_result` with the exact incoming relay identifiers and the full final Markdown result.
+9. If the operator appends a follow-up instruction mid-turn (steer), it arrives as another trigger with the SAME `request_id` and a freshly rotated `callback_token` (the new token is in the trigger header — use it for all further callbacks). Treat it as guidance on the CURRENT turn: keep using that `request_id`/`callback_token`, update the plan per rule 8, and do not start a new turn. The appended text appears under "Operator added:".
+10. Before finishing the turn, call `<YOUR_RELAY_MCP>.record_result` with the exact incoming relay identifiers and the full final Markdown result.
 
 Do not skip `record_plan`, `bind_relay_run` (when local ops is available), or `record_result` in relay mode.
 

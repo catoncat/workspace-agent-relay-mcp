@@ -208,6 +208,57 @@ export async function createRun(
   throw new Error(formatApiError(text))
 }
 
+// Append guidance to the active run in this conversation (steer): same run,
+// rotated callback_token, same request_id. The backend returns the updated
+// run on success / 502 (trigger failed but run updated). On 409 there is no
+// active run to steer (race: it went terminal between SSE status and send),
+// so fall back to creating a new turn. The response shape matches createRun
+// so callers can treat both uniformly.
+export async function steerConversation(
+  conversationId: number,
+  input_markdown: string,
+): Promise<CreateRunResponse> {
+  const response = await fetch(`/api/conversations/${conversationId}/steer`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ input_markdown }),
+  })
+  const text = await response.text()
+  let body: unknown = null
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = null
+  }
+
+  if (response.status === 409) {
+    return createRun(conversationId, input_markdown)
+  }
+
+  if (response.ok && body && typeof body === 'object' && 'id' in body) {
+    return { run: body as Run, triggerFailed: false }
+  }
+
+  if (
+    response.status === 502 &&
+    body &&
+    typeof body === 'object' &&
+    'run' in body &&
+    body.run &&
+    typeof body.run === 'object' &&
+    'id' in body.run
+  ) {
+    const payload = body as { error?: string; run: Run }
+    return {
+      run: payload.run,
+      triggerFailed: true,
+      warning: payload.error?.trim() || 'Trigger request failed',
+    }
+  }
+
+  throw new Error(formatApiError(text))
+}
+
 export function streamRun(
   runId: number,
   onDetail: (detail: RunDetail) => void,

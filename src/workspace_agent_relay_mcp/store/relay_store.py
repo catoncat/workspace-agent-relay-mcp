@@ -593,6 +593,54 @@ class RelayStore:
         self._notify_run(int(payload["id"]))
         return payload
 
+    def steer_run(
+        self,
+        *,
+        run_id: int,
+        new_callback_token: str,
+        user_input: str,
+    ) -> dict[str, Any]:
+        """Operator adds a mid-turn instruction to an active run (steer).
+
+        Rotates the run's callback_token (the old plaintext is unrecoverable —
+        only its hash is stored — so a fresh token is issued and handed to the
+        agent in the steer trigger input). The request_id is preserved so the
+        turn identity stays the same; the agent's subsequent record_plan /
+        record_progress / record_result land on this same run. Late callbacks
+        carrying the old token fail validation (hash mismatch) and are ignored.
+
+        Raises KeyError if the run does not exist, ValueError if it is already
+        terminal (the operator should send a new turn instead).
+        """
+        now = _now()
+        redacted_input = _redact_callback_token(user_input, new_callback_token)
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Run not found: {run_id}")
+            run = _row_to_dict(row) or {}
+            if run["status"] in TERMINAL_STATUSES:
+                raise ValueError("Run is already terminal; send a new turn instead.")
+            conn.execute(
+                """
+                UPDATE runs
+                SET callback_token_hash = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (_hash_token(new_callback_token), now, run_id),
+            )
+            self._append_event_conn(
+                conn,
+                run_id=run_id,
+                request_id="dashboard",
+                event_type="user_message",
+                title=None,
+                markdown=redacted_input,
+                payload={"source": "operator_steer"},
+            )
+        self._notify_run(run_id)
+        return self.get_run(run_id)
+
     def _get_run_by_request_id_conn(self, conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
         row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row is None:

@@ -876,6 +876,157 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     assert third["parent_run_id"] is None
 
 
+def _make_active_run(store: RelayStore, *, request_id: str, callback_token: str) -> dict:
+    """Create a run, give it a plan, and advance it to `accepted` (active)."""
+    agent = store.list_agents()[0]
+    conversation = store.list_conversations()[0]
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key=conversation["conversation_key"],
+        input_markdown="first turn",
+        callback_token=callback_token,
+        idempotency_key=request_id,
+        request_id=request_id,
+    )
+    store.record_plan(
+        request_id=request_id,
+        conversation_key=conversation["conversation_key"],
+        callback_token=callback_token,
+        steps=[{"id": "s1", "title": "Do the thing"}],
+    )
+    store.update_run_trigger_result(
+        request_id=request_id,
+        trigger_http_status=202,
+        trigger_x_request_id="req_api",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    return run
+
+
+def test_steer_run_rotates_token_and_appends_user_message(tmp_path: Path) -> None:
+    """Steer rotates the callback_token (old plaintext is unrecoverable) and
+    appends a user_message event on the SAME run (same request_id). The old
+    token stops validating; the new token works."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
+    _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    assert store.get_run_by_request_id("run_1")["status"] == "accepted"
+
+    steered = store.steer_run(
+        run_id=store.get_run_by_request_id("run_1")["id"],
+        new_callback_token="secret-rotated",
+        user_input="You didn't push.",
+    )
+
+    # Same turn identity (request_id preserved); still active.
+    assert steered["request_id"] == "run_1"
+    assert steered["status"] == "accepted"
+    # No new run row was created.
+    assert len(store.list_runs_for_conversation(store.list_conversations()[0]["id"])) == 1
+
+    # A user_message event was appended on the same run.
+    events = store.list_events(steered["id"])
+    user_messages = [e for e in events if e["event_type"] == "user_message"]
+    assert len(user_messages) == 1
+    assert user_messages[0]["markdown"] == "You didn't push."
+    assert json.loads(user_messages[0]["payload_json"])["source"] == "operator_steer"
+
+    # Old token no longer validates; new token does.
+    old_progress = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-first",
+        message="late with old token",
+    )
+    assert old_progress["success"] is False
+    assert old_progress["error"]["code"] == "invalid_callback_token"
+
+    new_progress = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-rotated",
+        message="progress with new token",
+        step_updates=[{"id": "s1", "status": "in_progress"}],
+    )
+    assert new_progress["success"] is True
+
+
+def test_steer_run_rejects_terminal_or_missing_run(tmp_path: Path) -> None:
+    """Steer is only for active runs: terminal runs raise ValueError (the
+    operator should send a new turn), missing runs raise KeyError."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
+    run = _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    # Finish the run -> terminal.
+    store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-first",
+        status="done",
+        title="Done",
+        markdown="final",
+    )
+    assert store.get_run_by_request_id("run_1")["status"] == "done"
+
+    with pytest.raises(ValueError):
+        store.steer_run(run_id=run["id"], new_callback_token="secret-rotated", user_input="too late")
+
+    with pytest.raises(KeyError):
+        store.steer_run(run_id=999999, new_callback_token="secret-rotated", user_input="no run")
+
+
+def test_steer_lets_agent_finish_with_new_token(tmp_path: Path) -> None:
+    """After steer, the agent can record_result(done) with the rotated token to
+    close the SAME turn; the old token cannot."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
+    _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    store.steer_run(
+        run_id=store.get_run_by_request_id("run_1")["id"],
+        new_callback_token="secret-rotated",
+        user_input="You didn't push.",
+    )
+
+    old_result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-first",
+        status="done",
+        title="Done",
+        markdown="final",
+    )
+    assert old_result["success"] is False
+    assert old_result["error"]["code"] == "invalid_callback_token"
+    assert store.get_run_by_request_id("run_1")["status"] == "accepted"
+
+    new_result = store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        callback_token="secret-rotated",
+        status="done",
+        title="Done",
+        markdown="pushed and finished",
+    )
+    assert new_result["success"] is True
+    assert store.get_run_by_request_id("run_1")["status"] == "done"
+
+
 def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

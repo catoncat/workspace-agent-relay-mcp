@@ -329,6 +329,78 @@ def test_api_follow_up_reuses_conversation_key_but_generates_new_message_ids(tmp
     assert trigger_client.calls[1]["idempotency_key"] == second["idempotency_key"]
 
 
+def test_api_steer_route_appends_to_active_run(tmp_path: Path) -> None:
+    """Steer on a conversation with an active run reuses the same run row
+    (same request_id) and dispatches another trigger with steer wording + a
+    fresh idempotency key; a user_message event is appended on the run."""
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        run = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "First message"},
+        ).json()
+        assert run["status"] == "accepted"
+
+        steer_response = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={"input_markdown": "You didn't push."},
+        )
+        assert steer_response.status_code == 200
+        steered = steer_response.json()
+        # Same turn / same run row.
+        assert steered["id"] == run["id"]
+        assert steered["request_id"] == run["request_id"]
+
+        # A second trigger was dispatched with a fresh idempotency key, same
+        # conversation_key, same request_id in the input, and steer wording.
+        assert len(trigger_client.calls) == 2
+        steer_call = trigger_client.calls[1]
+        assert steer_call["conversation_key"] == "research:sherlog"
+        assert steer_call["idempotency_key"] != run["idempotency_key"]
+        assert f"request_id: {run['request_id']}" in steer_call["input_text"]
+        assert "SAME turn" in steer_call["input_text"]
+        assert steer_call["input_text"].endswith("You didn't push.")
+
+        # The user_message event is persisted on the run.
+        detail = client.get(f"/api/runs/{run['id']}").json()
+        user_messages = [e for e in detail["events"] if e["event_type"] == "user_message"]
+        assert len(user_messages) == 1
+        assert user_messages[0]["markdown"] == "You didn't push."
+
+
+def test_api_steer_route_returns_409_when_no_active_run(tmp_path: Path) -> None:
+    """Steer with no active run (no runs, or only terminal runs) returns 409 so
+    the frontend falls back to creating a new turn."""
+    client, _ = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+
+        # No runs at all -> 409.
+        no_runs = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={"input_markdown": "anything"},
+        )
+        assert no_runs.status_code == 409
+
+        # A terminal (dismissed) run does not count as active -> 409.
+        run = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "First message"},
+        ).json()
+        client.post(f"/api/runs/{run['id']}/dismiss", json={})
+        dismissed = client.get(f"/api/runs/{run['id']}").json()
+        assert dismissed["run"]["status"] == "done"
+
+        only_terminal = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={"input_markdown": "still anything"},
+        )
+        assert only_terminal.status_code == 409
+
+
 def test_dashboard_names_continuation_key_and_recent_conversation_url_actions(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
