@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ClipboardCopy, MessageSquarePlus, Pencil, Settings, Trash2 } from 'lucide-react'
+import { ClipboardCopy, MessageSquarePlus, Pencil, Pin, PinOff, Settings, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Agent, Conversation } from '@/api/types'
 import { ThemeMenu, sidebarHeaderIconClass } from '@/components/ThemeMenu'
@@ -23,11 +23,9 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -37,7 +35,11 @@ import { buildConversationKey, defaultConversationName } from '@/lib/conversatio
 import { cn } from '@/lib/utils'
 
 const threadButtonClass =
-  'h-7 rounded-md px-2 text-[13px] font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground data-active:bg-sidebar-accent data-active:font-normal data-active:text-sidebar-foreground'
+  'h-7 w-full rounded-md text-[13px] font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground data-active:bg-sidebar-accent data-active:font-normal data-active:text-sidebar-foreground'
+
+const threadIndentClass = 'pl-5 pr-2'
+const threadIndentSingleClass = 'pl-3.5 pr-2'
+const agentLabelClass = 'pl-2.5 pr-2 pb-0.5 text-[11px] font-normal text-muted-foreground/80'
 
 export type CreateConversationInput = {
   agentId: number
@@ -54,6 +56,7 @@ type Props = {
   creating?: boolean
   onRename?: (id: number, name: string) => void | Promise<unknown>
   onDelete?: (id: number) => void | Promise<unknown>
+  onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
   onOpenSettings?: () => void
   loading?: boolean
 }
@@ -67,6 +70,7 @@ export function RelaySidebar({
   creating = false,
   onRename,
   onDelete,
+  onPin,
   onOpenSettings,
   loading = false,
 }: Props) {
@@ -93,46 +97,30 @@ export function RelaySidebar({
 
   return (
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
-      <SidebarHeader className="px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">Agent Relay</span>
-          <div className="flex items-center gap-0.5">
-            {onOpenSettings ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={sidebarHeaderIconClass}
-                title="Settings"
-                onClick={onOpenSettings}
-              >
-                <Settings className="size-3.5" />
-                <span className="sr-only">Open settings</span>
-              </Button>
-            ) : null}
-            <ThemeMenu />
-          </div>
-        </div>
-      </SidebarHeader>
-
-      <SidebarContent className="gap-0 px-2 pb-3">
-        <SidebarGroup className="p-0">
-          <SidebarGroupLabel className="h-7 px-2 text-xs font-medium text-muted-foreground">
-            Threads
-          </SidebarGroupLabel>
-          {onCreate ? (
-            <SidebarGroupAction
-              title="New thread"
+      <SidebarContent className="gap-0 px-2 pb-2 pt-2">
+        {onCreate ? (
+          <div className="mb-1 px-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               disabled={creating}
+              title="New thread"
               onClick={handleStartCreate}
+              className="h-7 w-full justify-start gap-2 px-2 text-[13px] font-normal text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
             >
-              <MessageSquarePlus />
-              <span className="sr-only">New thread</span>
-            </SidebarGroupAction>
-          ) : null}
+              <MessageSquarePlus className="size-3.5 shrink-0 opacity-70" />
+              <span>New thread</span>
+            </Button>
+          </div>
+        ) : null}
+
+        <SidebarGroup className="p-0">
           <SidebarGroupContent className="px-0">
             {isComposing && onCreate ? (
               <InlineCreateRow
                 agents={agents}
+                grouped={Boolean(grouped)}
                 pending={creating}
                 onCancel={handleCancelCreate}
                 onSubmit={handleSubmitCreate}
@@ -144,20 +132,20 @@ export function RelaySidebar({
                 {loading ? 'Loading…' : 'No threads yet'}
               </p>
             ) : grouped ? (
-              grouped.map((group) => (
-                <div key={group.agent.id} className="mb-2 last:mb-0">
-                  <p className="px-2 pb-0.5 text-[11px] font-normal text-muted-foreground/80">
-                    {group.agent.name}
-                  </p>
+              grouped.map((group, groupIndex) => (
+                <div key={group.agent.id} className={cn('mb-1 last:mb-0', groupIndex > 0 && 'pt-1.5')}>
+                  <p className={agentLabelClass}>{group.agent.name}</p>
                   <SidebarMenu className="gap-0.5">
                     {group.items.map((item) => (
                       <ConversationRow
                         key={item.id}
                         item={item}
                         isActive={item.id === selectedId}
+                        indentClass={threadIndentClass}
                         onSelect={onSelect}
                         onRename={onRename}
                         onDelete={onDelete}
+                        onPin={onPin}
                       />
                     ))}
                   </SidebarMenu>
@@ -170,9 +158,11 @@ export function RelaySidebar({
                     key={item.id}
                     item={item}
                     isActive={item.id === selectedId}
+                    indentClass={threadIndentSingleClass}
                     onSelect={onSelect}
                     onRename={onRename}
                     onDelete={onDelete}
+                    onPin={onPin}
                   />
                 ))}
               </SidebarMenu>
@@ -180,6 +170,25 @@ export function RelaySidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border px-2 py-2">
+        <div className="flex items-center gap-0.5">
+          {onOpenSettings ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={sidebarHeaderIconClass}
+              title="Settings"
+              onClick={onOpenSettings}
+            >
+              <Settings className="size-3.5" />
+              <span className="sr-only">Open settings</span>
+            </Button>
+          ) : null}
+          <ThemeMenu />
+        </div>
+      </SidebarFooter>
+
       <SidebarRail />
     </Sidebar>
   )
@@ -187,12 +196,13 @@ export function RelaySidebar({
 
 type InlineCreateProps = {
   agents: Agent[]
+  grouped?: boolean
   pending?: boolean
   onCancel: () => void
   onSubmit: (input: CreateConversationInput) => void | Promise<unknown>
 }
 
-function InlineCreateRow({ agents, pending = false, onCancel, onSubmit }: InlineCreateProps) {
+function InlineCreateRow({ agents, grouped = false, pending = false, onCancel, onSubmit }: InlineCreateProps) {
   const [name, setName] = useState('')
   const [agentId, setAgentId] = useState<number | null>(agents[0]?.id ?? null)
   const showAgentPicker = agents.length > 1
@@ -214,7 +224,7 @@ function InlineCreateRow({ agents, pending = false, onCancel, onSubmit }: Inline
   }, [agentId, agents, name, onSubmit, pending])
 
   return (
-    <div className="mb-1.5 space-y-2 px-1 py-1">
+    <div className={cn('mb-1.5 space-y-2 py-1', grouped ? 'pl-3 pr-0.5' : 'px-0.5')}>
       {showAgentPicker ? (
         <div className="inline-flex max-w-full flex-wrap gap-0.5 rounded-md bg-muted/60 p-0.5">
           {agents.map((agent) => (
@@ -280,18 +290,21 @@ function groupConversations(
 type RowProps = {
   item: Conversation
   isActive: boolean
+  indentClass: string
   onSelect: (id: number) => void
   onRename?: (id: number, name: string) => void | Promise<unknown>
   onDelete?: (id: number) => void | Promise<unknown>
+  onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
 }
 
-function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowProps) {
+function ConversationRow({ item, isActive, indentClass, onSelect, onRename, onDelete, onPin }: RowProps) {
   const [isRenaming, setIsRenaming] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [draftName, setDraftName] = useState(item.name)
   const deleteHintId = `delete-conversation-${item.id}-hint`
   const displayName = item.name.trim() || 'Untitled'
+  const isPinned = Boolean(item.pinned_at)
 
   useEffect(() => {
     setDraftName(item.name)
@@ -329,6 +342,16 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
     [],
   )
 
+  const handlePin = useCallback(async () => {
+    if (!onPin) return
+    try {
+      await onPin(item.id, !isPinned)
+      toast.success(isPinned ? 'Unpinned' : 'Pinned')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Pin update failed')
+    }
+  }, [isPinned, item.id, onPin])
+
   const handleDelete = useCallback(async () => {
     if (!onDelete) return
     setIsDeleting(true)
@@ -347,7 +370,7 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
     <SidebarMenuItem>
       <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
         {isRenaming ? (
-          <div className="px-0.5 py-0.5">
+          <div className={cn('py-0.5', indentClass)}>
             <Input
               autoFocus
               value={draftName}
@@ -374,10 +397,11 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
                   isActive={isActive}
                   size="sm"
                   onClick={() => onSelect(item.id)}
-                  className={threadButtonClass}
+                  className={cn(threadButtonClass, indentClass)}
                 />
               }
             >
+              {isPinned ? <Pin className="size-3 shrink-0 opacity-70" /> : null}
               <span className="truncate">{displayName}</span>
             </ContextMenuTrigger>
             <ContextMenuContent className="w-60">
@@ -391,6 +415,10 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
                 <span>Copy key</span>
               </ContextMenuItem>
               <ContextMenuSeparator />
+              <ContextMenuItem disabled={!onPin} onClick={() => void handlePin()}>
+                {isPinned ? <PinOff /> : <Pin />}
+                <span>{isPinned ? 'Unpin' : 'Pin'}</span>
+              </ContextMenuItem>
               <ContextMenuItem disabled={!onRename} onClick={() => setIsRenaming(true)}>
                 <Pencil />
                 <span>Rename</span>

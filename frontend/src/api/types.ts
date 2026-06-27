@@ -4,6 +4,7 @@ export type Agent = {
   trigger_url: string
   trigger_id: string
   token_ref: string
+  token_configured: boolean
 }
 
 // A token_ref the relay knows how to resolve (from its config snapshot). The
@@ -20,6 +21,7 @@ export type Conversation = {
   agent_id: number
   name: string
   conversation_key: string
+  pinned_at?: string | null
 }
 
 export type Run = {

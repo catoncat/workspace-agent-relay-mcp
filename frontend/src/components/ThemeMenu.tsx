@@ -26,7 +26,7 @@ export function ThemeMenu() {
         <Palette className="size-3.5" />
         <span className="sr-only">Theme settings</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="start" className="w-44">
         <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Appearance</p>
         {COLOR_MODES.map((item) => (
           <DropdownMenuItem key={item.id} onClick={() => setMode(item.id)}>

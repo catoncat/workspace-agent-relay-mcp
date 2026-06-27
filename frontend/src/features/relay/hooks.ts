@@ -5,11 +5,14 @@ import {
   createAgent,
   createConversation,
   createRun,
+  deleteAgent,
   deleteConversation,
   getRunDetail,
   renameAgent,
   renameConversation,
+  setConversationPinned,
   streamRun,
+  updateAgent,
 } from '@/api/client'
 import type { Agent, Conversation, Run, RunDetail } from '@/api/types'
 import {
@@ -34,7 +37,7 @@ export type CreateConversationInput = {
 export type CreateAgentInput = {
   name: string
   trigger_url: string
-  token_ref: string
+  access_token: string
 }
 
 export function useBootstrap() {
@@ -152,11 +155,40 @@ export function useCreateAgent() {
   })
 }
 
+export function useUpdateAgent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: number; name?: string; access_token?: string }) =>
+      updateAgent(id, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
 export function useRenameAgent() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({ id, name }: { id: number; name: string }) => renameAgent(id, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useDeleteAgent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => deleteAgent(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
@@ -210,6 +242,21 @@ export function useDeleteConversation() {
 
   return useMutation({
     mutationFn: (id: number) => deleteConversation(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function usePinConversation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>
+      setConversationPinned(id, pinned),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },

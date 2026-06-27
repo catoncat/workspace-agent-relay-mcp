@@ -9,7 +9,7 @@ export const RUN_ACTIVE_STATUSES = new Set([
 
 export const RUN_TERMINAL_STATUSES = new Set(['done', 'blocked', 'failed', 'superseded'])
 
-/** Run is in-flight; composer should show a spinner and block a new turn. */
+/** Run is in-flight; composer send button shows a spinner until the user types to steer. */
 export const RUN_COMPOSER_BUSY_STATUSES = new Set(['pending', 'running', 'accepted', 'waiting', 'progress'])
 
 export const RUN_USER_REPLY_STATUSES = new Set(['needs_user', 'question', 'ask_user'])

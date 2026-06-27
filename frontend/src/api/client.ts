@@ -24,11 +24,10 @@ function formatApiError(text: string): string {
     const body = JSON.parse(text) as { error?: string }
     const message = body.error?.trim()
     if (!message) return text || 'Request failed'
-    if (message.includes('WORKSPACE_AGENT_RELAY_AGENT_TOKEN')) {
+    if (message.includes('access token') || message.includes('WORKSPACE_AGENT_RELAY_AGENT_TOKEN')) {
       return (
-        'Workspace Agent token is missing on the relay server. ' +
-        'Set WORKSPACE_AGENT_RELAY_AGENT_TOKEN in .env (server-side; not the dashboard API token), ' +
-        'then restart workspace-agent-relay-mcp.'
+        'Workspace Agent access token is missing for this agent. ' +
+        'Open Settings, select the agent, and paste its access token from ChatGPT.'
       )
     }
     return message
@@ -54,23 +53,10 @@ export async function listAgents(): Promise<Agent[]> {
 }
 
 export async function ensureDefaultAgent(): Promise<Agent[]> {
-  let agents = await listAgents()
-  if (agents.length === 0) {
-    await api('/api/agents', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: 'default',
-        trigger_url: '',
-        token_ref: 'env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN',
-      }),
-    })
-    agents = await listAgents()
-  }
-  return agents
+  return listAgents()
 }
 
-// Token_refs the relay can resolve (from its config snapshot). Used to populate
-// the "create agent" form's token_ref dropdown. Only refs are returned.
+// Legacy: env-backed token refs for deployments that still use .env tokens.
 export async function listTokenRefs(): Promise<TokenRef[]> {
   return api('/api/agents/token-refs')
 }
@@ -78,16 +64,27 @@ export async function listTokenRefs(): Promise<TokenRef[]> {
 export async function createAgent(body: {
   name: string
   trigger_url: string
-  token_ref: string
+  access_token: string
 }): Promise<Agent> {
   return api('/api/agents', { method: 'POST', body: JSON.stringify(body) })
 }
 
-export async function renameAgent(agentId: number, name: string): Promise<Agent> {
+export async function updateAgent(
+  agentId: number,
+  body: { name?: string; access_token?: string },
+): Promise<Agent> {
   return api(`/api/agents/${agentId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   })
+}
+
+export async function renameAgent(agentId: number, name: string): Promise<Agent> {
+  return updateAgent(agentId, { name })
+}
+
+export async function deleteAgent(agentId: number): Promise<{ success: boolean }> {
+  return api(`/api/agents/${agentId}`, { method: 'DELETE' })
 }
 
 export async function listConversations(): Promise<Conversation[]> {
@@ -102,14 +99,28 @@ export async function createConversation(body: {
   return api('/api/conversations', { method: 'POST', body: JSON.stringify(body) })
 }
 
+export async function updateConversation(
+  conversationId: number,
+  body: { name?: string; pinned?: boolean },
+): Promise<Conversation> {
+  return api(`/api/conversations/${conversationId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
 export async function renameConversation(
   conversationId: number,
   name: string,
 ): Promise<Conversation> {
-  return api(`/api/conversations/${conversationId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ name }),
-  })
+  return updateConversation(conversationId, { name })
+}
+
+export async function setConversationPinned(
+  conversationId: number,
+  pinned: boolean,
+): Promise<Conversation> {
+  return updateConversation(conversationId, { pinned })
 }
 
 export async function deleteConversation(conversationId: number): Promise<{ success: boolean }> {

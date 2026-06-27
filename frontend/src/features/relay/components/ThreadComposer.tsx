@@ -22,18 +22,19 @@ export function ThreadComposer({
 }: Props) {
   const [text, setText] = useState('')
   const shortcut = useSendShortcut()
-  const isBusy = mode === 'sending' || mode === 'waiting'
+  const isSending = mode === 'sending'
+  const isAgentWorking = mode === 'waiting'
+  const hasText = Boolean(text.trim())
+  const showWorkingButton = isSending || (isAgentWorking && !hasText)
 
   const placeholder =
-    mode === 'waiting'
-      ? 'Waiting for agent response…'
-      : mode === 'sending'
-        ? 'Sending…'
-        : 'Send a task to the Workspace Agent…'
+    mode === 'sending'
+      ? 'Sending…'
+      : 'Send a task to the Workspace Agent…'
 
   const submit = async () => {
     const trimmed = text.trim()
-    if (!trimmed || isBusy || disabled) return
+    if (!trimmed || disabled || isSending) return
     setText('')
     await onSend(trimmed)
   }
@@ -54,18 +55,18 @@ export function ThreadComposer({
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            disabled={disabled || isBusy}
+            disabled={disabled}
             className="border-0 bg-transparent px-1.5 py-1.5 shadow-none ring-0 focus-visible:ring-0 disabled:opacity-60 dark:bg-transparent"
           />
           <Button
             type="button"
             size="icon-sm"
-            variant={isBusy ? 'secondary' : 'default'}
-            disabled={disabled || isBusy || !text.trim()}
+            variant={showWorkingButton ? 'secondary' : 'default'}
+            disabled={disabled || isSending || !hasText}
             onClick={() => void submit()}
-            aria-label={isBusy ? 'Agent working' : 'Send'}
+            aria-label={showWorkingButton ? 'Agent working' : 'Send'}
           >
-            {isBusy ? (
+            {showWorkingButton ? (
               <LoaderCircleIcon className="size-4 animate-spin" />
             ) : (
               <ArrowUpIcon className="size-4" />
@@ -73,8 +74,10 @@ export function ThreadComposer({
           </Button>
         </div>
         <div className="mt-1.5 px-1 text-xs text-muted-foreground">
-          {isBusy ? (
-            <span>{mode === 'sending' ? 'Triggering agent…' : 'Agent is working on this turn'}</span>
+          {isSending ? (
+            <span>Triggering agent…</span>
+          ) : isAgentWorking && !hasText ? (
+            <span>Agent is working on this turn — type to steer or start a new turn</span>
           ) : (
             <>
               <kbd className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px]">

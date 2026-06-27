@@ -12,6 +12,7 @@ import {
   useCreateConversation,
   useCreateRun,
   useDeleteConversation,
+  usePinConversation,
   useRenameConversation,
   useRunDetailStream,
   useRunDetails,
@@ -53,6 +54,7 @@ export function RelayPage() {
   const createConversationMutation = useCreateConversation()
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
+  const pinConversationMutation = usePinConversation()
 
   const agentNameById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent.name])),
@@ -129,6 +131,13 @@ export function RelayPage() {
     [deleteConversationMutation, navigate, selectedConversationId],
   )
 
+  const handlePinConversation = useCallback(
+    async (id: number, pinned: boolean) => {
+      await pinConversationMutation.mutateAsync({ id, pinned })
+    },
+    [pinConversationMutation],
+  )
+
   return (
     <SidebarProvider>
       <RelaySidebar
@@ -140,6 +149,7 @@ export function RelayPage() {
         creating={createConversationMutation.isPending}
         onRename={(id, name) => renameConversationMutation.mutateAsync({ id, name })}
         onDelete={handleDeleteConversation}
+        onPin={handlePinConversation}
         onOpenSettings={() => setSettingsOpen(true)}
         loading={bootstrapQuery.isLoading || bootstrapQuery.isFetching}
       />
