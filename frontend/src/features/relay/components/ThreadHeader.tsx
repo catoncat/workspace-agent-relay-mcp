@@ -1,115 +1,91 @@
-import { Bug, ClipboardCopy, Check, ExternalLink, Settings } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { ClipboardCopy, ExternalLink, MoreHorizontal } from 'lucide-react'
+import { useCallback } from 'react'
 import { toast } from 'sonner'
-import type { Conversation, RunDetail } from '@/api/types'
-import { StatusBadge } from '@/components/StatusBadge'
-import { ThemeToggle } from '@/components/ThemeToggle'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import type { Conversation } from '@/api/types'
+import { buttonVariants } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLinkItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { SidebarTrigger } from '@/components/ui/sidebar'
+import { cn } from '@/lib/utils'
 
 type Props = {
   selectedConversation: Conversation | null
-  selectedDetail: RunDetail | null
+  selectedAgentName?: string
   loading: boolean
   recentUrl: string | null
   runCount: number
-  onOpenDebug: () => void
-  onOpenSettings: () => void
 }
 
 export function ThreadHeader({
   selectedConversation,
-  selectedDetail,
+  selectedAgentName,
   loading,
   recentUrl,
   runCount,
-  onOpenDebug,
-  onOpenSettings,
 }: Props) {
   const title = selectedConversation?.name ?? (loading ? 'Loading...' : 'No conversation selected')
   const conversationKey = selectedConversation?.conversation_key
-  const [copied, setCopied] = useState(false)
-  const copyTimeoutRef = useRef<number | null>(null)
 
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current !== null) {
-        window.clearTimeout(copyTimeoutRef.current)
-      }
-    }
-  }, [])
+  const subtitleParts = [
+    selectedAgentName,
+    runCount > 0 ? `${runCount} ${runCount === 1 ? 'turn' : 'turns'}` : null,
+  ].filter(Boolean)
 
   const handleCopyKey = useCallback(async () => {
     if (!conversationKey) return
     try {
       await navigator.clipboard.writeText(conversationKey)
-      setCopied(true)
       toast.success('Continuation key copied')
-      if (copyTimeoutRef.current !== null) {
-        window.clearTimeout(copyTimeoutRef.current)
-      }
-      copyTimeoutRef.current = window.setTimeout(() => {
-        setCopied(false)
-        copyTimeoutRef.current = null
-      }, 1500)
     } catch {
       toast.error('Clipboard unavailable')
     }
   }, [conversationKey])
 
+  const hasMenuActions = Boolean(conversationKey || recentUrl)
+
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
+    <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-3 py-2">
       <SidebarTrigger />
-      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={title}>
-        {title}
-      </h1>
-
-      <div className="flex shrink-0 items-center gap-1.5">
-        {selectedDetail ? <StatusBadge status={selectedDetail.run.status} /> : null}
-        <Badge variant="secondary" className="tabular-nums">
-          {runCount} {runCount === 1 ? 'run' : 'runs'}
-        </Badge>
-
-        {conversationKey ? (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            title="Copy continuation key"
-            onClick={handleCopyKey}
-          >
-            {copied ? <Check /> : <ClipboardCopy />}
-            <span className="sr-only">Copy continuation key</span>
-          </Button>
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-sm font-semibold" title={title}>
+          {title}
+        </h1>
+        {subtitleParts.length > 0 ? (
+          <p className="truncate text-[11px] text-muted-foreground">{subtitleParts.join(' · ')}</p>
         ) : null}
+      </div>
 
-        {recentUrl ? (
-          <Button
-            render={<a href={recentUrl} target="_blank" rel="noopener noreferrer" />}
-            variant="ghost"
-            size="icon-sm"
-            title={`Open conversation: ${recentUrl}`}
-          >
-            <ExternalLink />
-            <span className="sr-only">Open conversation</span>
-          </Button>
+      <div className="flex shrink-0 items-center gap-1">
+        {hasMenuActions ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }))}
+              title="Conversation actions"
+            >
+              <MoreHorizontal />
+              <span className="sr-only">Conversation actions</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {conversationKey ? (
+                <DropdownMenuItem onClick={() => void handleCopyKey()}>
+                  <ClipboardCopy />
+                  Copy continuation key
+                </DropdownMenuItem>
+              ) : null}
+              {recentUrl ? (
+                <DropdownMenuLinkItem href={recentUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink />
+                  Open in ChatGPT
+                </DropdownMenuLinkItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
-
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          title="Trigger trace"
-          disabled={!selectedDetail}
-          onClick={onOpenDebug}
-        >
-          <Bug />
-          <span className="sr-only">Open trigger trace</span>
-        </Button>
-        <Button variant="ghost" size="icon-sm" title="Settings" onClick={onOpenSettings}>
-          <Settings />
-          <span className="sr-only">Open settings</span>
-        </Button>
-        <ThemeToggle size="icon-sm" />
       </div>
     </header>
   )

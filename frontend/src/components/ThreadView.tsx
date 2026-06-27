@@ -9,11 +9,14 @@ import {
   MessageContent,
 } from '@/components/ai-elements/message'
 import { Shimmer } from '@/components/ai-elements/shimmer'
-import { StatusBadge } from '@/components/StatusBadge'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ThreadProse } from '@/components/ThreadProse'
 import { cn } from '@/lib/utils'
+import {
+  RUN_ACTIVE_STATUSES,
+  RUN_TERMINAL_STATUSES,
+} from '@/lib/runStatus'
 import type { JsonValue, Plan, PlanStep, PlanStepStatus, Run, RunDetail, RunEvent, RunEventPayload, ToolTraceFields } from '@/api/types'
 import {
   CheckIcon,
@@ -25,8 +28,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
-const ACTIVE_STATUSES = new Set(['pending', 'running', 'accepted', 'waiting', 'needs_user', 'trigger_failed'])
-const TERMINAL_STATUSES = new Set(['done', 'blocked', 'failed', 'superseded'])
+const ACTIVE_STATUSES = RUN_ACTIVE_STATUSES
+const TERMINAL_STATUSES = RUN_TERMINAL_STATUSES
 
 type TimelineSegment =
   | { kind: 'traces'; events: RunEvent[] }
@@ -63,15 +66,9 @@ type Props = {
   onSend?: (text: string) => void | Promise<void>
 }
 
-export function planAnchorId(runId: number): string {
-  return `plan-anchor-${runId}`
-}
-
 export function ThreadView({ details, loading = false, onSend }: Props) {
   const activeDetail = useMemo(() => pickActiveRunDetail(details), [details])
-  const planAnchorVisible = usePlanAnchorVisible(
-    activeDetail ? planAnchorId(activeDetail.run.id) : null,
-  )
+
   if (loading) {
     return (
       <Conversation className="h-full">
@@ -95,7 +92,7 @@ export function ThreadView({ details, loading = false, onSend }: Props) {
 
   return (
     <Conversation className="h-full">
-      {activeDetail && !planAnchorVisible ? (
+      {activeDetail ? (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-background from-60% via-background/90 to-transparent px-4 pb-6 pt-4">
           <div className="mx-auto max-w-3xl">
             <StickyPlanBar detail={activeDetail} />
@@ -145,10 +142,8 @@ function RunThread({
 
   return (
     <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16 pl-0.5">
-      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-muted-foreground/70">
+      <div className="px-1 text-[11px] font-medium text-muted-foreground/70">
         <span className="tabular-nums">Turn {turnIndex}</span>
-        <span className="text-muted-foreground/40">·</span>
-        <StatusBadge status={run.status} />
       </div>
 
       <Message from="user">
@@ -157,13 +152,11 @@ function RunThread({
         </MessageContent>
       </Message>
 
-      {detail.plan ? (
-        <PlanChecklist
+      {detail.plan && !planActive ? (
+        <PlanCompactLine
           plan={detail.plan}
-          active={planActive}
           superseded={planSuperseded}
           revised={planRevised}
-          anchorId={isAuthoritative ? planAnchorId(run.id) : undefined}
         />
       ) : null}
 
@@ -236,151 +229,96 @@ export function pickActiveRunDetail(details: RunDetail[]): RunDetail | null {
   return null
 }
 
-function usePlanAnchorVisible(anchorId: string | null): boolean {
-  const [visible, setVisible] = useState(true)
-
-  useEffect(() => {
-    if (!anchorId) {
-      setVisible(true)
-      return
-    }
-
-    let observer: IntersectionObserver | null = null
-    let cancelled = false
-
-    const attach = () => {
-      if (cancelled) return
-      const element = document.getElementById(anchorId)
-      if (!element) {
-        setVisible(true)
-        return
-      }
-      observer?.disconnect()
-      observer = new IntersectionObserver(
-        ([entry]) => {
-          if (!cancelled) setVisible(entry.isIntersecting)
-        },
-        { threshold: 0, rootMargin: '-8px 0px 0px 0px' },
-      )
-      observer.observe(element)
-    }
-
-    attach()
-    const retry = window.setTimeout(attach, 0)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(retry)
-      observer?.disconnect()
-    }
-  }, [anchorId])
-
-  return visible
-}
-
-function PlanChecklist({
+function PlanCompactLine({
   plan,
-  active,
   superseded = false,
   revised = false,
-  anchorId,
 }: {
   plan: Plan
-  active: boolean
   superseded?: boolean
   revised?: boolean
-  anchorId?: string
 }) {
-  const { doneCount, inProgress, total, allDone } = planProgress(plan)
+  const { doneCount, total } = planProgress(plan)
+  const tags = [
+    superseded ? 'superseded' : null,
+    revised ? 'revised' : null,
+  ].filter(Boolean)
 
   return (
-    <div
-      id={anchorId}
-      className={cn('scroll-mt-20 border-l-2 border-border pl-3', superseded && 'opacity-70')}
-    >
-      <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-foreground/80">
-        <span>Plan</span>
-        <span className="tabular-nums">
-          {doneCount}/{total}
-        </span>
-        {superseded ? (
-          <span className="text-[11px] text-muted-foreground/80">superseded</span>
-        ) : revised ? (
-          <span className="text-[11px] text-muted-foreground/80">revised</span>
-        ) : active && inProgress && !allDone ? (
-          <span className="flex items-center gap-1 text-foreground">
-            <LoaderCircleIcon className="size-3 animate-spin" />
-            <span className="text-[11px]">working</span>
-          </span>
-        ) : null}
-      </div>
-      <ol className="space-y-1.5">
-        {plan.steps.map((step, index) => (
-          <PlanStepRow
-            key={step.id}
-            step={step}
-            live={active}
-            delayMs={index * 80}
-          />
-        ))}
-      </ol>
-    </div>
+    <p className="px-1 text-xs text-muted-foreground">
+      Plan {doneCount}/{total}
+      {tags.length > 0 ? ` · ${tags.join(' · ')}` : null}
+    </p>
   )
 }
 
 function StickyPlanBar({ detail }: { detail: RunDetail }) {
-  const run = detail.run
+  const [expanded, setExpanded] = useState(true)
   const plan = detail.plan
   if (!plan) return null
-  const { doneCount, inProgress, total, allDone, currentStep } = planProgress(plan)
-
-  const handleClick = () => {
-    const el = document.getElementById(planAnchorId(run.id))
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  const { doneCount, total, currentStep } = planProgress(plan)
+  const isLive = ACTIVE_STATUSES.has(detail.run.status)
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="pointer-events-auto group w-full rounded-xl border border-border/70 bg-background/95 p-3 text-left shadow-md backdrop-blur-md transition-[border-color,box-shadow,background-color] hover:border-border hover:bg-background hover:shadow-lg"
-    >
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <span>Plan</span>
-        <span className="tabular-nums text-foreground">
-          {doneCount}/{total}
-        </span>
-        {inProgress && !allDone ? (
-          <span className="flex items-center gap-1 text-foreground">
-            <LoaderCircleIcon className="size-3 animate-spin" />
-            <span className="text-[11px]">working</span>
+    <div className="pointer-events-auto w-full overflow-hidden rounded-xl border border-border/70 bg-background/95 shadow-md backdrop-blur-md">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="group w-full p-3 text-left transition-colors hover:bg-muted/30"
+        aria-expanded={expanded}
+      >
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <span>Plan</span>
+          <span className="tabular-nums text-foreground">
+            {doneCount}/{total}
           </span>
-        ) : null}
-        <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground/80 transition-colors group-hover:text-muted-foreground">
-          <span className="hidden sm:inline">View plan</span>
-          <ChevronUpIcon className="size-3.5 shrink-0" />
-        </span>
-      </div>
-
-      <p className="truncate text-sm leading-snug text-foreground">
-        {currentStep ? currentStep.title : 'Working…'}
-      </p>
-
-      <div className="mt-2.5 flex items-center gap-1" aria-hidden="true">
-        {plan.steps.map((step) => (
-          <span
-            key={step.id}
-            className={cn(
-              'h-1 min-w-0 flex-1 rounded-full transition-colors',
-              step.status === 'done' && 'bg-primary/70',
-              step.status === 'in_progress' && 'bg-primary',
-              step.status === 'skipped' && 'bg-muted-foreground/25',
-              step.status === 'pending' && 'bg-muted',
+          <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground/80 transition-colors group-hover:text-muted-foreground">
+            <span className="hidden sm:inline">{expanded ? 'Collapse' : 'Expand'}</span>
+            {expanded ? (
+              <ChevronUpIcon className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronDownIcon className="size-3.5 shrink-0" />
             )}
-          />
-        ))}
-      </div>
-    </button>
+          </span>
+        </div>
+
+        {!expanded ? (
+          <p className="truncate text-sm leading-snug text-foreground">
+            {currentStep ? currentStep.title : 'Working…'}
+          </p>
+        ) : null}
+
+        <div className={cn('flex items-center gap-1', expanded ? 'mt-0' : 'mt-2.5')} aria-hidden="true">
+          {plan.steps.map((step) => (
+            <span
+              key={step.id}
+              className={cn(
+                'h-1 min-w-0 flex-1 rounded-full transition-colors',
+                step.status === 'done' && 'bg-primary/70',
+                step.status === 'in_progress' && 'bg-primary',
+                step.status === 'skipped' && 'bg-muted-foreground/25',
+                step.status === 'pending' && 'bg-muted',
+              )}
+            />
+          ))}
+        </div>
+      </button>
+
+      {expanded ? (
+        <div className="border-t border-border/60 px-3 pb-3 pt-2">
+          <ol className="space-y-1.5">
+            {plan.steps.map((step, index) => (
+              <PlanStepRow
+                key={step.id}
+                step={step}
+                live={isLive}
+                delayMs={index * 80}
+              />
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -468,6 +406,12 @@ function RunProgressTimeline({
   hasResultEvent: boolean
 }) {
   const segments = useMemo(() => buildTimelineSegments(events), [events])
+  const lastNarrationIndex = useMemo(() => {
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      if (segments[index]?.kind === 'narration') return index
+    }
+    return -1
+  }, [segments])
   const lastTraceSegmentIndex = useMemo(() => {
     for (let index = segments.length - 1; index >= 0; index -= 1) {
       if (segments[index]?.kind === 'traces') return index
@@ -479,10 +423,12 @@ function RunProgressTimeline({
     <div className="flex flex-col gap-4">
       {segments.map((segment, index) => {
         if (segment.kind === 'narration') {
+          const live = isActive && !hasResultEvent && index === lastNarrationIndex
           return (
             <NarrationItem
               key={`narr-${segment.event.id ?? index}`}
               event={segment.event}
+              live={live}
             />
           )
         }
@@ -500,7 +446,7 @@ function RunProgressTimeline({
   )
 }
 
-function NarrationItem({ event }: { event: RunEvent }) {
+function NarrationItem({ event, live = false }: { event: RunEvent; live?: boolean }) {
   const titleDuplicatesMarkdown =
     !!event.title && !!event.markdown && event.title.trim() === event.markdown.trim()
   return (
@@ -509,7 +455,10 @@ function NarrationItem({ event }: { event: RunEvent }) {
         <p className="text-sm font-medium text-foreground">{event.title}</p>
       ) : null}
       {event.markdown ? (
-        <ThreadProse className={event.title && !titleDuplicatesMarkdown ? 'mt-1' : undefined}>
+        <ThreadProse
+          live={live}
+          className={event.title && !titleDuplicatesMarkdown ? 'mt-1' : undefined}
+        >
           {event.markdown}
         </ThreadProse>
       ) : null}
@@ -652,12 +601,9 @@ function QuestionEvent({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge status="needs_user" />
-        <span className="text-xs font-medium text-muted-foreground">
-          {event.title || 'User input needed'}
-        </span>
-      </div>
+      <p className="text-xs font-medium text-muted-foreground">
+        {event.title || 'User input needed'}
+      </p>
       {event.markdown ? <ThreadProse>{event.markdown}</ThreadProse> : null}
       {context ? <p className="text-sm text-muted-foreground">{context}</p> : null}
       {choices.length > 0 ? (

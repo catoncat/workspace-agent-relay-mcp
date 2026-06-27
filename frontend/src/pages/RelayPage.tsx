@@ -1,16 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { DebugSheet } from '@/components/DebugSheet'
-import { RelaySidebar } from '@/components/RelaySidebar'
+import { RelaySidebar, type CreateConversationInput } from '@/components/RelaySidebar'
 import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import type { Agent, Conversation, Run } from '@/api/types'
-import {
-  NewConversationDialog,
-  type NewConversationValues,
-} from '@/features/relay/components/NewConversationDialog'
-import { ThreadComposer } from '@/features/relay/components/ThreadComposer'
+import { ThreadComposer, resolveComposerMode } from '@/features/relay/components/ThreadComposer'
 import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
 import {
   useBootstrap,
@@ -28,19 +23,6 @@ const EMPTY_AGENTS: Agent[] = []
 const EMPTY_CONVERSATIONS: Conversation[] = []
 const EMPTY_RUNS: Run[] = []
 
-const SELECTED_AGENT_KEY = 'relaySelectedAgentId'
-
-function loadSelectedAgentId(): number | null {
-  const raw = localStorage.getItem(SELECTED_AGENT_KEY)
-  if (!raw) return null
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function saveSelectedAgentId(id: number): void {
-  localStorage.setItem(SELECTED_AGENT_KEY, String(id))
-}
-
 export function RelayPage() {
   const params = useParams({ strict: false })
   const navigate = useNavigate()
@@ -50,36 +32,10 @@ export function RelayPage() {
   const selectedRunId = parseRouteId(params.runId)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [debugOpen, setDebugOpen] = useState(false)
-  const [newConversationOpen, setNewConversationOpen] = useState(false)
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(loadSelectedAgentId)
 
   const bootstrapQuery = useBootstrap()
   const agents = bootstrapQuery.data?.agents ?? EMPTY_AGENTS
   const conversations = bootstrapQuery.data?.conversations ?? EMPTY_CONVERSATIONS
-
-  // Keep selectedAgentId valid: once agents load, fall back to the first one if
-  // the stored selection no longer exists (or was never set).
-  useEffect(() => {
-    if (agents.length === 0) return
-    if (agents.some((agent) => agent.id === selectedAgentId)) return
-    const next = agents[0].id
-    setSelectedAgentId(next)
-    saveSelectedAgentId(next)
-  }, [agents, selectedAgentId])
-
-  const handleSelectAgent = useCallback((id: number) => {
-    setSelectedAgentId(id)
-    saveSelectedAgentId(id)
-  }, [])
-
-  const filteredConversations = useMemo(
-    () =>
-      selectedAgentId
-        ? conversations.filter((conversation) => conversation.agent_id === selectedAgentId)
-        : conversations,
-    [conversations, selectedAgentId],
-  )
 
   const runsQuery = useRuns(selectedConversationId)
   const runs = runsQuery.data ?? EMPTY_RUNS
@@ -98,28 +54,38 @@ export function RelayPage() {
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
 
+  const agentNameById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent.name])),
+    [agents],
+  )
+
   const selectedConversation = useMemo(
-    () => filteredConversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
-    [filteredConversations, selectedConversationId],
+    () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
+    [conversations, selectedConversationId],
   )
-  const selectedDetail = useMemo(
-    () => runDetails.find((detail) => detail.run.id === selectedRunId) ?? null,
-    [runDetails, selectedRunId],
-  )
+  const selectedAgentName = selectedConversation
+    ? agentNameById.get(selectedConversation.agent_id)
+    : undefined
   const recentUrl = useMemo(
     () => runDetails.map((detail) => detail.run.conversation_url).find(Boolean) ?? null,
     [runDetails],
   )
+  const latestRunStatus = runDetails[runDetails.length - 1]?.run.status
+  const composerMode = resolveComposerMode(latestRunStatus, createRunMutation.isPending)
 
   useEffect(() => {
-    if (filteredConversations.length === 0) return
-    const stillSelected = filteredConversations.some(
+    if (conversations.length === 0) return
+    if (!selectedConversationId) {
+      navigate({ to: '/c/$conversationId', params: { conversationId: String(conversations[0].id) }, replace: true })
+      return
+    }
+    const stillSelected = conversations.some(
       (conversation) => conversation.id === selectedConversationId,
     )
-    if (!selectedConversationId || !stillSelected) {
-      navigate({ to: '/c/$conversationId', params: { conversationId: String(filteredConversations[0].id) }, replace: true })
+    if (!stillSelected && !bootstrapQuery.isFetching) {
+      navigate({ to: '/c/$conversationId', params: { conversationId: String(conversations[0].id) }, replace: true })
     }
-  }, [filteredConversations, navigate, selectedConversationId])
+  }, [bootstrapQuery.isFetching, conversations, navigate, selectedConversationId])
 
   useEffect(() => {
     if (!selectedConversationId || selectedRunId || runDetails.length === 0) return
@@ -138,19 +104,19 @@ export function RelayPage() {
   )
 
   const handleCreateConversation = useCallback(
-    (values: NewConversationValues) => {
-      if (!selectedAgentId) return
-      createConversationMutation.mutate(
-        { agentId: selectedAgentId, name: values.name, key: values.key },
-        {
-          onSuccess: (conversation) => {
-            setNewConversationOpen(false)
-            navigate({ to: '/c/$conversationId', params: { conversationId: String(conversation.id) } })
-          },
-        },
-      )
+    async (values: CreateConversationInput) => {
+      const conversation = await createConversationMutation.mutateAsync({
+        agentId: values.agentId,
+        name: values.name,
+        key: values.key,
+      })
+      navigate({
+        to: '/c/$conversationId',
+        params: { conversationId: String(conversation.id) },
+        replace: true,
+      })
     },
-    [createConversationMutation, navigate, selectedAgentId],
+    [createConversationMutation, navigate],
   )
 
   const handleDeleteConversation = useCallback(
@@ -167,27 +133,24 @@ export function RelayPage() {
     <SidebarProvider>
       <RelaySidebar
         agents={agents}
-        selectedAgentId={selectedAgentId}
-        onSelectAgent={handleSelectAgent}
-        conversations={filteredConversations}
+        conversations={conversations}
         selectedId={selectedConversationId}
         onSelect={(id) => navigate({ to: '/c/$conversationId', params: { conversationId: String(id) } })}
-        onNew={() => setNewConversationOpen(true)}
-        onRefresh={() => void bootstrapQuery.refetch()}
+        onCreate={handleCreateConversation}
+        creating={createConversationMutation.isPending}
         onRename={(id, name) => renameConversationMutation.mutateAsync({ id, name })}
         onDelete={handleDeleteConversation}
+        onOpenSettings={() => setSettingsOpen(true)}
         loading={bootstrapQuery.isLoading || bootstrapQuery.isFetching}
       />
 
       <SidebarInset className="flex h-svh min-h-0 flex-col overflow-hidden">
         <ThreadHeader
           selectedConversation={selectedConversation}
-          selectedDetail={selectedDetail}
+          selectedAgentName={agents.length > 1 ? selectedAgentName : undefined}
           loading={bootstrapQuery.isLoading}
           recentUrl={recentUrl}
           runCount={runDetails.length}
-          onOpenDebug={() => setDebugOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -197,7 +160,7 @@ export function RelayPage() {
         <ThreadComposer
           conversationKey={selectedConversation?.conversation_key}
           disabled={!selectedConversationId}
-          sending={createRunMutation.isPending}
+          mode={composerMode}
           onSend={handleSend}
         />
       </SidebarInset>
@@ -208,13 +171,6 @@ export function RelayPage() {
         token={token}
         onTokenChange={setToken}
         agents={agents}
-      />
-      <DebugSheet open={debugOpen} onOpenChange={setDebugOpen} detail={selectedDetail} />
-      <NewConversationDialog
-        open={newConversationOpen}
-        pending={createConversationMutation.isPending}
-        onOpenChange={setNewConversationOpen}
-        onCreate={handleCreateConversation}
       />
     </SidebarProvider>
   )

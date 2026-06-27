@@ -21,6 +21,8 @@ const threadProseClass = cn(
 type ThreadProseProps = {
   children: string
   className?: string
+  /** Animate newly streamed narration while the run is still active. */
+  live?: boolean
 }
 
 const threadMarkdownComponents: Components = {
@@ -30,10 +32,13 @@ const threadMarkdownComponents: Components = {
   li: ThreadLi,
 }
 
-export function ThreadProse({ children, className }: ThreadProseProps) {
+export function ThreadProse({ children, className, live = false }: ThreadProseProps) {
   return (
     <Streamdown
-      mode="static"
+      mode={live ? 'streaming' : 'static'}
+      animated={live ? { sep: 'char', stagger: 0.012, duration: 0.15 } : false}
+      isAnimating={live}
+      caret={live ? 'block' : undefined}
       className={cn(threadProseClass, className)}
       plugins={streamdownPlugins}
       components={threadMarkdownComponents}

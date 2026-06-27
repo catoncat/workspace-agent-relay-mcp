@@ -233,7 +233,7 @@ def test_dashboard_names_continuation_key_and_recent_conversation_url_actions(tm
     assert 'id="root"' in response.text
     bundle = _frontend_bundle_text()
     assert "Copy continuation key" in bundle
-    assert "Open conversation" in bundle
+    assert "Open in ChatGPT" in bundle
     assert "/api/runs/" in bundle
 
 
