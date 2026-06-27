@@ -139,6 +139,10 @@ function RunThread({
   const progressEvents = detail.events.filter(
     (event) => event.event_type === 'progress' && (event.markdown || event.title),
   )
+  const systemEvents = detail.events.filter(
+    (event) => event.event_type === 'system' && (event.markdown || event.title),
+  )
+  const hasSystemEvent = systemEvents.length > 0
 
   return (
     <div id={`run-${run.id}`} className="flex flex-col gap-3 scroll-mt-16 pl-0.5">
@@ -191,7 +195,15 @@ function RunThread({
           />
         ))}
 
-      {!hasResultEvent && TERMINAL_STATUSES.has(run.status) ? (
+      {systemEvents.map((event, index) => (
+        <SystemEvent
+          key={`system-${event.id ?? index}`}
+          event={event}
+          runStatus={run.status}
+        />
+      ))}
+
+      {!hasResultEvent && !hasSystemEvent && TERMINAL_STATUSES.has(run.status) ? (
         <TerminalStatus run={run} />
       ) : null}
 
@@ -651,6 +663,16 @@ function ResultEvent({ event, runStatus }: { event: RunEvent; runStatus: string 
     <RunTerminalMessage
       status={status}
       title={event.title || 'Run result'}
+      markdown={event.markdown}
+    />
+  )
+}
+
+function SystemEvent({ event, runStatus }: { event: RunEvent; runStatus: string }) {
+  return (
+    <RunTerminalMessage
+      status={runStatus}
+      title={event.title || 'System update'}
       markdown={event.markdown}
     />
   )

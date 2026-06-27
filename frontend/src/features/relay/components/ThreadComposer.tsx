@@ -48,6 +48,7 @@ export function ThreadComposer({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter') return
+    if (event.nativeEvent.isComposing) return
     if (event.shiftKey) return
     event.preventDefault()
     void submit()
