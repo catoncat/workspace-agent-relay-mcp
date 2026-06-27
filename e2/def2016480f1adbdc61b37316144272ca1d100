@@ -1,0 +1,53 @@
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_1e516fc1f0128a::t_8cb79082788b3d 165-252,271
+frontend/src/api/client.ts
+  s_1e516fc1f0128a::t_a7781ddf2f78a9 211-258
+  s_1e516fc1f0128a::t_8e4ce8fec48098 208-210
+frontend/src/components/ThreadView.tsx
+  s_1e516fc1f0128a::t_4360dcfe806d57 458-467
+  s_1e516fc1f0128a::t_d4a03eb01dccb1 20
+  s_1e516fc1f0128a::t_0a6ab3f8886365 41,44-46,61-65
+  s_1e516fc1f0128a::t_63571a3f43e0f7 123
+  s_1e516fc1f0128a::t_3e0231987f5ec3 156-159,168-172,190,192
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_1e516fc1f0128a::t_ae2a4a74f502b2 596-627,629-643
+  s_1e516fc1f0128a::t_12dc680837776a 628
+tests/test_trigger_payload.py
+  s_1e516fc1f0128a::t_3048d0ea66e7b2 68-94
+frontend/src/pages/RelayPage.tsx
+  s_1e516fc1f0128a::t_b7705f40d1cbb6 58
+  s_1e516fc1f0128a::t_c1a20314679a68 21,24
+  s_1e516fc1f0128a::t_f2d5d0c99b7ec4 119-125,128
+  s_1e516fc1f0128a::t_004a6bebd79793 83-85,92
+frontend/src/features/relay/hooks.ts
+  s_1e516fc1f0128a::t_cf4881a66f3a7f 15
+  s_1e516fc1f0128a::t_4c4f49fadf833f 200-232
+tests/test_relay_store.py
+  s_1e516fc1f0128a::t_900f46113cdf7b 879-1029
+docs/superpowers/specs/2026-06-27-relay-steer-protocol.md
+  s_1e516fc1f0128a::t_00c95ce54a4cb4 1-73
+src/workspace_agent_relay_mcp/server.py
+  s_1e516fc1f0128a::t_1c539a5b6d615f 64
+src/workspace_agent_relay_mcp/trigger.py
+  s_1e516fc1f0128a::t_968799ca53365d 57,65-85
+tests/test_web_api.py
+  s_1e516fc1f0128a::t_8e0d97189951a1 332-403
+docs/agent-instructions.md
+  s_1e516fc1f0128a::t_9ce59196b969f5 105-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "e2def2016480f1adbdc61b37316144272ca1d100",
+  "prompts": {},
+  "sessions": {
+    "s_1e516fc1f0128a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8ab8ed62-66b7-440f-b3de-4a422e3f1eec",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
