@@ -1,0 +1,25 @@
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_a83a203a5ef7f2::t_f1b24efc05f787 334-347
+tests/test_web_api.py
+  s_a83a203a5ef7f2::t_fde96dc8f0cb25 135-150
+tests/test_relay_store.py
+  s_a83a203a5ef7f2::t_09ee2df625a907 24-35
+src/workspace_agent_relay_mcp/api/routes/agents.py
+  s_a83a203a5ef7f2::t_aa32232b8e5dd5 51-69,74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "296c59c4f2afc788d364d41f1728b05e2d00a6c0",
+  "prompts": {},
+  "sessions": {
+    "s_a83a203a5ef7f2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "46741cc5-bfde-4744-9ad9-27bee775ff51",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
