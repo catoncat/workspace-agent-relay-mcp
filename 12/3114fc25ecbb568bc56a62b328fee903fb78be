@@ -1,0 +1,150 @@
+frontend/src/features/relay/hooks.ts
+  s_34618028a38b2e::t_bad2c9c0322af9 8
+  s_091955681249af::t_450ee9b3d14265 59-68,70-95,163
+  s_63dfa69e100aff::t_754cd3680317f7 2
+  s_e8f1ec30de454a::t_35d0517b6516da 320-341,344-347
+  s_63dfa69e100aff::t_716a5d04d3fdf9 69
+  s_34618028a38b2e::t_e92b789805793a 144-162
+  s_091955681249af::t_bd3e503a392f11 26
+  s_091955681249af::t_7202ad8ccea091 164
+src/workspace_agent_relay_mcp/api/routes/conversations.py
+  s_e8f1ec30de454a::t_8ec7f48ca39b38 44-50,52
+frontend/src/components/WorkingIndicator.tsx
+  s_91df3bcb582810::t_b08083e225cda1 1-2,7-13,15-16,18-20,23,25,28-34
+  s_e8f1ec30de454a::t_ce5d63b766ca75 3-6,14,17,21-22,24,26-27
+frontend/src/features/relay/components/ThreadHeader.tsx
+  s_a404bf7ce9ac5f::t_355e545bd8f2f1 54
+  s_a404bf7ce9ac5f::t_33b1944cf8e4a6 13
+frontend/src/index.css
+  s_e8f1ec30de454a::t_31cda178fe4de7 233-269,271-273,275-278,281,284-285,287-288,290-293,295-302,305-307,310-312
+  s_91df3bcb582810::t_de3de41bf01926 231-232,270,274,279-280,282-283,286,289,294,303-304,308-309
+frontend/src/lib/runStatus.ts
+  s_091955681249af::t_972d27cc337b9a 22-38
+frontend/src/components/ui/dialog.tsx
+  s_e8f1ec30de454a::t_2af22104650eff 103
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_34618028a38b2e::t_8f1f2667733af5 165-179,185
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_e8f1ec30de454a::t_a38d103ebde11e 439-445,447-458,467-468,473-477
+  s_34618028a38b2e::t_dcc9225eb83640 960-984
+  s_e8f1ec30de454a::t_1418766130cd33 478
+  s_34618028a38b2e::t_6a10a4cdd371ce 985
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_63dfa69e100aff::t_266bb0d7484ad2 5,32,38-40,50-53,99-104,111-116,146,149-153
+  s_38f9fb52d4497a::t_7e418349a1f94e 6
+  s_38f9fb52d4497a::t_9aa019a64f69cc 85-89
+  s_34618028a38b2e::t_59345d03f1c342 23,25,33
+  s_34618028a38b2e::t_52f08d7865737d 119-131,136-137,139-142
+  s_91df3bcb582810::t_d5aede4df6e44d 56-59,61,64-84,90-95
+  s_34618028a38b2e::t_b4012912671e3d 3,14,16
+  s_34618028a38b2e::t_641fdec0c30aa5 118
+tests/test_relay_store.py
+  s_e8f1ec30de454a::t_a892b8b9ca7260 113-123
+  s_34618028a38b2e::t_7638b025200b05 446-517
+  s_34618028a38b2e::t_82c359d1f3c6a4 518-519
+frontend/src/components/RelaySidebar.tsx
+  s_091955681249af::t_4cab18bf615c69 435
+  s_091955681249af::t_1d7bf234ce67c6 80
+  s_e8f1ec30de454a::t_6c456cd963dd57 41-44
+  s_e8f1ec30de454a::t_5a7cf02fdec65a 115
+  s_e8f1ec30de454a::t_16eb526ee634c1 304
+  s_091955681249af::t_b1354bbcf97417 168
+  s_e8f1ec30de454a::t_00911a44dcfbea 471-472,479-484,487-492
+  s_91df3bcb582810::t_de77ed2b0a68c9 6
+  s_e8f1ec30de454a::t_255feb3c5fb556 316
+  s_e8f1ec30de454a::t_6a140387a5b3b1 410-423
+  s_e8f1ec30de454a::t_008ef69640e9b1 170
+  s_091955681249af::t_4981ec55e0ecf8 302,311-315,317-321
+  s_e8f1ec30de454a::t_dca5de522c1de1 366,368
+  s_e8f1ec30de454a::t_9c23b71af0d8a0 151
+  s_091955681249af::t_f2910e5cdf645c 65
+  s_091955681249af::t_8d3db8aad13307 149
+frontend/src/components/ui/sidebar.tsx
+  s_e8f1ec30de454a::t_b9de3284ee9055 589
+  s_a404bf7ce9ac5f::t_58253e76992fc5 314
+  s_e8f1ec30de454a::t_bc4f648fd6b3c0 30-35,38-53,62-65
+  s_e8f1ec30de454a::t_b4b5caec2e05c6 261
+  s_e8f1ec30de454a::t_30a0a1fbba36f3 321-341,347,349,352-353,359-410
+  s_e8f1ec30de454a::t_90ad5d2d3ee455 273
+  s_e8f1ec30de454a::t_5a981e149abdb9 94-105
+  s_e8f1ec30de454a::t_e8858f661cb6ef 160-163,165,172,175
+tests/test_web_api.py
+  s_34618028a38b2e::t_6f00ec5da2cadf 734-777
+  s_e8f1ec30de454a::t_49e4bec2937130 141-160
+frontend/src/components/SettingsSheet.tsx
+  s_e8f1ec30de454a::t_d68ce02acfb0c2 326-327,335-340,343-348
+frontend/src/pages/RelayPage.tsx
+  s_34618028a38b2e::t_c52a9772ce7e6a 78-79
+  s_091955681249af::t_5aabdbb9302569 172
+  s_091955681249af::t_200f92022be02c 82-89
+  s_34618028a38b2e::t_35f67c8fdb5130 15
+  s_34618028a38b2e::t_8352d98ad886e9 56
+  s_34618028a38b2e::t_19038217c2f555 191,193
+  s_34618028a38b2e::t_a8b0beb0b53b52 120-123
+  s_091955681249af::t_7ae01fb5c467fb 21
+  s_34618028a38b2e::t_28dd5f99041fb4 124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "123114fc25ecbb568bc56a62b328fee903fb78be",
+  "prompts": {},
+  "sessions": {
+    "s_091955681249af": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4f00c455-cd33-4507-9f67-380c4d99bf72",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_34618028a38b2e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1c85a1cf-b37a-4688-917a-8c4e4eaa260e",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_38f9fb52d4497a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "acf27d54-172e-4ab2-b778-495a3d9069ce",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_63dfa69e100aff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b43e29a2-6a67-4627-945a-b6ec7f154921",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_91df3bcb582810": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "450e0bc5-460e-4429-bdfa-9bbbe4a58e91",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a404bf7ce9ac5f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "cb0f202d-ef46-409c-adfc-bebf02827074",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_e8f1ec30de454a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a3d70a80-687a-40aa-9fd0-c79fd066f6c6",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
