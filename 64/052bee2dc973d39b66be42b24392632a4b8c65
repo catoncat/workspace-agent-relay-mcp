@@ -1,0 +1,22 @@
+docs/agent-instructions.md
+  s_1a98f877b1591d::t_6d3bb48e3d02db 174-180
+  s_1a98f877b1591d::t_6836ab6aa0f69b 3-16,20-23,28-173,182,184,186,188-190,195-197
+README.md
+  s_1a98f877b1591d::t_2065d598527935 3,7,9,12-21,24-25,30,32-33,36,38,40,42,44,46,48-52,54,56,58,62-63,65,67,69,71,73,75-77,79,82,85,87,89,91,93-99,101,103,107-109,111,116-120,123,125-128,132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "64052bee2dc973d39b66be42b24392632a4b8c65",
+  "prompts": {},
+  "sessions": {
+    "s_1a98f877b1591d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5cca5388-9895-4f52-9bf6-58e4cb67286b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
