@@ -175,7 +175,7 @@ Tokens are snapshotted from the environment once at startup into `RelayConfig.ag
 
 3. In the dashboard, open **Settings → Register another agent**. Enter a display name, paste that agent's **Trigger URL** (`https://api.chatgpt.com/v1/workspace_agents/agtch_<id>/trigger`), and pick the matching env var from the **Token** dropdown. The dropdown only lists vars that actually have a value on the server.
 
-4. Switch agents with the **Agent** dropdown in the sidebar. The conversation list filters to that agent; new conversations and runs go to the selected agent.
+4. Create conversations from the sidebar. When multiple workspace agents are registered, pick the target agent in the **New conversation** dialog. Each thread stays bound to that agent for all future runs.
 
 Each agent then needs its own ChatGPT-side MCP connector + Instructions pointing at the same relay (the `bind_relay_run` / callback protocol is identical). Runs triggered for agent A use account one's token; runs for agent B use account two's — the relay picks the token from the agent record's `token_ref` at trigger time.
 

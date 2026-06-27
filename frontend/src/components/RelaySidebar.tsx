@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ClipboardCopy, MessageSquarePlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ClipboardCopy, MessageSquarePlus, Pencil, Settings, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Agent, Conversation } from '@/api/types'
+import { ThemeMenu, sidebarHeaderIconClass } from '@/components/ThemeMenu'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -31,95 +33,139 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
+import { buildConversationKey, defaultConversationName } from '@/lib/conversationKey'
+import { cn } from '@/lib/utils'
+
+const threadButtonClass =
+  'h-7 rounded-md px-2 text-[13px] font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground data-active:bg-sidebar-accent data-active:font-normal data-active:text-sidebar-foreground'
+
+export type CreateConversationInput = {
+  agentId: number
+  name: string
+  key: string
+}
 
 type Props = {
   agents: Agent[]
-  selectedAgentId: number | null
-  onSelectAgent: (id: number) => void
   conversations: Conversation[]
   selectedId: number | null
   onSelect: (id: number) => void
-  onNew: () => void
-  onRefresh: () => void
+  onCreate?: (input: CreateConversationInput) => void | Promise<unknown>
+  creating?: boolean
   onRename?: (id: number, name: string) => void | Promise<unknown>
   onDelete?: (id: number) => void | Promise<unknown>
+  onOpenSettings?: () => void
   loading?: boolean
 }
 
 export function RelaySidebar({
   agents,
-  selectedAgentId,
-  onSelectAgent,
   conversations,
   selectedId,
   onSelect,
-  onNew,
-  onRefresh,
+  onCreate,
+  creating = false,
   onRename,
   onDelete,
+  onOpenSettings,
   loading = false,
 }: Props) {
+  const [isComposing, setIsComposing] = useState(false)
+  const grouped = useMemo(() => groupConversations(agents, conversations), [agents, conversations])
+
+  const handleStartCreate = useCallback(() => {
+    if (!onCreate) return
+    setIsComposing(true)
+  }, [onCreate])
+
+  const handleCancelCreate = useCallback(() => {
+    setIsComposing(false)
+  }, [])
+
+  const handleSubmitCreate = useCallback(
+    async (input: CreateConversationInput) => {
+      if (!onCreate) return
+      await onCreate(input)
+      setIsComposing(false)
+    },
+    [onCreate],
+  )
+
   return (
-    <Sidebar collapsible="offcanvas">
-      <SidebarHeader className="border-b border-sidebar-border p-0">
-        <div className="flex h-12 items-center gap-2 px-3">
-          <div className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold leading-none text-primary-foreground">
-            AR
+    <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
+      <SidebarHeader className="px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">Agent Relay</span>
+          <div className="flex items-center gap-0.5">
+            {onOpenSettings ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={sidebarHeaderIconClass}
+                title="Settings"
+                onClick={onOpenSettings}
+              >
+                <Settings className="size-3.5" />
+                <span className="sr-only">Open settings</span>
+              </Button>
+            ) : null}
+            <ThemeMenu />
           </div>
-          <span className="font-semibold tracking-tight">Agent Relay</span>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="ml-auto text-muted-foreground"
-            title="Refresh conversations"
-            onClick={onRefresh}
-            disabled={loading}
-          >
-            <RefreshCw className={loading ? 'motion-safe:animate-spin' : ''} />
-          </Button>
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
-        {agents.length > 0 && (
-          <div className="px-3 pb-2 pt-3">
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Agent</label>
-            <select
-              value={selectedAgentId ?? ''}
-              onChange={(event) => onSelectAgent(Number(event.target.value))}
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/50"
-              aria-label="Select workspace agent"
+      <SidebarContent className="gap-0 px-2 pb-3">
+        <SidebarGroup className="p-0">
+          <SidebarGroupLabel className="h-7 px-2 text-xs font-medium text-muted-foreground">
+            Threads
+          </SidebarGroupLabel>
+          {onCreate ? (
+            <SidebarGroupAction
+              title="New thread"
+              disabled={creating}
+              onClick={handleStartCreate}
             >
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <SidebarGroup>
-          <SidebarGroupLabel>Conversations</SidebarGroupLabel>
-          <SidebarGroupAction title="New conversation" onClick={onNew}>
-            <MessageSquarePlus />
-            <span className="sr-only">New conversation</span>
-          </SidebarGroupAction>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {conversations.length === 0 ? (
-                <SidebarMenuItem>
-                  <div className="px-2 py-4 text-xs text-muted-foreground">
-                    <p>{loading ? 'Loading...' : 'No conversations yet.'}</p>
-                    {!loading ? (
-                      <Button variant="outline" size="sm" className="mt-2 w-full" onClick={onNew}>
-                        <MessageSquarePlus />
-                        New conversation
-                      </Button>
-                    ) : null}
-                  </div>
-                </SidebarMenuItem>
-              ) : (
-                conversations.map((item) => (
+              <MessageSquarePlus />
+              <span className="sr-only">New thread</span>
+            </SidebarGroupAction>
+          ) : null}
+          <SidebarGroupContent className="px-0">
+            {isComposing && onCreate ? (
+              <InlineCreateRow
+                agents={agents}
+                pending={creating}
+                onCancel={handleCancelCreate}
+                onSubmit={handleSubmitCreate}
+              />
+            ) : null}
+
+            {conversations.length === 0 && !isComposing ? (
+              <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                {loading ? 'Loading…' : 'No threads yet'}
+              </p>
+            ) : grouped ? (
+              grouped.map((group) => (
+                <div key={group.agent.id} className="mb-2 last:mb-0">
+                  <p className="px-2 pb-0.5 text-[11px] font-normal text-muted-foreground/80">
+                    {group.agent.name}
+                  </p>
+                  <SidebarMenu className="gap-0.5">
+                    {group.items.map((item) => (
+                      <ConversationRow
+                        key={item.id}
+                        item={item}
+                        isActive={item.id === selectedId}
+                        onSelect={onSelect}
+                        onRename={onRename}
+                        onDelete={onDelete}
+                      />
+                    ))}
+                  </SidebarMenu>
+                </div>
+              ))
+            ) : conversations.length > 0 ? (
+              <SidebarMenu className="gap-0.5">
+                {conversations.map((item) => (
                   <ConversationRow
                     key={item.id}
                     item={item}
@@ -128,15 +174,107 @@ export function RelaySidebar({
                     onRename={onRename}
                     onDelete={onDelete}
                   />
-                ))
-              )}
-            </SidebarMenu>
+                ))}
+              </SidebarMenu>
+            ) : null}
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
       <SidebarRail />
     </Sidebar>
   )
+}
+
+type InlineCreateProps = {
+  agents: Agent[]
+  pending?: boolean
+  onCancel: () => void
+  onSubmit: (input: CreateConversationInput) => void | Promise<unknown>
+}
+
+function InlineCreateRow({ agents, pending = false, onCancel, onSubmit }: InlineCreateProps) {
+  const [name, setName] = useState('')
+  const [agentId, setAgentId] = useState<number | null>(agents[0]?.id ?? null)
+  const showAgentPicker = agents.length > 1
+
+  useEffect(() => {
+    setAgentId(agents[0]?.id ?? null)
+    setName('')
+  }, [agents])
+
+  const commit = useCallback(async () => {
+    const resolvedAgentId = agentId ?? agents[0]?.id
+    if (!resolvedAgentId || pending) return
+    const trimmed = name.trim() || defaultConversationName()
+    await onSubmit({
+      agentId: resolvedAgentId,
+      name: trimmed,
+      key: buildConversationKey(trimmed),
+    })
+  }, [agentId, agents, name, onSubmit, pending])
+
+  return (
+    <div className="mb-1.5 space-y-2 px-1 py-1">
+      {showAgentPicker ? (
+        <div className="inline-flex max-w-full flex-wrap gap-0.5 rounded-md bg-muted/60 p-0.5">
+          {agents.map((agent) => (
+            <button
+              key={agent.id}
+              type="button"
+              disabled={pending}
+              onClick={() => setAgentId(agent.id)}
+              onMouseDown={(event) => event.preventDefault()}
+              className={cn(
+                'rounded px-2 py-0.5 text-[11px] transition-colors',
+                agentId === agent.id
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {agent.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <Input
+        autoFocus
+        value={name}
+        disabled={pending}
+        placeholder="Name this thread…"
+        aria-label="New thread name"
+        className="h-7 border-0 bg-background/80 shadow-none focus-visible:ring-1"
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            void commit()
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+        onBlur={() => {
+          if (name.trim()) void commit()
+          else onCancel()
+        }}
+      />
+    </div>
+  )
+}
+
+function groupConversations(
+  agents: Agent[],
+  conversations: Conversation[],
+): Array<{ agent: Agent; items: Conversation[] }> | null {
+  if (agents.length <= 1) return null
+  const buckets = new Map(agents.map((agent) => [agent.id, [] as Conversation[]]))
+  for (const conversation of conversations) {
+    const bucket = buckets.get(conversation.agent_id)
+    if (bucket) bucket.push(conversation)
+  }
+  return agents
+    .map((agent) => ({ agent, items: buckets.get(agent.id) ?? [] }))
+    .filter((group) => group.items.length > 0)
 }
 
 type RowProps = {
@@ -152,15 +290,8 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [draftName, setDraftName] = useState(item.name)
-  const inputRef = useRef<HTMLInputElement>(null)
   const deleteHintId = `delete-conversation-${item.id}-hint`
-
-  useEffect(() => {
-    if (isRenaming) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
-  }, [isRenaming])
+  const displayName = item.name.trim() || 'Untitled'
 
   useEffect(() => {
     setDraftName(item.name)
@@ -215,72 +346,75 @@ function ConversationRow({ item, isActive, onSelect, onRename, onDelete }: RowPr
   return (
     <SidebarMenuItem>
       <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
-        <ContextMenu>
-          <ContextMenuTrigger render={<div className="w-full" />}>
-            {isRenaming ? (
-              <div className="flex items-center gap-1 px-2 py-1">
-                <input
-                  ref={inputRef}
-                  value={draftName}
-                  aria-label={`Rename ${item.name}`}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      void commitRename()
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault()
-                      cancelRename()
-                    }
-                  }}
-                  className="h-7 w-full rounded border border-input bg-background px-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/50"
+        {isRenaming ? (
+          <div className="px-0.5 py-0.5">
+            <Input
+              autoFocus
+              value={draftName}
+              aria-label={`Rename ${displayName}`}
+              className="h-7 border-0 bg-muted/40 shadow-none focus-visible:ring-1"
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void commitRename()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  cancelRename()
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <ContextMenu>
+            <ContextMenuTrigger
+              render={
+                <SidebarMenuButton
+                  isActive={isActive}
+                  size="sm"
+                  onClick={() => onSelect(item.id)}
+                  className={threadButtonClass}
                 />
-              </div>
-            ) : (
-              <SidebarMenuButton
-                isActive={isActive}
-                onClick={() => onSelect(item.id)}
-                tooltip={item.name}
-              >
-                <span className="truncate font-medium">{item.name}</span>
-              </SidebarMenuButton>
-            )}
-          </ContextMenuTrigger>
-          <ContextMenuContent className="w-60">
-            <div className="flex items-baseline justify-between gap-3 px-2 py-1.5">
-              <span className="min-w-0 truncate text-sm font-medium text-foreground">{item.name}</span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">#{item.id}</span>
-            </div>
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => void handleCopy(item.conversation_key, 'Continuation key')}>
-              <ClipboardCopy />
-              <span>Copy key</span>
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem disabled={!onRename} onClick={() => setIsRenaming(true)}>
-              <Pencil />
-              <span>Rename</span>
-            </ContextMenuItem>
-            <ContextMenuItem
-              disabled={!onDelete}
-              variant="destructive"
-              aria-describedby={deleteHintId}
-              onClick={() => setDeleteOpen(true)}
+              }
             >
-              <Trash2 />
-              <span>Delete</span>
-              <span id={deleteHintId} className="sr-only">
-                Opens a confirmation dialog before deleting this conversation.
-              </span>
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
+              <span className="truncate">{displayName}</span>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-60">
+              <div className="flex items-baseline justify-between gap-3 px-2 py-1.5">
+                <span className="min-w-0 truncate text-sm font-medium text-foreground">{displayName}</span>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">#{item.id}</span>
+              </div>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => void handleCopy(item.conversation_key, 'Continuation key')}>
+                <ClipboardCopy />
+                <span>Copy key</span>
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem disabled={!onRename} onClick={() => setIsRenaming(true)}>
+                <Pencil />
+                <span>Rename</span>
+              </ContextMenuItem>
+              <ContextMenuItem
+                disabled={!onDelete}
+                variant="destructive"
+                aria-describedby={deleteHintId}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 />
+                <span>Delete</span>
+                <span id={deleteHintId} className="sr-only">
+                  Opens a confirmation dialog before deleting this conversation.
+                </span>
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        )}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete conversation?</DialogTitle>
             <DialogDescription>
-              This removes "{item.name}" from the conversation list. Existing run history is archived with it.
+              This removes "{displayName}" from the conversation list. Existing run history is archived with it.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

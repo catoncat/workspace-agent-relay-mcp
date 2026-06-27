@@ -159,7 +159,15 @@ export function useCreateConversation() {
       if (!agentId) throw new Error('Select an agent before creating a conversation.')
       return createConversation({ agent_id: agentId, name, conversation_key: key })
     },
-    onSuccess: () => {
+    onSuccess: (conversation) => {
+      queryClient.setQueryData<BootstrapData>(relayQueryKeys.bootstrap, (current) => {
+        if (!current) return current
+        const conversations = [
+          conversation,
+          ...current.conversations.filter((item) => item.id !== conversation.id),
+        ]
+        return { ...current, conversations }
+      })
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
     onError: (err) => {
