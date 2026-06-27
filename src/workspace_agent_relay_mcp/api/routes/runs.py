@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
-from ...store.relay_store import TERMINAL_STATUSES
+from ...store.relay_store import TERMINAL_STATUSES, USER_REPLY_STATUSES
 from ...store.bus import RunEventBus
 from ...trigger import (
     TriggerClient,
@@ -193,6 +193,10 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         active = next((r for r in runs if r["status"] not in TERMINAL_STATUSES), None)
         if active is None:
             return json_error("no active run to steer; send a new turn instead", status_code=409)
+        # Steering a run that is paused on ask_user (needs_user) is the operator's
+        # ANSWER: it resumes the same turn. Label the trigger accordingly so the
+        # agent treats it as an answer to its question, not brand-new guidance.
+        is_answer = str(active["status"]) in USER_REPLY_STATUSES
         input_markdown = str(payload.get("input_markdown") or "")
         if not input_markdown.strip():
             return json_error("input_markdown must not be empty", status_code=400)
@@ -216,6 +220,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             callback_token=new_callback_token,
             user_input=input_markdown,
             mode="steer",
+            answer=is_answer,
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         try:

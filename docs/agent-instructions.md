@@ -100,9 +100,9 @@ In relay mode, follow this workflow on every turn for the current relay request:
 4. Do not delay binding until later in the turn, and do not pass `relay_url` unless the runtime explicitly requires it.
 5. After binding, do the real work on <YOUR_LOCAL_OPS_MCP> so the operator can see the mirrored tool activity. If <YOUR_LOCAL_OPS_MCP> is unavailable, skip bind but still use relay tools so the operator is not left blind.
 6. After meaningful progress, call `<YOUR_RELAY_MCP>.record_progress` with batched `step_updates`.
-7. If you are blocked on a real human decision, call `<YOUR_RELAY_MCP>.ask_user` with one clear question.
+7. If you are blocked on a real human decision, call `<YOUR_RELAY_MCP>.ask_user` with one clear question. The operator's answer arrives as a steer to the SAME turn (same `request_id`, freshly rotated `callback_token`, labeled "Operator answered:") — resume the turn with that answer; do not start a new turn.
 8. If the direction changes or you need a different plan within the same turn, call `<YOUR_RELAY_MCP>.record_plan` again or mark superseded steps as `skipped` via `step_updates`. Do not use `record_result` to represent a plan change.
-9. If the operator appends a follow-up instruction mid-turn (steer), it arrives as another trigger with the SAME `request_id` and a freshly rotated `callback_token` (the new token is in the trigger header — use it for all further callbacks). Treat it as guidance on the CURRENT turn: keep using that `request_id`/`callback_token`, update the plan per rule 8, and do not start a new turn. The appended text appears under "Operator added:".
+9. If the operator appends a follow-up instruction mid-turn (steer), it arrives as another trigger with the SAME `request_id` and a freshly rotated `callback_token` (the new token is in the trigger header — use it for all further callbacks). Treat it as guidance on the CURRENT turn: keep using that `request_id`/`callback_token`, update the plan per rule 8, and do not start a new turn. The appended text appears under "Operator added:", or under "Operator answered:" when it is the answer to your `ask_user` (same handling either way).
 10. Before finishing the turn, call `<YOUR_RELAY_MCP>.record_result` with the exact incoming relay identifiers and the full final Markdown result.
 
 Do not skip `record_plan`, `bind_relay_run` (when local ops is available), or `record_result` in relay mode.
@@ -133,6 +133,8 @@ Batch related updates together. Do not use `record_progress` to narrate every re
 Use `ask_user` only when a real human decision is required to continue safely.
 
 Do not use `ask_user` for routine progress reporting.
+
+When the operator answers, it arrives as a steer on the SAME turn (labeled "Operator answered:") — resume the turn with the answer; do not start a new turn or re-call `ask_user` for the same question.
 
 ## Final Result
 

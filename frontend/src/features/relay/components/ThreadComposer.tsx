@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { ArrowUpIcon, LoaderCircleIcon, SquareIcon } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 
-type ComposerMode = 'idle' | 'sending' | 'waiting'
+type ComposerMode = 'idle' | 'sending' | 'waiting' | 'replying'
 
 type Props = {
   conversationKey?: string
@@ -36,12 +36,15 @@ export function ThreadComposer({
       ? 'Marking turn as finished…'
       : null
 
+  const isReplying = mode === 'replying'
   const placeholder =
     mode === 'sending'
       ? 'Sending…'
       : isAgentWorking
         ? 'Add instruction to current work…'
-        : 'Send a task to the Workspace Agent…'
+        : isReplying
+          ? 'Answer the agent…'
+          : 'Send a task to the Workspace Agent…'
 
   const submit = async () => {
     const trimmed = text.trim()
@@ -78,9 +81,11 @@ export function ThreadComposer({
           ? isAgentWorking && !hasText && !isSending
             ? 'Mark turn finished'
             : 'Agent working'
-          : isAgentWorking
-            ? 'Send follow-up instruction'
-            : 'Send'
+          : isReplying
+            ? 'Send answer'
+            : isAgentWorking
+              ? 'Send follow-up instruction'
+              : 'Send'
       }
       className={cn(
         'mb-0.5 size-8 shrink-0 rounded-full',
@@ -151,5 +156,6 @@ export function resolveComposerMode(
 ): ComposerMode {
   if (sending) return 'sending'
   if (isComposerBusy(latestRunStatus) && !isUserReplyStatus(latestRunStatus)) return 'waiting'
+  if (isUserReplyStatus(latestRunStatus)) return 'replying'
   return 'idle'
 }

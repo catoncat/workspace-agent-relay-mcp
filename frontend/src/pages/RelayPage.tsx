@@ -21,7 +21,7 @@ import {
   useSteer,
   useWorkingConversationIds,
 } from '@/features/relay/hooks'
-import { isConversationWorking } from '@/lib/runStatus'
+import { shouldSteerLatestRun } from '@/lib/runStatus'
 import { useAuth } from '@/providers/AuthContext'
 
 const EMPTY_AGENTS: Agent[] = []
@@ -80,7 +80,11 @@ export function RelayPage() {
   )
   const latestRun = runDetails[runDetails.length - 1]?.run
   const latestRunStatus = latestRun?.status
-  const conversationWorking = isConversationWorking(latestRunStatus)
+  // Route composer sends: continue the latest run (steer) when it is in-flight
+  // OR paused on ask_user (answering resumes the same turn); otherwise start a
+  // new turn. steerConversation falls back to createRun on 409, so a race that
+  // turns the run terminal between SSE status and send is still safe.
+  const shouldSteer = shouldSteerLatestRun(latestRunStatus)
   const sending = createRunMutation.isPending || steerMutation.isPending
   const composerMode = resolveComposerMode(latestRunStatus, sending)
 
@@ -116,16 +120,17 @@ export function RelayPage() {
     async (text: string) => {
       const trimmed = text.trim()
       if (!trimmed || !selectedConversationId) return
-      // If the conversation has an active run, append guidance to it (steer):
-      // same turn, plan gets updated rather than redone. Otherwise start a new
-      // turn. steerConversation falls back to createRun on 409, so this is safe
-      // even if the run went terminal between SSE status and send.
-      const detail = conversationWorking
+      // If the latest run is in-flight OR paused on ask_user, append to it
+      // (steer): same turn, plan gets updated rather than redone, and an
+      // ask_user answer resumes that turn. Otherwise start a new turn.
+      // steerConversation falls back to createRun on 409, so this is safe even
+      // if the run went terminal between SSE status and send.
+      const detail = shouldSteer
         ? await steerMutation.mutateAsync(trimmed)
         : await createRunMutation.mutateAsync(trimmed)
       navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(selectedConversationId), runId: String(detail.run.id) } })
     },
-    [conversationWorking, createRunMutation, navigate, selectedConversationId, steerMutation],
+    [shouldSteer, createRunMutation, navigate, selectedConversationId, steerMutation],
   )
 
   const handleDismiss = useCallback(async () => {

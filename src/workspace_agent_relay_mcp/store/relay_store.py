@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 
 
 TERMINAL_STATUSES = {"done", "blocked", "failed", "superseded"}
+# Active runs paused on a human decision (set by ask_user). Steering such a run
+# is the operator's ANSWER — it resumes the SAME turn rather than starting a new
+# one, so the route labels the steer trigger accordingly and steer_run transitions
+# the run out of the question state.
+USER_REPLY_STATUSES = {"needs_user", "question", "ask_user"}
 # Agent-settable result statuses. `superseded` is system-only (set when a newer
 # turn starts in the same conversation), so record_result must reject it.
 VALID_RESULT_STATUSES = {"done", "blocked", "failed"}
@@ -621,13 +626,20 @@ class RelayStore:
             run = _row_to_dict(row) or {}
             if run["status"] in TERMINAL_STATUSES:
                 raise ValueError("Run is already terminal; send a new turn instead.")
+            # Answering a paused question (needs_user) resumes the turn: a fresh
+            # trigger is about to be dispatched, so the run leaves the question
+            # state. Reset to "sent" so the upcoming trigger-result update advances
+            # it to "accepted" (agent resuming) on a 202. Other active states
+            # (running, progress, waiting, accepted) are left untouched — the agent
+            # is mid-work there and the steer is added guidance, not a resume.
+            next_status = "sent" if run["status"] in USER_REPLY_STATUSES else run["status"]
             conn.execute(
                 """
                 UPDATE runs
-                SET callback_token_hash = ?, updated_at = ?
+                SET callback_token_hash = ?, status = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (_hash_token(new_callback_token), now, run_id),
+                (_hash_token(new_callback_token), next_status, now, run_id),
             )
             self._append_event_conn(
                 conn,

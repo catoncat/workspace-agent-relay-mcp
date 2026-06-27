@@ -92,6 +92,35 @@ def test_build_trigger_input_steer_reuses_request_id_with_rotated_token() -> Non
     assert "Same relay protocol as before" not in rendered
 
 
+def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
+    """When answer=True, a steer is the operator's reply to an ask_user on this
+    run: it must be framed as the answer (resume the turn) and labeled
+    "Operator answered:" — not the generic "Operator added:" guidance framing."""
+    rendered = build_trigger_input(
+        request_id="relay_789",
+        conversation_key="research:sherlog",
+        callback_token="callback-rotated",
+        user_input="Target the dev branch.",
+        mode="steer",
+        answer=True,
+    )
+
+    assert "request_id: relay_789" in rendered
+    assert "callback_token: callback-rotated" in rendered
+    # Answer framing: references ask_user and asks the agent to RESUME the turn.
+    assert "ask_user" in rendered
+    assert "answer" in rendered.lower()
+    assert "Resume the current turn" in rendered
+    assert "SAME turn" in rendered
+    assert "Operator answered:" in rendered
+    assert rendered.endswith("Target the dev branch.")
+    # Must NOT use the generic guidance label.
+    assert "Operator added:" not in rendered
+    # Same steer guardrails apply.
+    assert "Do NOT start a new turn" in rendered
+    assert "record_plan" in rendered
+
+
 class FakeResponse:
     def __init__(self, status: int, body: bytes, headers: dict[str, str]) -> None:
         self.status = status

@@ -401,6 +401,74 @@ def test_api_steer_route_returns_409_when_no_active_run(tmp_path: Path) -> None:
         assert only_terminal.status_code == 409
 
 
+def test_api_steer_route_answers_ask_user_on_same_run(tmp_path: Path) -> None:
+    """Steering a run that is paused on ask_user (needs_user) is the operator's
+    ANSWER: it reuses the same run row (same request_id), dispatches a trigger
+    framed as the answer ("Operator answered:"), appends a user_message, and
+    leaves the question state — the run advances to "accepted" (agent resuming)
+    once the trigger result is recorded."""
+    from workspace_agent_relay_mcp import server
+
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        # Create the run at the store layer with a known callback_token so we can
+        # drive it into needs_user via ask_user (the dashboard API has no
+        # ask_user endpoint — it is an MCP tool the agent calls).
+        server.store.create_run(
+            agent_id=client.get("/api/agents").json()[0]["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown="First message",
+            callback_token="secret-callback-token",
+            idempotency_key="idem_1",
+            request_id="run_1",
+        )
+        server.store.update_run_trigger_result(
+            request_id="run_1",
+            trigger_http_status=202,
+            trigger_x_request_id="x_req_1",
+            conversation_url="https://chatgpt.com/c/test",
+        )
+        server.store.ask_user(
+            request_id="run_1",
+            conversation_key="research:sherlog",
+            callback_token="secret-callback-token",
+            question="Which branch should I target?",
+            choices=["main", "dev"],
+        )
+        run_id = server.store.get_run_by_request_id("run_1")["id"]
+        assert server.store.get_run_by_request_id("run_1")["status"] == "needs_user"
+
+        steer_response = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={"input_markdown": "Target the dev branch."},
+        )
+        assert steer_response.status_code == 200
+        steered = steer_response.json()
+        # Same turn / same run row; question state left (trigger 202 -> accepted).
+        assert steered["id"] == run_id
+        assert steered["request_id"] == "run_1"
+        assert steered["status"] == "accepted"
+
+        # One trigger dispatched (the run was created at the store layer, not via
+        # the API), framed as the answer — not the generic guidance label.
+        assert len(trigger_client.calls) == 1
+        steer_call = trigger_client.calls[0]
+        assert steer_call["conversation_key"] == "research:sherlog"
+        assert "request_id: run_1" in steer_call["input_text"]
+        assert "Operator answered:" in steer_call["input_text"]
+        assert "Operator added:" not in steer_call["input_text"]
+        assert steer_call["input_text"].endswith("Target the dev branch.")
+
+        # The user_message event is persisted on the same run.
+        detail = client.get(f"/api/runs/{run_id}").json()
+        user_messages = [e for e in detail["events"] if e["event_type"] == "user_message"]
+        assert len(user_messages) == 1
+        assert user_messages[0]["markdown"] == "Target the dev branch."
+
+
 def test_dashboard_names_continuation_key_and_recent_conversation_url_actions(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 

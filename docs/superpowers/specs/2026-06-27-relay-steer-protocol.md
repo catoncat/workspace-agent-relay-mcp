@@ -1,7 +1,7 @@
 # Relay Steer 协议：追加消息续同一 Turn
 
 日期：2026-06-27
-状态：落地中（Phase 2 的 follow-up / steer 从未决转为实现）。
+状态：落地中（Phase 2 的 follow-up / steer 从未决转为实现；同日追加：`ask_user` 回答改为 steer 续同 turn）。
 
 相关既有 spec：
 
@@ -54,6 +54,27 @@
 - `src/workspace_agent_relay_mcp/server.py` — `MCP_INSTRUCTIONS`。
 - `docs/agent-instructions.md` — 第 8 条追加 steer 句。
 
+## ask_user 回答：续同 turn 而非开新 turn（2026-06-27 追加）
+
+steer 落地后浮现的 Phase 2 未决项：`ask_user` 把 run 置 `needs_user` 后，操作者回答应**续同一 turn**，而非像旧实现那样 `create_run` 开新 turn 再把提问 run `supersede`。`needs_user` 是活跃、非终态 run，符合 steer 前提，故回答直接走 steer。
+
+| 场景 | 行为 |
+|------|------|
+| Agent `ask_user` → run `needs_user` → composer 发送 / 点选项 | **steer（answer 变体）**：同一 run，轮换 token，追加 `user_message`，同 `request_id` 重 trigger；trigger 文案用「Operator answered:」+「resume the turn」框架 |
+| steer_run 对 `needs_user` run | 轮换 token + 追加 `user_message` + **状态 `needs_user` → `sent`**（回答=恢复，离开提问态）；随后 `update_run_trigger_result` 把 `sent` → `accepted`（agent 恢复中） |
+| 其它 active 状态（running / progress / accepted / waiting）的 steer | 状态**不变**（agent 仍在工作，steer 是追加指导，不是恢复） |
+| 旧 token 迟到回调 | `invalid_callback_token`（同通用 steer） |
+
+关键状态机修正：`update_run_trigger_result` 只在 `TRIGGER_MUTABLE_RUN_STATUSES = {draft, sent}` 时改状态；若 steer_run 不把 `needs_user` 重置为 `sent`，run 会**卡在 `needs_user`**——UI 仍显示「可回答」、选项仍可点、可重复回答。故 `steer_run` 在 run 处于 `USER_REPLY_STATUSES = {needs_user, question, ask_user}` 时显式置 `sent`，由后续 trigger 结果推进到 `accepted`。
+
+新增常量 `USER_REPLY_STATUSES`（`store/relay_store.py`，经 `db.py` re-export）；`build_trigger_input` 新增 `answer: bool` 参数；steer 路由按 `active["status"] ∈ USER_REPLY_STATUSES` 传 `answer=True`。
+
+触发口径同步（同上三处，本次更新点）：
+
+- `trigger.py` — `build_trigger_input(mode="steer", answer=True)` 的「Operator answered:」正文。
+- `server.py` — `MCP_INSTRUCTIONS` 的 ask_user 句接上「回答以 steer 续同 turn」。
+- `docs/agent-instructions.md` — 第 7 条 + 第 9 条 +「Blocking Questions」节均补「回答=steer、`Operator answered:`、续同 turn」。
+
 ## UI 对齐
 
 - 删 `SupersededRunSummary` 折叠卡；`superseded` run 走正常 `RunThread`（plan frozen、progress 照常），无虚线框、无「folded into…」文案。
@@ -61,13 +82,16 @@
 - 去 `Turn N · follow-up` 标签噪音。
 - `RunPhaseHint` 仅在「trigger 已发但无任何 event/plan」时短暂显示。
 - `user_message` 事件作为用户气泡内联渲染，让 steer 追加消息像聊天一样出现在 agent 进度之间。
+- composer 新增 `replying` 模式：run `needs_user` 时 placeholder 显示「Answer the agent…」、发送键 aria-label「Send answer」；发送路由经 `shouldSteerLatestRun`（`isComposerBusy || isUserReplyStatus`）走 steer，而非旧的 `createRun`。回答后 run 离开 `needs_user` → `accepted`，`QuestionEvent` 选项自动失效，避免重复回答。
 
 ## 验证清单
 
 - 后端 `pytest tests/ -q` 全绿（含 `test_steer_run_*` / `test_steer_route_*` / `test_steer_input_*`）。
 - 前端 `npm run build` 零错误。
 - 端到端（须真实 Workspace Agent，`callback_token` 哈希不可伪造）：run A 进行中发追加「你没 push」→ A 仍 active、新增 `user_message` 事件、token 已轮换、agent 用新 token 回调且 `record_plan` 标 revised 而非新开 turn；A 完成后 `record_result(done)`。
+- 端到端 ask_user 回答：run A 中 agent `ask_user` → A 变 `needs_user`、composer 切 `replying`；操作者点选项 / 输入回答 → 走 steer（同 A、token 轮换、`user_message` 气泡、trigger 文案「Operator answered:」）→ A 离开 `needs_user` 进 `accepted`、选项失效；agent 用新 token 续同 turn 完成 `record_result(done)`。
 
 ## 变更记录
 
 - **2026-06-27**：初稿。落地 Phase 2 steer：token 轮换 + `user_message` 事件 + 同 `request_id` 重 trigger + UI 对话化。
+- **2026-06-27（追加）**：`ask_user` 回答改为 steer 续同 turn。新增 `USER_REPLY_STATUSES`；`steer_run` 对 `needs_user` run 置 `sent`（修复「卡在 needs_user 可重复回答」）；`build_trigger_input(answer=True)` 「Operator answered:」文案；steer 路由按状态传 `answer`；三处口径同步；前端 `shouldSteerLatestRun` 路由 + composer `replying` 模式。

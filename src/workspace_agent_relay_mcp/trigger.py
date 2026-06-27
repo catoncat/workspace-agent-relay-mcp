@@ -55,6 +55,7 @@ def build_trigger_input(
     user_input: str,
     is_continuation: bool = False,
     mode: str = "initial",
+    answer: bool = False,
 ) -> str:
     header = [
         f"request_id: {request_id}",
@@ -70,16 +71,40 @@ def build_trigger_input(
         # revise the plan via record_plan or skip old steps, and keep using the
         # request_id/callback_token above for callbacks. Do NOT call record_result
         # to signal a direction change.
+        #
+        # When answer=True, this steer is the operator's reply to an ask_user
+        # question on this run: frame it as the answer and ask the agent to RESUME
+        # the turn with it (not merely "added guidance"), so the agent picks up
+        # where it paused instead of treating it as a brand-new directive.
+        if answer:
+            lead = (
+                "This is the operator's answer to your ask_user question, appended to the SAME turn you were working on "
+                "(same request_id as before; the callback_token above is freshly rotated — use it for all further callbacks)."
+            )
+            resume = (
+                "Resume the current turn with this answer: if it changes the plan, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. Do NOT start a new turn, and do NOT use record_result to signal a plan change."
+            )
+            label = "Operator answered:"
+        else:
+            lead = (
+                "This is a follow-up instruction appended to the SAME turn you are already working on "
+                "(same request_id as before; the callback_token above is freshly rotated — use it for all further callbacks)."
+            )
+            resume = (
+                "Continue the current turn: if the direction changed, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. "
+                "Do NOT start a new turn, and do NOT use record_result to signal a plan change."
+            )
+            label = "Operator added:"
         return "\n".join(
             [
                 *header,
                 "",
-                "This is a follow-up instruction appended to the SAME turn you are already working on (same request_id as before; the callback_token above is freshly rotated — use it for all further callbacks).",
-                "Continue the current turn: if the direction changed, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. Do NOT start a new turn, and do NOT use record_result to signal a plan change.",
+                lead,
+                resume,
                 "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps.",
                 "If notion-local-ops-mcp was bound earlier this turn, keep using it; if it is unavailable, still call record_progress/record_result so the operator stays informed.",
                 "",
-                "Operator added:",
+                label,
                 user_input.strip(),
             ]
         )
