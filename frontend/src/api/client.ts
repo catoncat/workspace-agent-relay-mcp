@@ -83,6 +83,13 @@ export async function createAgent(body: {
   return api('/api/agents', { method: 'POST', body: JSON.stringify(body) })
 }
 
+export async function renameAgent(agentId: number, name: string): Promise<Agent> {
+  return api(`/api/agents/${agentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+}
+
 export async function listConversations(): Promise<Conversation[]> {
   return api('/api/conversations')
 }

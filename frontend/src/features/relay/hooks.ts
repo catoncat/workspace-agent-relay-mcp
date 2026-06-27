@@ -7,6 +7,7 @@ import {
   createRun,
   deleteConversation,
   getRunDetail,
+  renameAgent,
   renameConversation,
   streamRun,
 } from '@/api/client'
@@ -144,6 +145,20 @@ export function useCreateAgent() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.tokenRefs })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useRenameAgent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => renameAgent(id, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
     onError: (err) => {
       toast.error(toError(err).message)
