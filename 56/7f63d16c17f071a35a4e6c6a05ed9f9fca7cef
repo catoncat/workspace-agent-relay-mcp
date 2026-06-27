@@ -1,0 +1,77 @@
+frontend/src/providers/AppProviders.tsx
+  s_55f8fd78b106d8::t_b9308bbc579bca 6,12-19
+frontend/src/lib/themePresets.ts
+  s_55f8fd78b106d8::t_ef50b3dbd648d2 1-74
+frontend/src/components/ui/dropdown-menu.tsx
+  s_a83a203a5ef7f2::t_28832240eedf94 16,18-21,27
+  s_a83a203a5ef7f2::t_2642f81e816e43 1-15,17,22-26,28-103
+frontend/src/main.tsx
+  s_55f8fd78b106d8::t_de66443b056e0e 5,9
+  s_362a5163926ecd::t_a1f4cd3537844c 10
+frontend/src/index.css
+  s_1a98f877b1591d::t_7a7c5e161ba52b 119
+  s_1a98f877b1591d::t_ea4cc81fb5aeff 73,77,79
+  s_55f8fd78b106d8::t_8d013ca892e7d8 136-199
+  s_1a98f877b1591d::t_f6ffdbf8f26778 91
+  s_362a5163926ecd::t_3d97ada6e82d8d 200
+frontend/src/components/ThemeMenu.tsx
+  s_55f8fd78b106d8::t_49c39b2472d50a 1,3-9,11-13,16,19-22,25-32,34-55,57,60
+  s_5b6a0d5cf6c61c::t_f051cfed286158 33
+  s_55f8fd78b106d8::t_212df47d234572 2,10,14-15,17-18,23-24
+  s_55f8fd78b106d8::t_a802f7d8e01107 56,58-59
+frontend/src/components/ui/sonner.tsx
+  s_5b6a0d5cf6c61c::t_f051cfed286158 1
+  s_55f8fd78b106d8::t_909a5a887b01d0 8,11
+frontend/src/providers/ThemeProvider.tsx
+  s_55f8fd78b106d8::t_14e110c7f10854 27-28,30,32,37
+  s_55f8fd78b106d8::t_791539508c18af 1-12,14-26,29,31,33-36,38-78
+  s_55f8fd78b106d8::t_6a62de6f512227 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "567f63d16c17f071a35a4e6c6a05ed9f9fca7cef",
+  "prompts": {},
+  "sessions": {
+    "s_1a98f877b1591d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5cca5388-9895-4f52-9bf6-58e4cb67286b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_362a5163926ecd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "85cf2c49-911d-4911-a269-c2ffc38ded98",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_55f8fd78b106d8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a4962414-8108-4b66-ae5f-7da2c1b89858",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_5b6a0d5cf6c61c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "737eac2a-b19d-4b72-8186-df58158e345d",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a83a203a5ef7f2": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "46741cc5-bfde-4744-9ad9-27bee775ff51",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
