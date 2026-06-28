@@ -20,7 +20,6 @@ def _seed_run(store: RelayStore) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -36,7 +35,6 @@ def test_record_result_tool_persists_final_markdown(tmp_path: Path, monkeypatch)
     result = _call(
         server.record_result,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         status="done",
         title="Final",
@@ -50,7 +48,7 @@ def test_record_result_tool_persists_final_markdown(tmp_path: Path, monkeypatch)
     assert store.list_events(run["id"])[0]["markdown"] == "Full answer"
 
 
-def test_record_progress_rejects_wrong_callback_token(tmp_path: Path, monkeypatch) -> None:
+def test_record_progress_rejects_mismatched_conversation_key(tmp_path: Path, monkeypatch) -> None:
     from workspace_agent_relay_mcp import server
 
     store = RelayStore(tmp_path / "relay.sqlite")
@@ -60,13 +58,12 @@ def test_record_progress_rejects_wrong_callback_token(tmp_path: Path, monkeypatc
     result = _call(
         server.record_progress,
         request_id="run_1",
-        callback_token="wrong",
-        conversation_key="research:sherlog",
+        conversation_key="other",
         message="Working",
     )
 
     assert result["success"] is False
-    assert result["error"]["code"] == "invalid_callback_token"
+    assert result["error"]["code"] == "conversation_mismatch"
 
 
 def test_server_info_lists_relay_tools(tmp_path: Path, monkeypatch) -> None:
@@ -100,7 +97,6 @@ def test_record_plan_and_step_updates_flow(tmp_path: Path, monkeypatch) -> None:
     plan_result = _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[
             {"id": "s1", "title": "确认改动边界"},
@@ -121,7 +117,6 @@ def test_record_plan_and_step_updates_flow(tmp_path: Path, monkeypatch) -> None:
     progress = _call(
         server.record_progress,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         message="完成边界确认，开始修 Header",
         step_updates=[
@@ -162,7 +157,6 @@ def test_record_plan_rejects_invalid_steps(tmp_path: Path, monkeypatch) -> None:
     dup = _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[
             {"id": "s1", "title": "A"},
@@ -175,7 +169,6 @@ def test_record_plan_rejects_invalid_steps(tmp_path: Path, monkeypatch) -> None:
     missing_title = _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[{"id": "s1", "title": ""}],
     )
@@ -192,14 +185,12 @@ def test_record_plan_replaces_existing_plan(tmp_path: Path, monkeypatch) -> None
     _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[{"id": "s1", "title": "Old"}],
     )
     replaced = _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[{"id": "a", "title": "New A"}, {"id": "b", "title": "New B"}],
     )
@@ -219,14 +210,12 @@ def test_record_plan_revisions_emit_plan_event_sequence(tmp_path: Path, monkeypa
     _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[{"id": "s1", "title": "Old direction"}],
     )
     replaced = _call(
         server.record_plan,
         request_id="run_1",
-        callback_token="secret-callback",
         conversation_key="research:sherlog",
         steps=[{"id": "a", "title": "New direction A"}, {"id": "b", "title": "New direction B"}],
     )

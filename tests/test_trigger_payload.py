@@ -8,7 +8,6 @@ from workspace_agent_relay_mcp.trigger import (
     TriggerClient,
     TriggerResult,
     build_trigger_input,
-    generate_callback_token,
     generate_request_id,
 )
 
@@ -16,26 +15,23 @@ from workspace_agent_relay_mcp.trigger import (
 def test_generate_ids_are_prefixed_and_distinct() -> None:
     first = generate_request_id("relay")
     second = generate_request_id("relay")
-    token = generate_callback_token()
 
     assert first.startswith("relay_")
     assert second.startswith("relay_")
     assert first != second
     assert re.match(r"^relay_\d{8}T\d{6}Z_[0-9a-f]{12}$", first)
-    assert len(token) >= 32
 
 
-def test_build_trigger_input_contains_callback_contract() -> None:
+def test_build_trigger_input_contains_completion_contract() -> None:
     rendered = build_trigger_input(
         request_id="relay_123",
         conversation_key="research:sherlog",
-        callback_token="callback-secret",
         user_input="Please research sherlog.",
     )
 
     assert "request_id: relay_123" in rendered
     assert "conversation_key: research:sherlog" in rendered
-    assert "callback_token: callback-secret" in rendered
+    assert "callback_token" not in rendered
     assert "record_result" in rendered
     assert "Do not only answer in the ChatGPT conversation." in rendered
     assert "Keep record_plan user-visible" in rendered
@@ -49,13 +45,12 @@ def test_build_trigger_input_continuation_is_compact() -> None:
     rendered = build_trigger_input(
         request_id="relay_456",
         conversation_key="research:sherlog",
-        callback_token="callback-secret-2",
         user_input="Now add tests.",
         is_continuation=True,
     )
 
     assert "request_id: relay_456" in rendered
-    assert "callback_token: callback-secret-2" in rendered
+    assert "callback_token" not in rendered
     assert "Same relay protocol as before" in rendered
     assert "Keep record_plan user-visible" in rendered
     assert "If notion-local-ops-mcp is unavailable" in rendered
@@ -65,24 +60,23 @@ def test_build_trigger_input_continuation_is_compact() -> None:
     assert "Do not only answer in the ChatGPT conversation." not in rendered
 
 
-def test_build_trigger_input_steer_reuses_request_id_with_rotated_token() -> None:
-    """A mid-turn follow-up (steer) reuses the same request_id but hands the
-    agent a freshly rotated callback_token, and asks it to continue the current
-    turn (record_plan revision) rather than start over."""
+def test_build_trigger_input_steer_reuses_request_id_for_same_turn() -> None:
+    """A mid-turn follow-up (steer) reuses the same request_id and asks the
+    agent to continue the current turn (record_plan revision) rather than start
+    over. No callback_token is involved."""
     rendered = build_trigger_input(
         request_id="relay_789",
         conversation_key="research:sherlog",
-        callback_token="callback-rotated",
         user_input="You didn't push.",
         mode="steer",
     )
 
     assert "request_id: relay_789" in rendered
     assert "conversation_key: research:sherlog" in rendered
-    assert "callback_token: callback-rotated" in rendered
+    assert "callback_token" not in rendered
     # Steer must reference same-turn continuation and plan revision.
     assert "SAME turn" in rendered
-    assert "freshly rotated" in rendered
+    assert "freshly rotated" not in rendered
     assert "record_plan" in rendered
     assert "do not start a new turn" in rendered.lower() or "Do NOT start a new turn" in rendered
     assert "Operator added:" in rendered
@@ -99,14 +93,13 @@ def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
     rendered = build_trigger_input(
         request_id="relay_789",
         conversation_key="research:sherlog",
-        callback_token="callback-rotated",
         user_input="Target the dev branch.",
         mode="steer",
         answer=True,
     )
 
     assert "request_id: relay_789" in rendered
-    assert "callback_token: callback-rotated" in rendered
+    assert "callback_token" not in rendered
     # Answer framing: references ask_user and asks the agent to RESUME the turn.
     assert "ask_user" in rendered
     assert "answer" in rendered.lower()
