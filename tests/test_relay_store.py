@@ -1352,37 +1352,37 @@ def test_list_events_merged_orders_by_created_at(tmp_path: Path) -> None:
     assert merged[1]["markdown"] == "callback after"
 
 
-def test_list_events_merged_drops_polling_that_repeats_question_body(tmp_path: Path) -> None:
+def test_list_events_merged_sorts_polling_by_turn_anchor_and_mapping_ord(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     run = _make_run_for_polling(store)
-    q_body = "MCP 最核心是在帮 AI/Agent 解决什么问题？"
     store.record_progress(
         request_id="poll_run",
         conversation_key="research:poll",
-        message="已设计 MCP 答题闯关，并准备好第一关题目。",
-        title="闯关玩法已开启",
+        message="callback narration",
     )
     store.ask_user(
         request_id="poll_run",
         conversation_key="research:poll",
-        question=q_body,
-        choices=["A", "B", "C", "D"],
+        question="Pick one",
+        choices=["A", "B"],
     )
+    # Polling written with turn-anchor time (early) even if assistant finished late.
     store.record_polling_events(
         run_id=run["id"],
         events=[{
-            "source_key": "poll_q_dup",
+            "source_key": "late_assistant",
             "event_type": "progress",
             "title": None,
-            "markdown": f"可以，我们升级成 MCP 答题闯关。第一关：{q_body} A. … B. …",
-            "payload": {"polling": True},
-            "create_time": 1700000099.0,
+            "markdown": "polled narration in same turn",
+            "payload": {"polling": True, "turn_ord": 0, "mapping_ord": 3},
+            "create_time": 1700000000.0,
         }],
     )
     merged = store.list_events_merged(run["id"])
-    poll_rows = [e for e in merged if e.get("source_key")]
-    assert poll_rows == []
-    assert any(e["event_type"] == "question" and e["markdown"] == q_body for e in merged)
+    types = [e["event_type"] for e in merged]
+    assert types.index("progress") < types.index("question")
+    poll = next(e for e in merged if e.get("source_key") == "late_assistant")
+    assert json.loads(poll["payload_json"])["mapping_ord"] == 3
 
 
 def test_record_polling_events_rejects_unknown_run(tmp_path: Path) -> None:

@@ -248,8 +248,12 @@ def events_for_store(record: dict, db_path: Path) -> list[dict]:
 
     events: list[dict] = []
     current_run_id: int | None = None
+    turn_ord = -1
+    turn_anchor_ct: float | None = None
     seen_echo = False
+    mapping_ord = -1
     for m in msgs:
+        mapping_ord += 1
         role = m.get("role")
         node_id = m.get("node_id")
         ct = m.get("create_time")
@@ -257,11 +261,20 @@ def events_for_store(record: dict, db_path: Path) -> list[dict]:
             header = parse_relay_header(render_parts(m.get("parts")))
             rid = header.get("request_id", "")
             run = lookup_run(db_path, rid) if rid else None
-            current_run_id = int(run["id"]) if run else None
+            if run:
+                current_run_id = int(run["id"])
+                turn_ord += 1
+                turn_anchor_ct = float(ct) if isinstance(ct, (int, float)) else None
+            else:
+                current_run_id = None
+                turn_ord = -1
+                turn_anchor_ct = None
             seen_echo = False
             continue
         if current_run_id is None:
             continue
+        sort_ct = turn_anchor_ct if turn_anchor_ct is not None else ct
+        poll_meta = {"polling": True, "turn_ord": turn_ord, "mapping_ord": mapping_ord}
         if role == "assistant":
             text = render_parts(m.get("parts"))
             if not seen_echo and is_agent_echo(text):
@@ -277,8 +290,8 @@ def events_for_store(record: dict, db_path: Path) -> list[dict]:
                     "event_type": "result",
                     "title": None,
                     "markdown": _short(text, 4000),
-                    "payload": {"status": "done", "polling": True},
-                    "create_time": ct,
+                    "payload": {"status": "done", **poll_meta},
+                    "create_time": sort_ct,
                 })
             else:
                 events.append({
@@ -287,8 +300,8 @@ def events_for_store(record: dict, db_path: Path) -> list[dict]:
                     "event_type": "progress",
                     "title": None,
                     "markdown": _short(text, 4000),
-                    "payload": {"polling": True},
-                    "create_time": ct,
+                    "payload": poll_meta,
+                    "create_time": sort_ct,
                 })
         elif role == "tool":
             tool = infer_tool_name(m)
@@ -303,9 +316,9 @@ def events_for_store(record: dict, db_path: Path) -> list[dict]:
                     "tool": tool,
                     "title": tool,
                     "ok": True,
-                    "polling": True,
+                    **poll_meta,
                 },
-                "create_time": ct,
+                "create_time": sort_ct,
             })
     return events
 
