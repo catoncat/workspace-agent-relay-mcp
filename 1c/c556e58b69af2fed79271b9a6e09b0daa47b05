@@ -1,0 +1,50 @@
+src/workspace_agent_relay_mcp/app.py
+  s_6c817d28ce93c6::t_bd55d430d5e44c 87-90
+  s_6c817d28ce93c6::t_bbb3b895624717 10
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_6c817d28ce93c6::t_014c9a4887051f 625-629,652,655,663
+  s_6c817d28ce93c6::t_25cd30d642db4c 897,919-921
+  s_6c817d28ce93c6::t_aefabb30290c61 675,677,684
+  s_6c817d28ce93c6::t_40f31ea1069948 743
+  s_6c817d28ce93c6::t_b40b93c6a40517 798
+  s_6c817d28ce93c6::t_e5fbb4b40953d9 959,969-970
+  s_6c817d28ce93c6::t_de0ab51a0929c4 256-259,264-266,268-304,307-308
+  s_6c817d28ce93c6::t_9f4f525443867f 989,998-999,1004,1012-1015
+  s_6c817d28ce93c6::t_043d807ac5ff76 1065
+  s_6c817d28ce93c6::t_74ec6e7c075d91 260-263,267,305-306
+  s_6c817d28ce93c6::t_751ccdabc858b9 837,859,873-875
+  s_6c817d28ce93c6::t_2a3becdafd41db 611
+  s_6c817d28ce93c6::t_01094d842ba1fb 720,734
+  s_6c817d28ce93c6::t_aaed752de82ce5 568,571,579
+src/workspace_agent_relay_mcp/trigger.py
+  s_6c817d28ce93c6::t_8ef062f9b8c65e 63-66,75,84,112,124,127
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_6c817d28ce93c6::t_b2714807a03067 164-169
+src/workspace_agent_relay_mcp/server.py
+  s_6c817d28ce93c6::t_3a6fc472f3a393 64
+  s_6c817d28ce93c6::t_7840f4827a9a10 155
+  s_6c817d28ce93c6::t_13bb1f4269cbd5 245
+  s_6c817d28ce93c6::t_5c389274bd4c43 86
+src/workspace_agent_relay_mcp/api/auth.py
+  s_6c817d28ce93c6::t_a2ff50df7736c7 3
+  s_6c817d28ce93c6::t_100f57f5b452ae 35-79
+src/workspace_agent_relay_mcp/api/routes/internal.py
+  s_6c817d28ce93c6::t_10aef20a373278 38,40
+  s_6c817d28ce93c6::t_d790e2bebe2025 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "1cc556e58b69af2fed79271b9a6e09b0daa47b05",
+  "prompts": {},
+  "sessions": {
+    "s_6c817d28ce93c6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0317e21e-f3a7-4d92-a66c-8a3b3cffc30d",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
