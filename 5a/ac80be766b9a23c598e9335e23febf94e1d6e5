@@ -1,0 +1,19 @@
+docs/agent-instructions.md
+  s_6c817d28ce93c6::t_e09c53570c9d72 68-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "5aac80be766b9a23c598e9335e23febf94e1d6e5",
+  "prompts": {},
+  "sessions": {
+    "s_6c817d28ce93c6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0317e21e-f3a7-4d92-a66c-8a3b3cffc30d",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
