@@ -1,0 +1,35 @@
+docs/superpowers/specs/2026-06-28-polling-merge.md
+  s_9ac40e568cf465::t_4e80c71ffd63ea 1-169
+docs/research/2026-06-28-chatgpt-hermes-trigger-api.md
+  s_9ac40e568cf465::t_6cc3a92875da9b 170-189
+  s_9ac40e568cf465::t_b05aecb650bc92 301-303,305
+  s_9ac40e568cf465::t_33359396c03397 221,223-243,246-247
+  s_9ac40e568cf465::t_f6021da5926b07 271-273
+  s_9ac40e568cf465::t_1cca48c9e8f4c8 1-107,111,113,130-131,140-169,190,206-207,209-214,220,222,244-245,248
+  s_9ac40e568cf465::t_b1868ee6d88bec 264,266
+  s_9ac40e568cf465::t_9fb24eefa49f86 110,112,114-129,132,135-139
+  s_9ac40e568cf465::t_93d97bff104f64 249-263,265,267-270,274-300,304
+  s_9ac40e568cf465::t_805e6c5b19b11c 191-205
+  s_9ac40e568cf465::t_daf91f6e595289 208
+  s_9ac40e568cf465::t_8896a05764aa1a 215,217,219
+  s_9ac40e568cf465::t_53b2702c488319 218
+  s_9ac40e568cf465::t_13a97afd62135f 133-134
+  s_9ac40e568cf465::t_6aee43b9ff666c 216
+  s_9ac40e568cf465::t_e95d39444593c5 108-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "9cd8c793cd993d350418a7bc1a9fbfb451d0cca4",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
