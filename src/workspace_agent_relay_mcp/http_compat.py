@@ -49,7 +49,6 @@ OAuthManagerProvider = Callable[[], OAuthManager]
 DEBUG_LOGGER = logging.getLogger("workspace_agent_relay_mcp.mcp_debug")
 DEBUG_REDACTED = "[REDACTED]"
 DEBUG_SECRET_KEY_PARTS = (
-    "callback_token",
     "token",
     "secret",
     "password",

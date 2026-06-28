@@ -26,10 +26,6 @@ def generate_request_id(prefix: str = "relay") -> str:
     return f"{prefix}_{stamp}_{secrets.token_hex(6)}"
 
 
-def generate_callback_token() -> str:
-    return secrets.token_urlsafe(32)
-
-
 def _redact_secret(value: Any, secret: str) -> Any:
     if not secret:
         return value
@@ -51,7 +47,6 @@ def build_trigger_input(
     *,
     request_id: str,
     conversation_key: str,
-    callback_token: str,
     user_input: str,
     is_continuation: bool = False,
     mode: str = "initial",
@@ -60,17 +55,15 @@ def build_trigger_input(
     header = [
         f"request_id: {request_id}",
         f"conversation_key: {conversation_key}",
-        f"callback_token: {callback_token}",
         "relay_mcp: workspace-agent-relay-mcp",
     ]
     if mode == "steer":
         # Mid-turn follow-up: the operator appended guidance to THIS turn. We can
         # only send triggers, so this is another trigger to the same conversation,
-        # bookkept on the same run (same request_id, freshly rotated callback_token
-        # above). Ask the agent to continue the current turn rather than start over:
-        # revise the plan via record_plan or skip old steps, and keep using the
-        # request_id/callback_token above for callbacks. Do NOT call record_result
-        # to signal a direction change.
+        # bookkept on the same run (same request_id). Ask the agent to continue
+        # the current turn rather than start over: revise the plan via
+        # record_plan or skip old steps, and keep using the request_id above for
+        # callbacks. Do NOT call record_result to signal a direction change.
         #
         # When answer=True, this steer is the operator's reply to an ask_user
         # question on this run: frame it as the answer and ask the agent to RESUME
@@ -79,7 +72,7 @@ def build_trigger_input(
         if answer:
             lead = (
                 "This is the operator's answer to your ask_user question, appended to the SAME turn you were working on "
-                "(same request_id as before; the callback_token above is freshly rotated — use it for all further callbacks)."
+                "(same request_id as before — keep using it for all further callbacks)."
             )
             resume = (
                 "Resume the current turn with this answer: if it changes the plan, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. Do NOT start a new turn, and do NOT use record_result to signal a plan change."
@@ -88,7 +81,7 @@ def build_trigger_input(
         else:
             lead = (
                 "This is a follow-up instruction appended to the SAME turn you are already working on "
-                "(same request_id as before; the callback_token above is freshly rotated — use it for all further callbacks)."
+                "(same request_id as before — keep using it for all further callbacks)."
             )
             resume = (
                 "Continue the current turn: if the direction changed, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. "
@@ -116,7 +109,7 @@ def build_trigger_input(
             [
                 *header,
                 "",
-                "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the new request_id/callback_token above. Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as plan steps. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
+                "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the request_id above. Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as plan steps. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
                 "",
                 "User task:",
                 user_input.strip(),
@@ -128,10 +121,10 @@ def build_trigger_input(
             "",
             "Completion contract:",
             "The local operator CANNOT see your ChatGPT-side plan, tool calls, or reasoning. This relay is their only view of your work.",
-            "This trigger starts ONE turn (one request_id + callback_token scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",
+            "This trigger starts ONE turn (one request_id scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",
             "Before working, call workspace-agent-relay-mcp.record_plan with your step plan (each step needs a stable id and a title).",
             "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps unless the user explicitly asked to debug that plumbing.",
-            "Then call notion-local-ops-mcp.bind_relay_run with this request_id and the callback_token so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
+            "Then call notion-local-ops-mcp.bind_relay_run with this request_id so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
             "After completing several steps, call workspace-agent-relay-mcp.record_progress with step_updates to batch-sync step statuses, optionally with a one-line message summarizing what you did.",
             "If you need a human decision to continue, call workspace-agent-relay-mcp.ask_user (the turn pauses; it is NOT finished).",
             "Call workspace-agent-relay-mcp.record_result exactly once when this turn is truly over: status=done when delivered, status=failed on an execution error, status=blocked ONLY for an external hard blocker (missing access/resource/dependency) — never use blocked to mean 'the plan changed' or 'the user gave a new direction'.",

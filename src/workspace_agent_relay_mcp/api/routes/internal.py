@@ -9,10 +9,9 @@ from ..deps import json_body
 from ..errors import json_error
 
 # Map store validation error codes to HTTP status codes. These mirror the
-# callback-token validation shape used by record_progress/ask_user/record_result.
+# callback validation shape used by record_progress/ask_user/record_result.
 _TRACE_ERROR_STATUS = {
     "run_not_found": 404,
-    "invalid_callback_token": 401,
     "conversation_mismatch": 401,
     "run_closed": 409,
 }
@@ -34,12 +33,11 @@ def internal_routes(store: Any) -> list[tuple]:
 
         request_id = _require_str(payload, "request_id")
         conversation_key = _require_str(payload, "conversation_key")
-        callback_token = _require_str(payload, "callback_token")
         tool = _require_str(payload, "tool")
         title = _require_str(payload, "title")
-        if not (request_id and conversation_key and callback_token and tool and title):
+        if not (request_id and conversation_key and tool and title):
             return json_error(
-                "request_id, conversation_key, callback_token, tool, and title are required",
+                "request_id, conversation_key, tool, and title are required",
                 status_code=400,
             )
 
@@ -54,7 +52,6 @@ def internal_routes(store: Any) -> list[tuple]:
         result = store.record_tool_trace(
             request_id=request_id,
             conversation_key=conversation_key,
-            callback_token=callback_token,
             tool=tool,
             title=title,
             args_summary=payload.get("args_summary"),
