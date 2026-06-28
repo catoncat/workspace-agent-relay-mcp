@@ -1,0 +1,110 @@
+tests/test_tool_trace.py
+  s_9ac40e568cf465::t_fa38e6045792bd 512-548
+tests/test_relay_store.py
+  s_9ac40e568cf465::t_de668576c32c04 1514-1558
+  s_9ac40e568cf465::t_9923d270fe9e74 1407-1513
+tests/test_web_api.py
+  s_9ac40e568cf465::t_82a95468c9a4ef 174-206,208-210
+  s_9ac40e568cf465::t_dc2fc385cc558c 161-173
+  s_9ac40e568cf465::t_b30e9eca2909cd 207
+frontend/src/features/relay/components/ThreadHeader.tsx
+  s_9ac40e568cf465::t_1eb8104876bd30 4-5,23-25,34-36,57,72-94
+scripts/hermes_poller_cdp.py
+  s_9ac40e568cf465::t_d0b95e11e8b595 105-134
+  s_9ac40e568cf465::t_373200b79de4e4 226
+  s_9ac40e568cf465::t_871db749aef781 261,270-271
+  s_9ac40e568cf465::t_e8411765d58b89 155-158
+  s_9ac40e568cf465::t_d23a703a55d0e9 220,224-225,227-236,247-248,262-269,272-279
+  s_9ac40e568cf465::t_fe7c9a0f2e203e 312-315
+  s_9ac40e568cf465::t_e59a9c6ad84e73 329-341,344-346,352,355,358-359
+  s_9ac40e568cf465::t_4f64a742097ffe 67-89
+  s_9ac40e568cf465::t_3d23a94c1bc488 39
+frontend/src/pages/RelayPage.tsx
+  s_9ac40e568cf465::t_3e5bb5f55c08be 202-207
+  s_9ac40e568cf465::t_4b27366acededf 12
+  s_9ac40e568cf465::t_acd5080d4a0794 22
+  s_9ac40e568cf465::t_d11e4418ac13b2 216
+  s_9ac40e568cf465::t_707b53ce197fab 48
+  s_9ac40e568cf465::t_a7ae68b85c61db 67
+tests/test_trigger_payload.py
+  s_9ac40e568cf465::t_b26e2be2370f84 129-130
+  s_9ac40e568cf465::t_c7ef23c8ad4cb3 180
+  s_9ac40e568cf465::t_c5e05b52dae4cc 163
+  s_9ac40e568cf465::t_ec0c7be6a364df 146
+  s_9ac40e568cf465::t_71e7a81c479ebf 117-128,131-145,147-162,164-179,181-183
+src/workspace_agent_relay_mcp/trigger.py
+  s_9ac40e568cf465::t_95becd8ef5c3bf 7,13,24-35,59-75,84,86-146
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_9ac40e568cf465::t_6331711f005195 1
+  s_9ac40e568cf465::t_1c47ddd78619b1 14
+  s_9ac40e568cf465::t_6f225bccbc0cef 25
+  s_9ac40e568cf465::t_76aef98058c202 50-52
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_9ac40e568cf465::t_929da992acd7f8 719,737-739
+  s_9ac40e568cf465::t_24e6fd72a6c842 818-819,821,830
+  s_9ac40e568cf465::t_a9a4c4996dfe02 545-703
+  s_9ac40e568cf465::t_4a9d6ff1ccd218 91-97
+  s_9ac40e568cf465::t_93beffa2afa658 42
+  s_9ac40e568cf465::t_ec26c97e0f47c9 17-29
+  s_9ac40e568cf465::t_d90e772f3bead4 377,384-386
+  s_9ac40e568cf465::t_078133f0813b58 1385-1390
+  s_9ac40e568cf465::t_29d23a02d98f10 519-520
+  s_9ac40e568cf465::t_0e4213deed63c6 1338-1344
+  s_9ac40e568cf465::t_f878606b8b8122 373-376,378-383
+  s_9ac40e568cf465::t_1bd58feeef8792 802
+src/workspace_agent_relay_mcp/api/routes/conversations.py
+  s_9ac40e568cf465::t_731992600e4675 67-74,80
+  s_9ac40e568cf465::t_74f6e58a38bc73 44,50
+src/workspace_agent_relay_mcp/api/routes/internal.py
+  s_9ac40e568cf465::t_e2ca94ce796421 115-119,124-129,133
+src/workspace_agent_relay_mcp/api/static.py
+  s_9ac40e568cf465::t_981474780e362e 13
+frontend/src/features/relay/hooks.ts
+  s_9ac40e568cf465::t_e79f65cc4ccaa1 62-84,410
+  s_9ac40e568cf465::t_59ba78f34bc99d 16
+  s_9ac40e568cf465::t_ef4f4226882e79 408,412-435
+  s_9ac40e568cf465::t_cbf395af3eb099 12
+  s_9ac40e568cf465::t_757942ee9c9a45 21
+  s_9ac40e568cf465::t_849d010b9ceeb8 405-407
+  s_9ac40e568cf465::t_cc729140065972 409
+  s_9ac40e568cf465::t_87282ff0da5247 411
+src/workspace_agent_relay_mcp/server.py
+  s_9ac40e568cf465::t_afbd053c6e481e 59
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_9ac40e568cf465::t_028b67d9177b3a 13
+  s_9ac40e568cf465::t_3be1d7f5fb3b4a 28-32
+  s_9ac40e568cf465::t_6deead1259112d 119
+  s_9ac40e568cf465::t_4bbf5951f3ac2a 225
+  s_9ac40e568cf465::t_fe08b83c806273 113
+frontend/src/api/client.ts
+  s_9ac40e568cf465::t_cf2a32b0b4a0dd 1
+  s_9ac40e568cf465::t_30a69375ccac48 111
+  s_9ac40e568cf465::t_8248102806925c 133-139
+  s_9ac40e568cf465::t_758efedafa00cb 144-148
+docs/agent-instructions.md
+  s_9ac40e568cf465::t_64a16361c60e14 82,99-111
+  s_9ac40e568cf465::t_4ff91c1b13d46c 112
+docs/superpowers/specs/2026-06-28-polling-merge.md
+  s_9ac40e568cf465::t_685082c82b8dda 213-221
+  s_9ac40e568cf465::t_da4fc739897aba 205-212
+frontend/src/api/types.ts
+  s_9ac40e568cf465::t_4f2de197f36e27 27-28
+  s_9ac40e568cf465::t_c5d7f2a2d50881 47
+  s_9ac40e568cf465::t_a10a54468d9053 19-20,29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "8f6f189c9d2b636b796429c8b6b23f478f279635",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
