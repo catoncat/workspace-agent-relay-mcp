@@ -1,0 +1,35 @@
+src/workspace_agent_relay_mcp/api/routes/internal.py
+  s_9ac40e568cf465::t_6a0d7ec5947e4c 72-119,122
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_9ac40e568cf465::t_7eaf1360c6224b 31
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_9ac40e568cf465::t_8e68127d1d6fbf 1119,1121-1126,1141
+  s_9ac40e568cf465::t_49b79a216a8d1f 366-375
+  s_9ac40e568cf465::t_24653fd6b229f7 35-47
+  s_9ac40e568cf465::t_1d707b3cc543e4 48-79
+  s_9ac40e568cf465::t_62e140ac859413 183
+  s_9ac40e568cf465::t_986e77e0feec81 1109-1111,1113-1116,1120,1127-1140,1142-1189
+  s_9ac40e568cf465::t_aa063abd5e8e2d 376
+  s_9ac40e568cf465::t_d69b5194914dfb 1190
+tests/test_relay_store.py
+  s_9ac40e568cf465::t_6ef27df9d87f6d 1355-1387
+  s_9ac40e568cf465::t_6ac3f47fd0366a 1225-1354,1388-1406
+tests/test_tool_trace.py
+  s_9ac40e568cf465::t_a403a93f144719 382-511
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "f5fbbce30f077ad810a14357cf9a6135f06dd7ea",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
