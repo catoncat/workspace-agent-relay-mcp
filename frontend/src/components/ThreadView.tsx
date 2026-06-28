@@ -39,11 +39,17 @@ type TimelineSegment =
   | { kind: TraceSegmentKind; events: RunEvent[] }
   | { kind: 'narration'; event: RunEvent }
   | { kind: 'user_message'; event: RunEvent }
+  | { kind: 'question'; event: RunEvent; answer?: RunEvent }
+  | { kind: 'result'; event: RunEvent }
+  | { kind: 'system'; event: RunEvent }
 
 /** Split progress events at narration boundaries so tool batches and notes
- * render in causal order instead of two fixed buckets. `user_message` events
- * (steer follow-ups) are emitted as their own segment so they render as user
- * bubbles inline with the agent's progress. */
+ * render in causal order instead of two fixed buckets. `question`, `result`,
+ * `system`, and `user_message` events are placed inline at their chronological
+ * position (not pulled into separate footer blocks). A `question` absorbs the
+ * next `user_message` as its answer (rendered as the selected choice or the
+ * replied text inside the question card) so the answer is not double-rendered
+ * as a standalone user bubble. */
 export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
   const segments: TimelineSegment[] = []
   let traceBatch: RunEvent[] = []
@@ -57,12 +63,49 @@ export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
     traceKind = null
   }
 
-  for (const event of events) {
+  const eventKey = (event: RunEvent, index: number): string =>
+    event.id == null ? `idx${index}` : String(event.id)
+
+  // Pair each question with the next user_message after it (its answer), and
+  // mark that user_message as consumed so it is not also rendered as a bubble.
+  const consumedUserMessageKeys = new Set<string>()
+  const questionAnswer = new Map<string, RunEvent | undefined>()
+  for (let i = 0; i < events.length; i += 1) {
+    if (events[i].event_type !== 'question') continue
+    for (let j = i + 1; j < events.length; j += 1) {
+      if (events[j].event_type === 'user_message') {
+        questionAnswer.set(eventKey(events[i], i), events[j])
+        consumedUserMessageKeys.add(eventKey(events[j], j))
+        break
+      }
+    }
+  }
+
+  for (const [index, event] of events.entries()) {
+    if (event.event_type === 'plan') continue
     if (event.event_type === 'user_message') {
+      if (consumedUserMessageKeys.has(eventKey(event, index))) continue
       flushTraceBatch()
       segments.push({ kind: 'user_message', event })
       continue
     }
+    if (event.event_type === 'question') {
+      flushTraceBatch()
+      segments.push({ kind: 'question', event, answer: questionAnswer.get(eventKey(event, index)) })
+      continue
+    }
+    if (event.event_type === 'result') {
+      flushTraceBatch()
+      segments.push({ kind: 'result', event })
+      continue
+    }
+    if (event.event_type === 'system') {
+      flushTraceBatch()
+      segments.push({ kind: 'system', event })
+      continue
+    }
+    if (event.event_type !== 'progress') continue
+    if (!(event.markdown || event.title)) continue
     if (isTraceEvent(event)) {
       const nextKind: TraceSegmentKind =
         isInfrastructureTraceEvent(event) && !isFailedTraceEvent(event) ? 'infra' : 'traces'
@@ -153,11 +196,7 @@ function RunThread({
   const planRevised = planEventCount >= 2
   const planActive = isActive && isAuthoritative
   const hasResultEvent = detail.events.some((event) => event.event_type === 'result')
-  const timelineEvents = detail.events.filter(
-    (event) =>
-      event.event_type === 'user_message' ||
-      (event.event_type === 'progress' && (event.markdown || event.title)),
-  )
+  const timelineEvents = detail.events.filter((event) => event.event_type !== 'plan')
   const systemEvents = detail.events.filter(
     (event) => event.event_type === 'system' && (event.markdown || event.title),
   )
@@ -192,37 +231,10 @@ function RunThread({
           events={timelineEvents}
           isActive={isActive}
           hasResultEvent={hasResultEvent}
+          runStatus={run.status}
+          onSend={onSend}
         />
       ) : null}
-
-      {detail.events
-        .filter((event) => event.event_type === 'question')
-        .map((event, index) => (
-          <QuestionEvent
-            key={`question-${event.id ?? index}`}
-            event={event}
-            runStatus={run.status}
-            onSend={onSend}
-          />
-        ))}
-
-      {detail.events
-        .filter((event) => event.event_type === 'result')
-        .map((event, index) => (
-          <ResultEvent
-            key={`result-${event.id ?? index}`}
-            event={event}
-            runStatus={run.status}
-          />
-        ))}
-
-      {systemEvents.map((event, index) => (
-        <SystemEvent
-          key={`system-${event.id ?? index}`}
-          event={event}
-          runStatus={run.status}
-        />
-      ))}
 
       {!hasResultEvent && !hasSystemEvent && TERMINAL_STATUSES.has(run.status) ? (
         <TerminalStatus run={run} />
@@ -433,10 +445,14 @@ function RunProgressTimeline({
   events,
   isActive,
   hasResultEvent,
+  runStatus,
+  onSend,
 }: {
   events: RunEvent[]
   isActive: boolean
   hasResultEvent: boolean
+  runStatus: string
+  onSend?: (text: string) => void | Promise<void>
 }) {
   const segments = useMemo(() => buildTimelineSegments(events), [events])
   const lastNarrationIndex = useMemo(() => {
@@ -472,6 +488,38 @@ function RunProgressTimeline({
               key={`narr-${segment.event.id ?? index}`}
               event={segment.event}
               live={live}
+            />
+          )
+        }
+
+        if (segment.kind === 'question') {
+          return (
+            <QuestionEvent
+              key={`question-${segment.event.id ?? index}`}
+              event={segment.event}
+              answer={segment.answer}
+              runStatus={runStatus}
+              onSend={onSend}
+            />
+          )
+        }
+
+        if (segment.kind === 'result') {
+          return (
+            <ResultEvent
+              key={`result-${segment.event.id ?? index}`}
+              event={segment.event}
+              runStatus={runStatus}
+            />
+          )
+        }
+
+        if (segment.kind === 'system') {
+          return (
+            <SystemEvent
+              key={`system-${segment.event.id ?? index}`}
+              event={segment.event}
+              runStatus={runStatus}
             />
           )
         }
@@ -661,23 +709,28 @@ function SummaryList({
 
 function QuestionEvent({
   event,
+  answer,
   runStatus,
   onSend,
 }: {
   event: RunEvent
+  answer?: RunEvent
   runStatus: string
   onSend?: (text: string) => void | Promise<void>
 }) {
   const payload = eventPayload(event)
   const choices = stringArray(payload.choices)
   const context = stringValue(payload.context)
-  const [picked, setPicked] = useState<string | null>(null)
-  const answerable = runStatus === 'needs_user' && onSend
+  const answerText = (answer?.markdown || '').trim()
+  const matchedChoice = choices.find((choice) => choice.trim() === answerText) ?? null
+  const answered = Boolean(answer)
+  const [picked, setPicked] = useState<string | null>(matchedChoice)
+  const answerable = !answered && runStatus === 'needs_user' && Boolean(onSend)
 
   const handlePick = (choice: string) => {
     if (!answerable || picked) return
     setPicked(choice)
-    void onSend(choice)
+    void onSend?.(choice)
   }
 
   return (
@@ -691,12 +744,12 @@ function QuestionEvent({
         <div className="flex flex-wrap gap-1.5">
           {choices.map((choice) => {
             const isPicked = picked === choice
-            const disabled = !answerable || (picked !== null && !isPicked)
+            const disabled = !answerable && !isPicked
             return (
               <button
                 key={choice}
                 type="button"
-                disabled={disabled}
+                disabled={!answerable || (picked !== null && !isPicked)}
                 onClick={() => handlePick(choice)}
                 className={cn(
                   'max-w-full whitespace-normal rounded-full border px-3 py-1 text-xs font-medium transition-colors',
@@ -715,7 +768,14 @@ function QuestionEvent({
           })}
         </div>
       ) : null}
-      {!answerable && choices.length === 0 ? (
+      {answered && answerText && !matchedChoice ? (
+        <Message from="user">
+          <MessageContent>
+            <ThreadProse>{answerText}</ThreadProse>
+          </MessageContent>
+        </Message>
+      ) : null}
+      {!answerable && choices.length === 0 && !answered ? (
         <p className="text-xs text-muted-foreground">
           Reply below to answer the agent.
         </p>

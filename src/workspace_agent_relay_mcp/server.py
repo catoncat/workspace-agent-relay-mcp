@@ -61,7 +61,7 @@ MCP_INSTRUCTIONS = (
     "(and local tool traces after bind_relay_run on your local-ops MCP).\n"
     "Relay workflow: record_plan first → bind_relay_run on your local execution MCP → batch record_progress(step_updates) → "
     "record_result once when the turn truly ends (done/failed/blocked). Plan changes use record_plan or skipped steps, not record_result. "
-    "A mid-turn follow-up (steer) arrives as another trigger with the SAME request_id and a freshly rotated callback_token (use the new token for all further callbacks); treat it as guidance on the CURRENT turn — update the plan, do not start a new turn. The operator's answer to your ask_user arrives the same way, labeled 'Operator answered:'. "
+    "A mid-turn follow-up (steer) arrives as another trigger with the SAME request_id (keep using that request_id for all further callbacks); treat it as guidance on the CURRENT turn — update the plan, do not start a new turn. The operator's answer to your ask_user arrives the same way, labeled 'Operator answered:'. "
     "Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as steps unless debugging that plumbing. "
     "ask_user pauses the turn; it is not completion — the operator's answer resumes the SAME turn (as a steer), so do not start a new turn when it arrives. blocked is for external hard blockers only.\n"
     "Every call returns the current plan snapshot. No shell/filesystem/git on this server — use your local-ops MCP for execution."
@@ -83,7 +83,7 @@ async def _tool_names() -> list[str]:
     name="server_info",
     title="Server Info",
     annotations=READ_ONLY_TOOL,
-    description="Use this to orient yourself: returns the relay app name, version, state paths, auth mode, and the list of tool names available on this server. Read-only, no callback token required.",
+    description="Use this to orient yourself: returns the relay app name, version, state paths, auth mode, and the list of tool names available on this server. Read-only.",
 )
 async def server_info() -> dict[str, Any]:
     return {
@@ -113,7 +113,6 @@ async def server_info() -> dict[str, Any]:
 )
 def record_plan(
     request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
-    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
     conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
     steps: Annotated[
         list[dict[str, Any]],
@@ -130,7 +129,6 @@ def record_plan(
     return store.record_plan(
         request_id=request_id,
         conversation_key=conversation_key,
-        callback_token=callback_token,
         steps=steps,
     )
 
@@ -151,11 +149,10 @@ def record_plan(
 )
 def record_progress(
     request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
-    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
     conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
     message: Annotated[str, Field(description="Optional one-line summary of what you just did. Keep it short; full detail goes in record_result.")],
     title: Annotated[str | None, Field(description="Optional short title for this progress beat.")] = None,
-    payload: Annotated[dict[str, Any] | None, Field(description="Optional structured extras. Do not put the callback_token here.")] = None,
+    payload: Annotated[dict[str, Any] | None, Field(description="Optional structured extras.")] = None,
     step_updates: Annotated[
         list[dict[str, Any]] | None,
         Field(
@@ -169,7 +166,6 @@ def record_progress(
     return store.record_progress(
         request_id=request_id,
         conversation_key=conversation_key,
-        callback_token=callback_token,
         message=message,
         title=title,
         payload=payload,
@@ -192,7 +188,6 @@ def record_progress(
 )
 def record_result(
     request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
-    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
     conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
     status: Annotated[str, Field(description="Final status: done | blocked | failed.", json_schema_extra={"enum": ["done", "blocked", "failed"]})],
     title: Annotated[str, Field(description="Short headline for the result, e.g. \"UI fixes applied\".")],
@@ -205,7 +200,6 @@ def record_result(
     return store.record_result(
         request_id=request_id,
         conversation_key=conversation_key,
-        callback_token=callback_token,
         status=status,
         title=title,
         markdown=markdown,
@@ -227,7 +221,6 @@ def record_result(
 )
 def ask_user(
     request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
-    callback_token: Annotated[str, Field(description="The callback_token from the trigger header. Never log or echo it.")],
     conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
     question: Annotated[str, Field(description="One clear question the operator must answer.")],
     choices: Annotated[list[str] | None, Field(description="Optional list of answer options to pick from.")] = None,
@@ -236,7 +229,6 @@ def ask_user(
     return store.ask_user(
         request_id=request_id,
         conversation_key=conversation_key,
-        callback_token=callback_token,
         question=question,
         choices=choices,
         context=context,
@@ -250,7 +242,7 @@ def ask_user(
     description=(
         "Use this to re-orient when your ChatGPT conversation state is incomplete: returns recent run summaries, "
         "their progress/result event titles, and short markdown excerpts for a conversation_key. "
-        "No callback token required. Capped to <=20 runs and short excerpts to keep your context lean."
+        "Capped to <=20 runs and short excerpts to keep your context lean."
     ),
 )
 def get_run_context(

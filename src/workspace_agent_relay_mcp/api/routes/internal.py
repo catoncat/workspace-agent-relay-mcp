@@ -9,10 +9,9 @@ from ..deps import json_body
 from ..errors import json_error
 
 # Map store validation error codes to HTTP status codes. These mirror the
-# callback-token validation shape used by record_progress/ask_user/record_result.
+# callback validation shape used by record_progress/ask_user/record_result.
 _TRACE_ERROR_STATUS = {
     "run_not_found": 404,
-    "invalid_callback_token": 401,
     "conversation_mismatch": 401,
     "run_closed": 409,
 }
@@ -34,12 +33,11 @@ def internal_routes(store: Any) -> list[tuple]:
 
         request_id = _require_str(payload, "request_id")
         conversation_key = _require_str(payload, "conversation_key")
-        callback_token = _require_str(payload, "callback_token")
         tool = _require_str(payload, "tool")
         title = _require_str(payload, "title")
-        if not (request_id and conversation_key and callback_token and tool and title):
+        if not (request_id and conversation_key and tool and title):
             return json_error(
-                "request_id, conversation_key, callback_token, tool, and title are required",
+                "request_id, conversation_key, tool, and title are required",
                 status_code=400,
             )
 
@@ -54,7 +52,6 @@ def internal_routes(store: Any) -> list[tuple]:
         result = store.record_tool_trace(
             request_id=request_id,
             conversation_key=conversation_key,
-            callback_token=callback_token,
             tool=tool,
             title=title,
             args_summary=payload.get("args_summary"),
@@ -72,6 +69,55 @@ def internal_routes(store: Any) -> list[tuple]:
             return json_error(message, status_code=status_code)
         return JSONResponse(result, status_code=200)
 
+    async def post_polling_events(request: Request) -> JSONResponse:
+        # Polling-derived events from ChatGPT conversation readback (the
+        # hermes_poller_cdp path). The poller is a separate process and does NOT
+        # write SQLite directly; it POSTs batches here so the server remains the
+        # single writer. Auth is the same shared bearer as /internal/tool-trace.
+        try:
+            payload = await json_body(request)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        try:
+            run_id = int(request.path_params["run_id"])
+        except (KeyError, ValueError, TypeError):
+            return json_error("run_id must be an integer", status_code=400)
+        events = payload.get("events")
+        if not isinstance(events, list):
+            return json_error("events must be a list", status_code=400)
+        normalized: list[dict[str, Any]] = []
+        for index, event in enumerate(events):
+            if not isinstance(event, dict):
+                return json_error(f"events[{index}] must be an object", status_code=400)
+            source_key = event.get("source_key")
+            event_type = event.get("event_type")
+            if not (isinstance(source_key, str) and source_key.strip()):
+                return json_error(f"events[{index}].source_key is required", status_code=400)
+            if event_type not in ("progress", "result"):
+                return json_error(
+                    f"events[{index}].event_type must be 'progress' or 'result'",
+                    status_code=400,
+                )
+            create_time = event.get("create_time")
+            if create_time is not None and not isinstance(create_time, (int, float)):
+                return json_error(f"events[{index}].create_time must be a number", status_code=400)
+            normalized.append(
+                {
+                    "source_key": source_key,
+                    "event_type": event_type,
+                    "title": event.get("title"),
+                    "markdown": event.get("markdown"),
+                    "payload": event.get("payload") or {},
+                    "create_time": create_time,
+                }
+            )
+        try:
+            result = store.record_polling_events(run_id=run_id, events=normalized)
+        except KeyError:
+            return json_error(f"Run not found: {run_id}", status_code=404)
+        return JSONResponse(result, status_code=200)
+
     return [
         ("/internal/tool-trace", post_tool_trace, ["POST"]),
+        ("/internal/runs/{run_id:int}/polling-events", post_polling_events, ["POST"]),
     ]

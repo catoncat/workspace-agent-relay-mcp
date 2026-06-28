@@ -125,7 +125,6 @@ def _running_server(tmp_path: Path):
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -209,7 +208,7 @@ def test_plain_get_mcp_returns_server_card_when_auth_disabled(tmp_path: Path) ->
     assert response.json()["transport"]["endpoint"] == "/mcp"
 
 
-def test_debug_rpc_summary_redacts_callback_token_argument() -> None:
+def test_debug_rpc_summary_redacts_secret_keyed_arguments() -> None:
     body = b"""[
       {
         "jsonrpc": "2.0",
@@ -219,19 +218,19 @@ def test_debug_rpc_summary_redacts_callback_token_argument() -> None:
           "name": "record_result",
           "arguments": {
             "request_id": "relay_1",
-            "callback_token": "secret-callback-token",
+            "api_key": "api-secret",
             "conversation_key": "research:sherlog",
-            "message": "echo secret-callback-token",
-            "markdown": "result contains secret-callback-token",
+            "message": "echo api-secret",
+            "markdown": "result contains api-secret",
             "artifacts": [
               {
-                "title": "artifact secret-callback-token",
-                "content": "artifact body secret-callback-token"
+                "title": "artifact api-secret",
+                "content": "artifact body api-secret"
               }
             ],
             "nested": {
-              "api_key": "api-secret",
-              "access_key": "access-secret"
+              "access_key": "access-secret",
+              "authorization": "bearer-secret"
             }
           }
         }
@@ -250,10 +249,10 @@ def test_debug_rpc_summary_redacts_callback_token_argument() -> None:
     summary = _summarize_rpc_body(body)
     rendered = str(summary)
 
-    assert "secret-callback-token" not in rendered
-    assert "Bearer bearer-secret" not in rendered
     assert "api-secret" not in rendered
     assert "access-secret" not in rendered
+    assert "bearer-secret" not in rendered
+    assert "Bearer bearer-secret" not in rendered
     assert "[REDACTED]" in rendered
     assert "visible" in rendered
     assert summary["entries"][0]["tool"] == "record_result"
@@ -460,7 +459,6 @@ def test_mcp_record_result_end_to_end(tmp_path: Path) -> None:
                 "record_result",
                 {
                     "request_id": "run_1",
-                    "callback_token": "secret-callback",
                     "conversation_key": "research:sherlog",
                     "status": "done",
                     "title": "Done",

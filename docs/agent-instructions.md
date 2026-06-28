@@ -65,13 +65,24 @@ Use it by default for:
 
 Do not replace real local execution with chat-only explanation when the task can be completed on the machine.
 
+## Tool Call Economy
+
+<YOUR_LOCAL_OPS_MCP> runs on the operator's local machine. Your runtime reaches it over a remote link (ChatGPT → public tunnel → the operator's Mac), so every tool call is a separate network round-trip — typically a few hundred milliseconds each, paid sequentially, and they add up across a turn. This is unlike a local MCP client where tool calls are near-instant.
+
+Act accordingly:
+
+- Minimize round-trips. Prefer fewer, more substantial tool calls over many small ones.
+- When one call can return what would otherwise take several, use that one call.
+- Do not issue a sequence of tiny calls when a single call can do the same work.
+
+This applies to <YOUR_LOCAL_OPS_MCP> only. Relay callbacks (<YOUR_RELAY_MCP>.record_plan / record_progress / record_result) still follow the relay workflow — do not collapse or skip them.
+
 ## Relay Mode
 
-If the input includes all three of these fields:
+If the input includes both of these fields:
 
 - `request_id`
 - `conversation_key`
-- `callback_token`
 
 enter relay mode.
 
@@ -88,7 +99,7 @@ So in relay mode:
 - <YOUR_LOCAL_OPS_MCP> remains your hands
 - a normal chat reply is never sufficient outward communication
 
-If any of the three relay fields are missing, do not force relay callbacks unless the task clearly provides another callback contract.
+If both relay fields are not present, do not force relay callbacks unless the task clearly provides another callback contract.
 
 ## Relay Workflow
 
@@ -96,13 +107,13 @@ In relay mode, follow this workflow on every turn for the current relay request:
 
 1. Before doing any substantive work, call `<YOUR_RELAY_MCP>.record_plan` first.
 2. In that plan, use a short step list with stable step ids so later updates refer to the same steps. Keep the plan user-visible: do not include relay binding, `server_info`, or routine tool setup unless the user explicitly asked to debug that plumbing.
-3. Immediately after planning, call `<YOUR_LOCAL_OPS_MCP>.bind_relay_run` using `request_id` and `callback_token`; include `conversation_key` when accepted.
+3. Immediately after planning, call `<YOUR_LOCAL_OPS_MCP>.bind_relay_run` using `request_id` (and `conversation_key` when accepted). No `callback_token` is involved.
 4. Do not delay binding until later in the turn, and do not pass `relay_url` unless the runtime explicitly requires it.
 5. After binding, do the real work on <YOUR_LOCAL_OPS_MCP> so the operator can see the mirrored tool activity. If <YOUR_LOCAL_OPS_MCP> is unavailable, skip bind but still use relay tools so the operator is not left blind.
 6. After meaningful progress, call `<YOUR_RELAY_MCP>.record_progress` with batched `step_updates`.
-7. If you are blocked on a real human decision, call `<YOUR_RELAY_MCP>.ask_user` with one clear question. The operator's answer arrives as a steer to the SAME turn (same `request_id`, freshly rotated `callback_token`, labeled "Operator answered:") — resume the turn with that answer; do not start a new turn.
+7. If you are blocked on a real human decision, call `<YOUR_RELAY_MCP>.ask_user` with one clear question. The operator's answer arrives as a steer to the SAME turn (same `request_id`, labeled "Operator answered:") — resume the turn with that answer; do not start a new turn.
 8. If the direction changes or you need a different plan within the same turn, call `<YOUR_RELAY_MCP>.record_plan` again or mark superseded steps as `skipped` via `step_updates`. Do not use `record_result` to represent a plan change.
-9. If the operator appends a follow-up instruction mid-turn (steer), it arrives as another trigger with the SAME `request_id` and a freshly rotated `callback_token` (the new token is in the trigger header — use it for all further callbacks). Treat it as guidance on the CURRENT turn: keep using that `request_id`/`callback_token`, update the plan per rule 8, and do not start a new turn. The appended text appears under "Operator added:", or under "Operator answered:" when it is the answer to your `ask_user` (same handling either way).
+9. If the operator appends a follow-up instruction mid-turn (steer), it arrives as another trigger with the SAME `request_id` (keep using that `request_id` for all further callbacks). Treat it as guidance on the CURRENT turn: update the plan per rule 8, and do not start a new turn. The appended text appears under "Operator added:", or under "Operator answered:" when it is the answer to your `ask_user` (same handling either way).
 10. Before finishing the turn, call `<YOUR_RELAY_MCP>.record_result` with the exact incoming relay identifiers and the full final Markdown result.
 
 Do not skip `record_plan`, `bind_relay_run` (when local ops is available), or `record_result` in relay mode.
@@ -140,7 +151,7 @@ When the operator answers, it arrives as a steer on the SAME turn (labeled "Oper
 
 Before finishing any relay-mode run, always call `record_result`.
 
-Use the exact incoming `request_id`, `conversation_key`, and `callback_token`.
+Use the exact incoming `request_id` and `conversation_key`.
 
 Status rules:
 

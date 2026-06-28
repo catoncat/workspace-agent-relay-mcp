@@ -20,29 +20,10 @@ def _seed_run(store: RelayStore, *, request_id: str = "run_1") -> dict:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key=request_id,
         request_id=request_id,
     )
     return {"agent": agent, "conversation": conversation}
-
-
-def test_record_tool_trace_validates_callback_token(tmp_path: Path) -> None:
-    store = RelayStore(tmp_path / "relay.sqlite")
-    _seed_run(store)
-
-    wrong = store.record_tool_trace(
-        request_id="run_1",
-        conversation_key="research:sherlog",
-        callback_token="wrong",
-        tool="apply_patch",
-        title="apply_patch → ThreadView.tsx",
-    )
-
-    assert wrong["success"] is False
-    assert wrong["error"]["code"] == "invalid_callback_token"
-    run = store.get_run_by_request_id("run_1")
-    assert store.list_events(run["id"]) == []
 
 
 def test_record_tool_trace_rejects_conversation_mismatch(tmp_path: Path) -> None:
@@ -52,7 +33,6 @@ def test_record_tool_trace_rejects_conversation_mismatch(tmp_path: Path) -> None
     mismatch = store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:other",
-        callback_token="secret-callback",
         tool="apply_patch",
         title="apply_patch → ThreadView.tsx",
     )
@@ -68,7 +48,6 @@ def test_record_tool_trace_rejects_unknown_request_id(tmp_path: Path) -> None:
     missing = store.record_tool_trace(
         request_id="run_missing",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="apply_patch",
         title="apply_patch → ThreadView.tsx",
     )
@@ -83,7 +62,6 @@ def test_record_tool_trace_rejects_terminal_run(tmp_path: Path) -> None:
     store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
@@ -92,7 +70,6 @@ def test_record_tool_trace_rejects_terminal_run(tmp_path: Path) -> None:
     trace = store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="apply_patch",
         title="apply_patch → ThreadView.tsx",
     )
@@ -110,7 +87,6 @@ def test_record_tool_trace_appends_progress_event_with_trace_marker(tmp_path: Pa
     result = store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="apply_patch",
         title="apply_patch → ThreadView.tsx",
         args_summary={"path": "frontend/src/components/ThreadView.tsx", "hunks": 3},
@@ -152,7 +128,6 @@ def test_record_tool_trace_failure_markdown_truncates_error(tmp_path: Path) -> N
     result = store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="run_command",
         title="run_command",
         duration_ms=7,
@@ -178,14 +153,12 @@ def test_record_tool_trace_does_not_touch_plan_steps(tmp_path: Path) -> None:
     store.record_plan(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         steps=[{"id": "s1", "title": "Confirm changed files"}],
     )
 
     store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="apply_patch",
         title="apply_patch → ThreadView.tsx",
     )
@@ -196,7 +169,7 @@ def test_record_tool_trace_does_not_touch_plan_steps(tmp_path: Path) -> None:
     assert all(step["status"] == "pending" for step in plan["steps"])
 
 
-def test_record_tool_trace_redacts_callback_token_in_payload(tmp_path: Path) -> None:
+def test_record_tool_trace_keeps_payload_content_verbatim(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     _seed_run(store)
     run = store.get_run_by_request_id("run_1")
@@ -204,18 +177,18 @@ def test_record_tool_trace_redacts_callback_token_in_payload(tmp_path: Path) -> 
     store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="apply_patch",
-        title="echo secret-callback",
-        args_summary={"secret": "secret-callback"},
-        error="failed secret-callback",
+        title="echo marker",
+        args_summary={"secret": "a-secret-value"},
+        error="failed with a-secret-value",
         ok=False,
     )
 
     event = store.list_events(run["id"])[-1]
     rendered = str(event)
-    assert "secret-callback" not in rendered
-    assert "[redacted-callback-token]" in rendered
+    # No redaction layer anymore: trace content is stored verbatim.
+    assert "a-secret-value" in rendered
+    assert "echo marker" in event["title"]
 
 
 def test_record_tool_trace_keeps_existing_progress_tests_working(tmp_path: Path) -> None:
@@ -226,14 +199,12 @@ def test_record_tool_trace_keeps_existing_progress_tests_working(tmp_path: Path)
     progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         message="Reading repository",
         title="Working",
     )
     trace = store.record_tool_trace(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         tool="apply_patch",
         title="apply_patch → ThreadView.tsx",
     )
@@ -271,7 +242,7 @@ def _http_client(tmp_path: Path, *, auth_token: str = "") -> tuple:
     return TestClient(app), server.store
 
 
-def _seed_active_run(store: RelayStore, *, callback_token: str = "secret-callback") -> dict:
+def _seed_active_run(store: RelayStore) -> dict:
     agent = store.upsert_agent(
         name="default",
         trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
@@ -287,32 +258,37 @@ def _seed_active_run(store: RelayStore, *, callback_token: str = "secret-callbac
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token=callback_token,
         idempotency_key="idem_1",
         request_id="run_1",
     )
     return run
 
 
-def test_internal_tool_trace_with_correct_token_returns_200_and_creates_event(tmp_path: Path) -> None:
-    client, store = _http_client(tmp_path)
+def _trace_body(**overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "request_id": "run_1",
+        "conversation_key": "research:sherlog",
+        "tool": "apply_patch",
+        "title": "apply_patch → ThreadView.tsx",
+        "args_summary": {"path": "frontend/src/components/ThreadView.tsx", "hunks": 3},
+        "duration_ms": 42,
+        "ok": True,
+    }
+    body.update(overrides)
+    return body
+
+
+def test_internal_tool_trace_with_correct_bearer_returns_200_and_creates_event(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
     run = _seed_active_run(store)
 
     with client:
         response = client.post(
             "/internal/tool-trace",
-            json={
-                "request_id": "run_1",
-                "conversation_key": "research:sherlog",
-                "callback_token": "secret-callback",
-                "tool": "apply_patch",
-                "title": "apply_patch → ThreadView.tsx",
-                "args_summary": {"path": "frontend/src/components/ThreadView.tsx", "hunks": 3},
-                "duration_ms": 42,
-                "ok": True,
-            },
+            json=_trace_body(),
+            headers={"Authorization": "Bearer local-secret"},
         )
-        detail = client.get(f"/api/runs/{run['id']}")
+        detail = client.get(f"/api/runs/{run['id']}", headers={"Authorization": "Bearer local-secret"})
 
     assert response.status_code == 200
     body = response.json()
@@ -324,72 +300,64 @@ def test_internal_tool_trace_with_correct_token_returns_200_and_creates_event(tm
     assert json.loads(events[0]["payload_json"])["trace"] is True
 
 
-def test_internal_tool_trace_with_wrong_token_returns_401(tmp_path: Path) -> None:
-    client, store = _http_client(tmp_path)
-    _seed_active_run(store)
-
-    with client:
-        response = client.post(
-            "/internal/tool-trace",
-            json={
-                "request_id": "run_1",
-                "conversation_key": "research:sherlog",
-                "callback_token": "wrong-token",
-                "tool": "apply_patch",
-                "title": "apply_patch → ThreadView.tsx",
-            },
-        )
-
-    assert response.status_code == 401
-    assert response.json()["success"] is False
-
-
-def test_internal_tool_trace_with_unknown_request_id_returns_404(tmp_path: Path) -> None:
-    client, store = _http_client(tmp_path)
-    _seed_active_run(store)
-
-    with client:
-        response = client.post(
-            "/internal/tool-trace",
-            json={
-                "request_id": "run_missing",
-                "conversation_key": "research:sherlog",
-                "callback_token": "secret-callback",
-                "tool": "apply_patch",
-                "title": "apply_patch → ThreadView.tsx",
-            },
-        )
-
-    assert response.status_code == 404
-    assert response.json()["success"] is False
-
-
-def test_internal_tool_trace_bypasses_dashboard_bearer_auth(tmp_path: Path) -> None:
-    # When a dashboard auth_token is configured, /api/* requires that token,
-    # but /internal/tool-trace must NOT — it authenticates via the run's
-    # callback_token in the body instead.
+def test_internal_tool_trace_with_wrong_bearer_returns_401(tmp_path: Path) -> None:
     client, store = _http_client(tmp_path, auth_token="local-secret")
     _seed_active_run(store)
 
     with client:
         response = client.post(
             "/internal/tool-trace",
-            json={
-                "request_id": "run_1",
-                "conversation_key": "research:sherlog",
-                "callback_token": "secret-callback",
-                "tool": "apply_patch",
-                "title": "apply_patch → ThreadView.tsx",
-            },
+            json=_trace_body(),
+            headers={"Authorization": "Bearer wrong-token"},
         )
 
-    assert response.status_code == 200
-    assert response.json()["success"] is True
+    assert response.status_code == 401
+    assert response.json()["success"] is False
+
+
+def test_internal_tool_trace_without_bearer_returns_401(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    _seed_active_run(store)
+
+    with client:
+        response = client.post("/internal/tool-trace", json=_trace_body())
+
+    assert response.status_code == 401
+    assert response.json()["success"] is False
+
+
+def test_internal_tool_trace_disabled_when_no_auth_token_configured(tmp_path: Path) -> None:
+    # With no shared auth_token configured, the internal bridge is disabled
+    # (403) rather than left unauthenticated — the relay may be tunneled.
+    client, store = _http_client(tmp_path)
+    _seed_active_run(store)
+
+    with client:
+        response = client.post("/internal/tool-trace", json=_trace_body())
+
+    assert response.status_code == 403
+    assert response.json()["success"] is False
+
+
+def test_internal_tool_trace_with_unknown_request_id_returns_404(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            "/internal/tool-trace",
+            json=_trace_body(request_id="run_missing"),
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["success"] is False
 
 
 def test_internal_tool_trace_rejects_missing_required_fields(tmp_path: Path) -> None:
-    client, store = _http_client(tmp_path)
+    client, store = _http_client(tmp_path, auth_token="local-secret")
     _seed_active_run(store)
+    headers = {"Authorization": "Bearer local-secret"}
 
     with client:
         missing_tool = client.post(
@@ -397,17 +365,147 @@ def test_internal_tool_trace_rejects_missing_required_fields(tmp_path: Path) -> 
             json={
                 "request_id": "run_1",
                 "conversation_key": "research:sherlog",
-                "callback_token": "secret-callback",
                 "title": "apply_patch → ThreadView.tsx",
             },
+            headers=headers,
         )
         malformed = client.post(
             "/internal/tool-trace",
             content="{",
-            headers={"Content-Type": "application/json"},
+            headers={**headers, "Content-Type": "application/json"},
         )
 
     assert missing_tool.status_code == 400
     assert missing_tool.json()["success"] is False
     assert malformed.status_code == 400
     assert malformed.json() == {"success": False, "error": "malformed JSON body"}
+
+
+# ---------------------------------------------------------------------------
+# HTTP-level tests for POST /internal/runs/{run_id}/polling-events
+# ---------------------------------------------------------------------------
+
+
+def _polling_body(**overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "events": [
+            {
+                "source_key": "node_a",
+                "event_type": "progress",
+                "title": None,
+                "markdown": "polled reasoning",
+                "payload": {"polling": True},
+                "create_time": 1700000000.0,
+            },
+            {
+                "source_key": "node_b",
+                "event_type": "progress",
+                "title": None,
+                "markdown": "more polled reasoning",
+                "payload": {"polling": True},
+                "create_time": 1700000001.0,
+            },
+        ]
+    }
+    body.update(overrides)
+    return body
+
+
+def test_internal_polling_events_with_correct_bearer_returns_200_and_creates_events(
+    tmp_path: Path,
+) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+    headers = {"Authorization": "Bearer local-secret"}
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json=_polling_body(),
+            headers=headers,
+        )
+        detail = client.get(f"/api/runs/{run['id']}", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["inserted"] == 2
+    events = detail.json()["events"]
+    polling = [e for e in events if e.get("source_key")]
+    assert len(polling) == 2
+    assert {e["source_key"] for e in polling} == {"node_a", "node_b"}
+    assert any(e["markdown"] == "polled reasoning" for e in polling)
+
+
+def test_internal_polling_events_idempotent_on_repost(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+    headers = {"Authorization": "Bearer local-secret"}
+
+    with client:
+        first = client.post(f"/internal/runs/{run['id']}/polling-events", json=_polling_body(), headers=headers)
+        second = client.post(f"/internal/runs/{run['id']}/polling-events", json=_polling_body(), headers=headers)
+        detail = client.get(f"/api/runs/{run['id']}", headers=headers)
+
+    assert first.json()["inserted"] == 2
+    assert second.json()["inserted"] == 0
+    polling = [e for e in detail.json()["events"] if e.get("source_key")]
+    assert len(polling) == 2  # no duplicates
+
+
+def test_internal_polling_events_wrong_bearer_returns_401(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json=_polling_body(),
+            headers={"Authorization": "Bearer wrong"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_internal_polling_events_unknown_run_returns_404(tmp_path: Path) -> None:
+    client, _store = _http_client(tmp_path, auth_token="local-secret")
+
+    with client:
+        response = client.post(
+            "/internal/runs/999/polling-events",
+            json=_polling_body(),
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["success"] is False
+
+
+def test_internal_polling_events_rejects_bad_event_type(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json={"events": [{"source_key": "x", "event_type": "plan", "markdown": "m", "create_time": 1.0}]},
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+
+
+def test_internal_polling_events_rejects_missing_source_key(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json={"events": [{"event_type": "progress", "markdown": "m", "create_time": 1.0}]},
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False

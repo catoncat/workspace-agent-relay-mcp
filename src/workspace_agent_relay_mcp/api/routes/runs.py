@@ -15,7 +15,6 @@ from ...store.bus import RunEventBus
 from ...trigger import (
     TriggerClient,
     build_trigger_input,
-    generate_callback_token,
     generate_request_id,
     redact_secret,
 )
@@ -29,7 +28,7 @@ logger = logging.getLogger("workspace_agent_relay_mcp.trigger")
 def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
     return {
         "run": store.get_run(run_id),
-        "events": store.list_events(run_id),
+        "events": store.list_events_merged(run_id),
         "artifacts": store.list_artifacts(run_id),
         "plan": store.get_plan(run_id),
     }
@@ -100,7 +99,6 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             return json_error(str(exc), status_code=400)
         request_id = generate_request_id()
         idempotency_key = generate_request_id("idem")
-        callback_token = generate_callback_token()
         input_markdown = str(payload.get("input_markdown") or "")
         conversation_key = str(conversation["conversation_key"])
         # Continuation = this conversation already has prior runs, so the agent
@@ -110,7 +108,6 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,
-            callback_token=callback_token,
             user_input=input_markdown,
             is_continuation=is_continuation,
         )
@@ -119,7 +116,6 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             conversation_id=int(conversation["id"]),
             conversation_key=conversation_key,
             input_markdown=input_markdown,
-            callback_token=callback_token,
             idempotency_key=idempotency_key,
             request_id=request_id,
         )
@@ -165,11 +161,12 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
     async def steer_run(request: Request) -> JSONResponse:
         # Operator appends guidance to the active run in this conversation
         # (steer). We can only send triggers, so this is another trigger to the
-        # same conversation_key, bookkept on the SAME run row: the run's
-        # callback_token is rotated and the same request_id is reused, so the
-        # agent's callbacks land on the existing run and can UPDATE its plan
-        # rather than start a new one. If no run is active, return 409 so the
-        # frontend falls back to create_run (a new turn).
+        # same conversation_key, bookkept on the SAME run row: the same
+        # request_id is reused, so the agent's callbacks land on the existing
+        # run and can UPDATE its plan rather than start a new one. If no run is
+        # active, return 409 so the frontend falls back to create_run (a new
+        # turn). No credential rotation is involved — callbacks authenticate
+        # via the MCP/OAuth layer plus request_id routing.
         try:
             payload = await json_body(request)
         except ValueError as exc:
@@ -202,12 +199,10 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             return json_error("input_markdown must not be empty", status_code=400)
         conversation_key = str(conversation["conversation_key"])
         request_id = str(active["request_id"])
-        new_callback_token = generate_callback_token()
         idempotency_key = generate_request_id("idem")
         try:
             run = store.steer_run(
                 run_id=int(active["id"]),
-                new_callback_token=new_callback_token,
                 user_input=input_markdown,
             )
         except KeyError as exc:
@@ -217,7 +212,6 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,
-            callback_token=new_callback_token,
             user_input=input_markdown,
             mode="steer",
             answer=is_answer,

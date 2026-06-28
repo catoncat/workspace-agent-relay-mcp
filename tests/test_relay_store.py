@@ -1,5 +1,4 @@
 from pathlib import Path
-import hashlib
 import json
 import threading
 
@@ -58,7 +57,7 @@ def test_store_set_agent_access_token_migrates_to_local_ref(tmp_path: Path) -> N
     assert store.get_agent_access_token(int(agent["id"])) == "at-new"
 
 
-def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> None:
+def test_create_run_validates_callbacks_by_request_id_and_conversation_key(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -67,20 +66,31 @@ def test_create_run_hashes_callback_token_and_validates_it(tmp_path: Path) -> No
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="hello",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
 
     assert run["request_id"] == "run_1"
     assert "callback_token_hash" not in run
-    assert "secret-callback" not in str(run)
-    secret_run = store.get_run_by_request_id("run_1", include_secret_hash=True)
-    assert secret_run["callback_token_hash"] == hashlib.sha256(b"secret-callback").hexdigest()
-    assert "secret-callback" not in str(secret_run)
-    assert store.validate_callback("run_1", "research:sherlog", "secret-callback")["success"] is True
-    assert store.validate_callback("run_1", "research:sherlog", "wrong")["success"] is False
-    assert store.validate_callback("run_1", "other", "secret-callback")["success"] is False
+    # No callback_token is stored anywhere on the run row.
+    assert "callback_token" not in run
+    # record_progress routes by request_id + conversation_key; a mismatched
+    # conversation_key is rejected (this is the real cross-conversation guard).
+    assert store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        message="ok",
+    )["success"] is True
+    assert store.record_progress(
+        request_id="run_1",
+        conversation_key="other",
+        message="wrong conversation",
+    )["error"]["code"] == "conversation_mismatch"
+    assert store.record_progress(
+        request_id="missing",
+        conversation_key="research:sherlog",
+        message="unknown run",
+    )["error"]["code"] == "run_not_found"
 
 
 def test_delete_conversation_archives_it_from_lists(tmp_path: Path) -> None:
@@ -137,17 +147,16 @@ def test_delete_agent_cascades_conversations(tmp_path: Path) -> None:
     assert store.list_conversations() == []
 
 
-def test_create_run_redacts_callback_token_echo_from_input_markdown(tmp_path: Path) -> None:
+def test_create_run_stores_input_markdown_verbatim(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
 
-    run = store.create_run(
+    store.create_run(
         agent_id=agent["id"],
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
-        input_markdown="callback_token: secret-callback",
-        callback_token="secret-callback",
+        input_markdown="just some user text",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -156,10 +165,9 @@ def test_create_run_redacts_callback_token_echo_from_input_markdown(tmp_path: Pa
     listed = store.list_runs_for_conversation(conversation["id"])
     context = store.get_run_context("research:sherlog", limit=1)
 
-    for payload in (run, stored, listed, context):
-        rendered = str(payload)
-        assert "secret-callback" not in rendered
-        assert "[redacted-callback-token]" in rendered
+    assert stored["input_markdown"] == "just some user text"
+    assert listed[0]["input_markdown"] == "just some user text"
+    assert "just some user text" in str(context)
 
 
 def test_record_progress_result_and_question_update_run_state(tmp_path: Path) -> None:
@@ -171,7 +179,6 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -179,7 +186,6 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
     progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         message="Reading repository",
         title="Working",
         payload={"phase": "scan"},
@@ -189,7 +195,6 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
     question = store.ask_user(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         question="Which branch?",
         choices=["main", "dev"],
         context="Need target branch",
@@ -199,7 +204,6 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
@@ -217,7 +221,7 @@ def test_record_progress_result_and_question_update_run_state(tmp_path: Path) ->
     assert artifacts[0]["name"] == "result.md"
 
 
-def test_get_run_context_redacts_callback_tokens(tmp_path: Path) -> None:
+def test_get_run_context_returns_capped_recent_runs(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -229,14 +233,12 @@ def test_get_run_context_redacts_callback_tokens(tmp_path: Path) -> None:
             conversation_id=conversation["id"],
             conversation_key="research:sherlog",
             input_markdown=f"task {index}",
-            callback_token="secret-callback",
             idempotency_key=request_id,
             request_id=request_id,
         )
         store.record_result(
             request_id=request_id,
             conversation_key="research:sherlog",
-            callback_token="secret-callback",
             status="done",
             title=f"Finished {index}",
             markdown=f"Final answer {index}",
@@ -246,13 +248,13 @@ def test_get_run_context_redacts_callback_tokens(tmp_path: Path) -> None:
 
     rendered = str(context)
     assert context["success"] is True
-    assert "secret-callback" not in rendered
     assert "callback_token_hash" not in rendered
+    assert "callback_token" not in rendered
     assert [run["request_id"] for run in context["runs"]] == ["run_3", "run_2"]
     assert "run_1" not in rendered
 
 
-def test_callback_token_echoes_are_redacted_from_callback_content(tmp_path: Path) -> None:
+def test_record_progress_result_and_question_keep_content_verbatim(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -261,7 +263,6 @@ def test_callback_token_echoes_are_redacted_from_callback_content(tmp_path: Path
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -269,52 +270,48 @@ def test_callback_token_echoes_are_redacted_from_callback_content(tmp_path: Path
     store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
-        message="progress message secret-callback",
-        title="progress title secret-callback",
-        payload={
-            "secret-callback-key": "payload value secret-callback",
-            "nested": ["list value secret-callback", {"inner": "dict value secret-callback"}],
-        },
+        message="progress message",
+        title="progress title",
+        payload={"phase": "scan"},
     )
     store.ask_user(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
-        question="question secret-callback",
-        choices=["choice secret-callback"],
-        context="context secret-callback",
+        question="which branch?",
+        choices=["main"],
+        context="need target",
     )
     store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
-        title="result title secret-callback",
-        markdown="result markdown secret-callback",
+        title="result title",
+        markdown="result markdown",
         artifacts=[
             {
-                "name": "artifact secret-callback",
-                "mime_type": "text/secret-callback",
-                "content": "artifact content secret-callback",
-                "metadata": {
-                    "metadata-secret-callback": "metadata value secret-callback",
-                    "nested": ["metadata list secret-callback"],
-                },
+                "name": "artifact.md",
+                "mime_type": "text/markdown",
+                "content": "artifact content",
+                "metadata": {"k": "v", "nested": ["list value"]},
             }
         ],
     )
 
-    events_rendered = str(store.list_events(run["id"]))
-    artifacts_rendered = str(store.list_artifacts(run["id"]))
-    context_rendered = str(store.get_run_context("research:sherlog", limit=1))
+    events = store.list_events(run["id"])
+    artifacts = store.list_artifacts(run["id"])
+    events_rendered = str(events)
+    artifacts_rendered = str(artifacts)
 
-    for rendered in (events_rendered, artifacts_rendered, context_rendered):
-        assert "secret-callback" not in rendered
-        assert "[redacted-callback-token]" in rendered
+    assert "progress message" in events_rendered
+    assert "progress title" in events_rendered
+    assert "which branch?" in events_rendered
+    assert "result markdown" in events_rendered
+    assert artifacts[0]["name"] == "artifact.md"
+    assert artifacts[0]["content"] == "artifact content"
+    assert "list value" in artifacts_rendered
 
 
-def test_artifact_bytes_scalars_are_redacted_after_string_coercion(tmp_path: Path) -> None:
+def test_record_result_coerces_bytes_artifact_scalars_to_str(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -323,7 +320,6 @@ def test_artifact_bytes_scalars_are_redacted_after_string_coercion(tmp_path: Pat
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -331,28 +327,26 @@ def test_artifact_bytes_scalars_are_redacted_after_string_coercion(tmp_path: Pat
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
         artifacts=[
             {
-                "name": b"name secret-callback",
-                "mime_type": b"text/secret-callback",
-                "content": b"content secret-callback",
+                "name": b"name-bytes",
+                "mime_type": b"text/markdown",
+                "content": b"content-bytes",
             }
         ],
     )
 
     artifacts = store.list_artifacts(run["id"])
-    rendered = str(artifacts)
 
     assert result["success"] is True
-    assert "secret-callback" not in rendered
-    assert "[redacted-callback-token]" in rendered
-    assert "[redacted-callback-token]" in artifacts[0]["name"]
-    assert "[redacted-callback-token]" in artifacts[0]["mime_type"]
-    assert "[redacted-callback-token]" in artifacts[0]["content"]
+    # Bytes scalars are coerced via str(), which renders the b'...' repr
+    # (same as the pre-removal behavior — no special bytes decoding).
+    assert artifacts[0]["name"] == str(b"name-bytes")
+    assert artifacts[0]["mime_type"] == str(b"text/markdown")
+    assert artifacts[0]["content"] == str(b"content-bytes")
 
 
 def test_record_result_rolls_back_result_event_when_artifact_metadata_fails(tmp_path: Path) -> None:
@@ -364,7 +358,6 @@ def test_record_result_rolls_back_result_event_when_artifact_metadata_fails(tmp_
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -373,7 +366,6 @@ def test_record_result_rolls_back_result_event_when_artifact_metadata_fails(tmp_
         store.record_result(
             request_id="run_1",
             conversation_key="research:sherlog",
-            callback_token="secret-callback",
             status="done",
             title="Finished",
             markdown="Final answer",
@@ -400,14 +392,12 @@ def test_terminal_run_rejects_later_callbacks_without_reopening(tmp_path: Path) 
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
@@ -416,19 +406,16 @@ def test_terminal_run_rejects_later_callbacks_without_reopening(tmp_path: Path) 
     progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         message="Reading repository",
     )
     question = store.ask_user(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         question="Which branch?",
     )
     second_result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished again",
         markdown="Second answer",
@@ -453,7 +440,6 @@ def test_dismiss_run_marks_non_terminal_run_done(tmp_path: Path) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -466,7 +452,6 @@ def test_dismiss_run_marks_non_terminal_run_done(tmp_path: Path) -> None:
     store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         message="Still working",
     )
 
@@ -483,7 +468,6 @@ def test_dismiss_run_marks_non_terminal_run_done(tmp_path: Path) -> None:
     late = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Late",
         markdown="Too late",
@@ -501,14 +485,12 @@ def test_dismiss_run_rejects_terminal_run(tmp_path: Path) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
     store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
@@ -518,7 +500,7 @@ def test_dismiss_run_rejects_terminal_run(tmp_path: Path) -> None:
         store.dismiss_run(int(run["id"]))
 
 
-def test_terminal_run_checks_callback_token_before_closed_status(tmp_path: Path) -> None:
+def test_terminal_run_rejects_callbacks_and_mismatched_conversation(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -527,57 +509,46 @@ def test_terminal_run_checks_callback_token_before_closed_status(tmp_path: Path)
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
     )
 
-    wrong_progress = store.record_progress(
+    # Same conversation on a terminal run -> run_closed (the turn is sealed).
+    late_progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="wrong-callback",
         message="Reading repository",
     )
-    wrong_result = store.record_result(
+    late_result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="wrong-callback",
         status="done",
         title="Finished again",
         markdown="Second answer",
     )
-    correct_progress = store.record_progress(
+    # Wrong conversation_key is rejected (cross-conversation guard) — and the
+    # mismatch is checked before the terminal-status check, so it surfaces as
+    # conversation_mismatch even on a closed run.
+    mismatched = store.record_progress(
         request_id="run_1",
-        conversation_key="research:sherlog",
-        callback_token="secret-callback",
-        message="Reading repository",
-    )
-    correct_result = store.record_result(
-        request_id="run_1",
-        conversation_key="research:sherlog",
-        callback_token="secret-callback",
-        status="done",
-        title="Finished again",
-        markdown="Second answer",
+        conversation_key="other",
+        message="wrong conversation",
     )
 
     assert result["success"] is True
-    assert wrong_progress["success"] is False
-    assert wrong_progress["error"]["code"] == "invalid_callback_token"
-    assert wrong_result["success"] is False
-    assert wrong_result["error"]["code"] == "invalid_callback_token"
-    assert correct_progress["success"] is False
-    assert correct_progress["error"]["code"] == "run_closed"
-    assert correct_result["success"] is False
-    assert correct_result["error"]["code"] == "run_closed"
+    assert late_progress["success"] is False
+    assert late_progress["error"]["code"] == "run_closed"
+    assert late_result["success"] is False
+    assert late_result["error"]["code"] == "run_closed"
+    assert mismatched["success"] is False
+    assert mismatched["error"]["code"] == "conversation_mismatch"
     assert store.get_run_by_request_id("run_1")["status"] == "done"
 
 
@@ -590,14 +561,12 @@ def test_late_trigger_result_does_not_reopen_terminal_run(tmp_path: Path) -> Non
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="done",
         title="Finished",
         markdown="Final answer",
@@ -612,7 +581,6 @@ def test_late_trigger_result_does_not_reopen_terminal_run(tmp_path: Path) -> Non
     progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         message="Reading repository",
     )
 
@@ -636,7 +604,6 @@ def test_update_run_trigger_result_persists_trigger_error(tmp_path: Path) -> Non
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_err",
         request_id="run_err",
     )
@@ -710,13 +677,83 @@ def test_existing_database_gets_trigger_error_column_via_migration(tmp_path: Pat
     conn.close()
 
     store = RelayStore(db)
-    # Opening the store runs _init_schema, which must add the missing column.
+    # Opening the store runs _init_schema, which must add the missing column
+    # and drop the legacy callback_token_hash via a table rebuild.
     import sqlite3 as _sqlite3
     check = _sqlite3.connect(db)
     cols = {row[1] for row in check.execute("PRAGMA table_info(runs)")}
     check.close()
     for column in ("trigger_error", "parent_run_id", "superseded_by_run_id", "supersede_reason"):
         assert column in cols
+    assert "callback_token_hash" not in cols
+
+
+def test_existing_database_drops_callback_token_hash_and_preserves_runs(tmp_path: Path) -> None:
+    # Build an old-style runs table WITH callback_token_hash and a real row,
+    # then confirm the rebuild migration drops the column and keeps the data.
+    import sqlite3
+
+    db = tmp_path / "relay.sqlite"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+            trigger_url TEXT NOT NULL, trigger_id TEXT NOT NULL, token_ref TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id INTEGER NOT NULL,
+            name TEXT NOT NULL, conversation_key TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT
+        );
+        CREATE TABLE runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL UNIQUE,
+            agent_id INTEGER NOT NULL, conversation_id INTEGER NOT NULL,
+            conversation_key TEXT NOT NULL, callback_token_hash TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL, input_markdown TEXT NOT NULL,
+            trigger_status TEXT NOT NULL DEFAULT 'draft', trigger_http_status INTEGER,
+            trigger_x_request_id TEXT, conversation_url TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT
+        );
+        CREATE TABLE events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL,
+            request_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT,
+            markdown TEXT, payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL,
+            name TEXT NOT NULL, mime_type TEXT NOT NULL, content TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+        );
+        INSERT INTO agents (id, name, trigger_url, trigger_id, token_ref, created_at, updated_at)
+            VALUES (1, 'default', 'https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger', 'agtch_test', 'env:TOKEN', '2026-06-28T00:00:00Z', '2026-06-28T00:00:00Z');
+        INSERT INTO conversations (id, agent_id, name, conversation_key, created_at, updated_at)
+            VALUES (1, 1, 'Sherlog', 'research:sherlog', '2026-06-28T00:00:00Z', '2026-06-28T00:00:00Z');
+        INSERT INTO runs (id, request_id, agent_id, conversation_id, conversation_key, callback_token_hash, idempotency_key, input_markdown, trigger_status, status, created_at, updated_at)
+            VALUES (1, 'run_1', 1, 1, 'research:sherlog', 'legacy-hash', 'run_1', 'old task', 'accepted', 'accepted', '2026-06-28T00:00:00Z', '2026-06-28T00:00:00Z');
+        INSERT INTO events (id, run_id, request_id, event_type, title, markdown, payload_json, created_at)
+            VALUES (1, 1, 'run_1', 'progress', 'Working', 'old progress', '{}', '2026-06-28T00:00:00Z');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = RelayStore(db)
+
+    # The legacy column is gone; the run row and its event survived the rebuild.
+    check = sqlite3.connect(db)
+    cols = {row[1] for row in check.execute("PRAGMA table_info(runs)")}
+    event_count = check.execute("SELECT COUNT(*) FROM events WHERE run_id = 1").fetchone()[0]
+    check.close()
+    assert "callback_token_hash" not in cols
+    assert event_count == 1
+
+    run = store.get_run_by_request_id("run_1")
+    assert run["input_markdown"] == "old task"
+    assert run["status"] == "accepted"
 
 
 def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> None:
@@ -728,7 +765,6 @@ def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> 
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -736,7 +772,6 @@ def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> 
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="weird",
         title="Finished",
         markdown="Final answer",
@@ -758,7 +793,6 @@ def test_record_result_rejects_superseded_status(tmp_path: Path) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -766,7 +800,6 @@ def test_record_result_rejects_superseded_status(tmp_path: Path) -> None:
     result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-callback",
         status="superseded",
         title="Replaced",
         markdown="should not be stored",
@@ -790,7 +823,6 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="first turn",
-        callback_token="secret-first",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -798,7 +830,6 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     store.record_plan(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
         steps=[{"id": "s1", "title": "Old direction"}],
     )
     # Advance first run to an active, non-terminal status (mimics trigger accepted).
@@ -815,7 +846,6 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="correcting direction",
-        callback_token="secret-second",
         idempotency_key="run_2",
         request_id="run_2",
     )
@@ -846,7 +876,6 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     late = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
         message="late",
     )
     assert late["success"] is False
@@ -856,7 +885,6 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     store.record_result(
         request_id="run_2",
         conversation_key="research:sherlog",
-        callback_token="secret-second",
         status="done",
         title="Done",
         markdown="final",
@@ -866,7 +894,6 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="third turn",
-        callback_token="secret-third",
         idempotency_key="run_3",
         request_id="run_3",
     )
@@ -876,7 +903,7 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     assert third["parent_run_id"] is None
 
 
-def _make_active_run(store: RelayStore, *, request_id: str, callback_token: str) -> dict:
+def _make_active_run(store: RelayStore, *, request_id: str) -> dict:
     """Create a run, give it a plan, and advance it to `accepted` (active)."""
     agent = store.list_agents()[0]
     conversation = store.list_conversations()[0]
@@ -885,14 +912,12 @@ def _make_active_run(store: RelayStore, *, request_id: str, callback_token: str)
         conversation_id=conversation["id"],
         conversation_key=conversation["conversation_key"],
         input_markdown="first turn",
-        callback_token=callback_token,
         idempotency_key=request_id,
         request_id=request_id,
     )
     store.record_plan(
         request_id=request_id,
         conversation_key=conversation["conversation_key"],
-        callback_token=callback_token,
         steps=[{"id": "s1", "title": "Do the thing"}],
     )
     store.update_run_trigger_result(
@@ -904,10 +929,9 @@ def _make_active_run(store: RelayStore, *, request_id: str, callback_token: str)
     return run
 
 
-def test_steer_run_rotates_token_and_appends_user_message(tmp_path: Path) -> None:
-    """Steer rotates the callback_token (old plaintext is unrecoverable) and
-    appends a user_message event on the SAME run (same request_id). The old
-    token stops validating; the new token works."""
+def test_steer_run_appends_user_message_on_same_run(tmp_path: Path) -> None:
+    """Steer appends a user_message event on the SAME run (same request_id).
+    No credential rotation is involved; callbacks still route by request_id."""
     store = RelayStore(tmp_path / "relay.sqlite")
     store.upsert_agent(
         name="default",
@@ -915,12 +939,11 @@ def test_steer_run_rotates_token_and_appends_user_message(tmp_path: Path) -> Non
         token_ref="env:TOKEN",
     )
     store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
-    _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    _make_active_run(store, request_id="run_1")
     assert store.get_run_by_request_id("run_1")["status"] == "accepted"
 
     steered = store.steer_run(
         run_id=store.get_run_by_request_id("run_1")["id"],
-        new_callback_token="secret-rotated",
         user_input="You didn't push.",
     )
 
@@ -937,24 +960,14 @@ def test_steer_run_rotates_token_and_appends_user_message(tmp_path: Path) -> Non
     assert user_messages[0]["markdown"] == "You didn't push."
     assert json.loads(user_messages[0]["payload_json"])["source"] == "operator_steer"
 
-    # Old token no longer validates; new token does.
-    old_progress = store.record_progress(
+    # Callbacks still work after steer (no token to rotate).
+    progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
-        message="late with old token",
-    )
-    assert old_progress["success"] is False
-    assert old_progress["error"]["code"] == "invalid_callback_token"
-
-    new_progress = store.record_progress(
-        request_id="run_1",
-        conversation_key="research:sherlog",
-        callback_token="secret-rotated",
-        message="progress with new token",
+        message="progress after steer",
         step_updates=[{"id": "s1", "status": "in_progress"}],
     )
-    assert new_progress["success"] is True
+    assert progress["success"] is True
 
 
 def test_steer_run_rejects_terminal_or_missing_run(tmp_path: Path) -> None:
@@ -967,12 +980,11 @@ def test_steer_run_rejects_terminal_or_missing_run(tmp_path: Path) -> None:
         token_ref="env:TOKEN",
     )
     store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
-    run = _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    run = _make_active_run(store, request_id="run_1")
     # Finish the run -> terminal.
     store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
         status="done",
         title="Done",
         markdown="final",
@@ -980,15 +992,15 @@ def test_steer_run_rejects_terminal_or_missing_run(tmp_path: Path) -> None:
     assert store.get_run_by_request_id("run_1")["status"] == "done"
 
     with pytest.raises(ValueError):
-        store.steer_run(run_id=run["id"], new_callback_token="secret-rotated", user_input="too late")
+        store.steer_run(run_id=run["id"], user_input="too late")
 
     with pytest.raises(KeyError):
-        store.steer_run(run_id=999999, new_callback_token="secret-rotated", user_input="no run")
+        store.steer_run(run_id=999999, user_input="no run")
 
 
-def test_steer_lets_agent_finish_with_new_token(tmp_path: Path) -> None:
-    """After steer, the agent can record_result(done) with the rotated token to
-    close the SAME turn; the old token cannot."""
+def test_steer_lets_agent_finish_same_turn(tmp_path: Path) -> None:
+    """After steer, the agent can record_result(done) on the SAME request_id
+    to close the turn. No token rotation is involved."""
     store = RelayStore(tmp_path / "relay.sqlite")
     store.upsert_agent(
         name="default",
@@ -996,43 +1008,29 @@ def test_steer_lets_agent_finish_with_new_token(tmp_path: Path) -> None:
         token_ref="env:TOKEN",
     )
     store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
-    _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    _make_active_run(store, request_id="run_1")
     store.steer_run(
         run_id=store.get_run_by_request_id("run_1")["id"],
-        new_callback_token="secret-rotated",
         user_input="You didn't push.",
     )
 
-    old_result = store.record_result(
+    result = store.record_result(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
-        status="done",
-        title="Done",
-        markdown="final",
-    )
-    assert old_result["success"] is False
-    assert old_result["error"]["code"] == "invalid_callback_token"
-    assert store.get_run_by_request_id("run_1")["status"] == "accepted"
-
-    new_result = store.record_result(
-        request_id="run_1",
-        conversation_key="research:sherlog",
-        callback_token="secret-rotated",
         status="done",
         title="Done",
         markdown="pushed and finished",
     )
-    assert new_result["success"] is True
+    assert result["success"] is True
     assert store.get_run_by_request_id("run_1")["status"] == "done"
 
 
 def test_steer_run_on_needs_user_resumes_turn(tmp_path: Path) -> None:
     """Steering a run that is paused on ask_user (needs_user) is the operator's
-    ANSWER: it rotates the callback_token, appends a user_message, and transitions
-    the run OUT of the question state to "sent" (the trigger-result update in the
-    route then advances it to "accepted"). request_id is preserved (same turn),
-    no new run row is created, and the old token stops validating."""
+    ANSWER: it appends a user_message and transitions the run OUT of the
+    question state to "sent" (the trigger-result update in the route then
+    advances it to "accepted"). request_id is preserved (same turn), no new
+    run row is created, and callbacks resume on the same request_id."""
     store = RelayStore(tmp_path / "relay.sqlite")
     store.upsert_agent(
         name="default",
@@ -1040,12 +1038,11 @@ def test_steer_run_on_needs_user_resumes_turn(tmp_path: Path) -> None:
         token_ref="env:TOKEN",
     )
     store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
-    _make_active_run(store, request_id="run_1", callback_token="secret-first")
+    _make_active_run(store, request_id="run_1")
     # Agent pauses on a human decision -> run is needs_user.
     store.ask_user(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
         question="Which branch should I target?",
         choices=["main", "dev"],
     )
@@ -1053,7 +1050,6 @@ def test_steer_run_on_needs_user_resumes_turn(tmp_path: Path) -> None:
 
     steered = store.steer_run(
         run_id=store.get_run_by_request_id("run_1")["id"],
-        new_callback_token="secret-rotated",
         user_input="Target the dev branch.",
     )
 
@@ -1070,25 +1066,14 @@ def test_steer_run_on_needs_user_resumes_turn(tmp_path: Path) -> None:
     assert user_messages[0]["markdown"] == "Target the dev branch."
     assert json.loads(user_messages[0]["payload_json"])["source"] == "operator_steer"
 
-    # The pre-answer token no longer validates; the rotated token does, so the
-    # agent can resume the turn and finish it with the new token.
-    old_progress = store.record_progress(
+    # The agent resumes the turn on the same request_id (no token to rotate).
+    progress = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
-        callback_token="secret-first",
-        message="late with old token",
-    )
-    assert old_progress["success"] is False
-    assert old_progress["error"]["code"] == "invalid_callback_token"
-
-    new_progress = store.record_progress(
-        request_id="run_1",
-        conversation_key="research:sherlog",
-        callback_token="secret-rotated",
         message="resuming with the answer",
         step_updates=[{"id": "s1", "status": "in_progress"}],
     )
-    assert new_progress["success"] is True
+    assert progress["success"] is True
 
 
 def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -> None:
@@ -1103,7 +1088,6 @@ def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -
             conversation_id=first_conversation["id"],
             conversation_key=second_conversation["conversation_key"],
             input_markdown="task",
-            callback_token="secret-callback",
             idempotency_key="run_1",
             request_id="run_1",
         )
@@ -1136,7 +1120,6 @@ def test_create_run_rejects_agent_that_does_not_own_conversation(tmp_path: Path)
             conversation_id=conversation["id"],
             conversation_key=conversation["conversation_key"],
             input_markdown="task",
-            callback_token="secret-callback",
             idempotency_key="run_1",
             request_id="run_1",
         )
@@ -1146,7 +1129,7 @@ def test_create_run_rejects_agent_that_does_not_own_conversation(tmp_path: Path)
         store.get_run_by_request_id("run_1")
 
 
-def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callback(
+def test_concurrent_store_instances_serialize_callbacks_via_store_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1161,7 +1144,6 @@ def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callba
         conversation_id=conversation["id"],
         conversation_key="research:sherlog",
         input_markdown="task",
-        callback_token="secret-callback",
         idempotency_key="run_1",
         request_id="run_1",
     )
@@ -1197,7 +1179,6 @@ def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callba
             progress_result["value"] = progress_store.record_progress(
                 request_id="run_1",
                 conversation_key="research:sherlog",
-                callback_token="secret-callback",
                 message="Reading repository",
             )
         except BaseException as exc:
@@ -1208,7 +1189,6 @@ def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callba
             result_result["value"] = result_store.record_result(
                 request_id="run_1",
                 conversation_key="research:sherlog",
-                callback_token="secret-callback",
                 status="done",
                 title="Finished",
                 markdown="Final answer",
@@ -1242,3 +1222,185 @@ def test_concurrent_store_instances_cannot_reopen_terminal_run_with_stale_callba
     events = setup_store.list_events(run["id"])
     assert run["status"] == "done"
     assert [event["event_type"] for event in events] == ["progress", "result"]
+
+
+def _make_run_for_polling(store: RelayStore, *, request_id: str = "poll_run") -> dict:
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conversation = store.create_conversation(
+        agent_id=agent["id"], name="Poll", conversation_key="research:poll"
+    )
+    return store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:poll",
+        input_markdown="task",
+        idempotency_key=request_id,
+        request_id=request_id,
+    )
+
+
+def test_record_polling_events_is_idempotent(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    events = [
+        {"source_key": "node_a", "event_type": "progress", "title": None,
+         "markdown": "thinking", "payload": {"polling": True}, "create_time": 1700000000.0},
+        {"source_key": "node_b", "event_type": "progress", "title": None,
+         "markdown": "more thinking", "payload": {"polling": True}, "create_time": 1700000001.0},
+    ]
+    first = store.record_polling_events(run_id=run["id"], events=events)
+    assert first["success"] is True
+    assert first["inserted"] == 2
+    # Re-post the same source_keys: no new rows.
+    second = store.record_polling_events(run_id=run["id"], events=events)
+    assert second["inserted"] == 0
+    polling = [e for e in store.list_events_merged(run["id"]) if e.get("source_key")]
+    assert len(polling) == 2
+    assert {e["source_key"] for e in polling} == {"node_a", "node_b"}
+
+
+def test_list_events_merged_drops_polling_result_when_callback_result_exists(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.record_progress(
+        request_id="poll_run", conversation_key="research:poll", message="working",
+    )
+    store.record_result(
+        request_id="poll_run", conversation_key="research:poll",
+        status="done", title="Done", markdown="callback result",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[
+            {"source_key": "p1", "event_type": "progress", "title": None,
+             "markdown": "polled message", "payload": {"polling": True}, "create_time": 1700000002.0},
+            {"source_key": "p2", "event_type": "result", "title": None,
+             "markdown": "polled result", "payload": {"status": "done", "polling": True}, "create_time": 1700000003.0},
+        ],
+    )
+    merged = store.list_events_merged(run["id"])
+    result_events = [e for e in merged if e["event_type"] == "result"]
+    # Only the callback result survives; the polling result candidate is dropped.
+    assert len(result_events) == 1
+    assert result_events[0]["markdown"] == "callback result"
+    assert result_events[0].get("source_key") is None
+    # Polling progress is still kept (covers the cloud-side plane).
+    assert any(e.get("source_key") == "p1" and e["markdown"] == "polled message" for e in merged)
+
+
+def test_list_events_merged_keeps_polling_result_when_no_callback_result(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    # No callback result ever arrives (agent failed to call record_result).
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[
+            {"source_key": "p1", "event_type": "progress", "title": None,
+             "markdown": "polled reasoning", "payload": {"polling": True}, "create_time": 1700000002.0},
+            {"source_key": "p2", "event_type": "result", "title": None,
+             "markdown": "polled final answer", "payload": {"status": "done", "polling": True}, "create_time": 1700000003.0},
+        ],
+    )
+    merged = store.list_events_merged(run["id"])
+    result_events = [e for e in merged if e["event_type"] == "result"]
+    assert len(result_events) == 1
+    assert result_events[0]["markdown"] == "polled final answer"
+    assert result_events[0].get("source_key") == "p2"
+
+
+def test_list_events_callback_only_excludes_polling(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.record_progress(
+        request_id="poll_run", conversation_key="research:poll", message="callback progress",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{"source_key": "p1", "event_type": "progress", "title": None,
+                 "markdown": "polled", "payload": {"polling": True}, "create_time": 1700000000.0}],
+    )
+    callback_only = store.list_events(run["id"])
+    assert all(e.get("source_key") is None for e in callback_only)
+    assert any(e["markdown"] == "callback progress" for e in callback_only)
+    assert all(e["markdown"] != "polled" for e in callback_only)
+    # Merged view includes both.
+    merged = store.list_events_merged(run["id"])
+    assert any(e.get("source_key") == "p1" for e in merged)
+
+
+def test_list_events_merged_orders_by_created_at(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    # Callback progress lands first (server now, lower id).
+    store.record_progress(
+        request_id="poll_run", conversation_key="research:poll", message="callback after",
+    )
+    # Polling event with an earlier create_time (higher id, but earlier timestamp)
+    # must sort BEFORE the callback event in the merged timeline.
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{"source_key": "p1", "event_type": "progress", "title": None,
+                 "markdown": "polled before", "payload": {"polling": True}, "create_time": 1700000000.0}],
+    )
+    merged = store.list_events_merged(run["id"])
+    assert merged[0]["markdown"] == "polled before"
+    assert merged[0].get("source_key") == "p1"
+    assert merged[1]["markdown"] == "callback after"
+
+
+def test_list_events_merged_drops_polling_that_repeats_question_body(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    q_body = "MCP 最核心是在帮 AI/Agent 解决什么问题？"
+    store.record_progress(
+        request_id="poll_run",
+        conversation_key="research:poll",
+        message="已设计 MCP 答题闯关，并准备好第一关题目。",
+        title="闯关玩法已开启",
+    )
+    store.ask_user(
+        request_id="poll_run",
+        conversation_key="research:poll",
+        question=q_body,
+        choices=["A", "B", "C", "D"],
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "poll_q_dup",
+            "event_type": "progress",
+            "title": None,
+            "markdown": f"可以，我们升级成 MCP 答题闯关。第一关：{q_body} A. … B. …",
+            "payload": {"polling": True},
+            "create_time": 1700000099.0,
+        }],
+    )
+    merged = store.list_events_merged(run["id"])
+    poll_rows = [e for e in merged if e.get("source_key")]
+    assert poll_rows == []
+    assert any(e["event_type"] == "question" and e["markdown"] == q_body for e in merged)
+
+
+def test_record_polling_events_rejects_unknown_run(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    with pytest.raises(KeyError):
+        store.record_polling_events(
+            run_id=999,
+            events=[{"source_key": "x", "event_type": "progress", "title": None,
+                     "markdown": "m", "payload": {}, "create_time": 1.0}],
+        )
+
+
+def test_record_polling_events_rejects_bad_event_type(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    with pytest.raises(ValueError):
+        store.record_polling_events(
+            run_id=run["id"],
+            events=[{"source_key": "x", "event_type": "plan", "title": None,
+                     "markdown": "m", "payload": {}, "create_time": 1.0}],
+        )

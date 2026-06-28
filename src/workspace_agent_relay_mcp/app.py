@@ -7,7 +7,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware as StarletteMiddleware
 from starlette.routing import Mount, Route
 
-from .api.auth import APIBearerAuthMiddleware
+from .api.auth import APIBearerAuthMiddleware, InternalBearerAuthMiddleware
 from .api.routes.agents import agent_routes
 from .api.routes.conversations import conversation_routes
 from .api.routes.internal import internal_routes
@@ -83,6 +83,10 @@ def build_app(
                 get_auth_token=get_auth_token,
                 get_oauth_config=get_oauth_config,
                 get_oauth_manager=current_oauth_manager,
+            ),
+            StarletteMiddleware(
+                InternalBearerAuthMiddleware,
+                get_auth_token=get_auth_token,
             ),
         ],
         lifespan=lifespan,

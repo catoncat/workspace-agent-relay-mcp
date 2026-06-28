@@ -413,15 +413,14 @@ def test_api_steer_route_answers_ask_user_on_same_run(tmp_path: Path) -> None:
 
     with client:
         _, conversation = _seed_conversation(client)
-        # Create the run at the store layer with a known callback_token so we can
-        # drive it into needs_user via ask_user (the dashboard API has no
-        # ask_user endpoint — it is an MCP tool the agent calls).
+        # Create the run at the store layer so we can drive it into needs_user
+        # via ask_user (the dashboard API has no ask_user endpoint — it is an
+        # MCP tool the agent calls).
         server.store.create_run(
             agent_id=client.get("/api/agents").json()[0]["id"],
             conversation_id=conversation["id"],
             conversation_key="research:sherlog",
             input_markdown="First message",
-            callback_token="secret-callback-token",
             idempotency_key="idem_1",
             request_id="run_1",
         )
@@ -434,7 +433,6 @@ def test_api_steer_route_answers_ask_user_on_same_run(tmp_path: Path) -> None:
         server.store.ask_user(
             request_id="run_1",
             conversation_key="research:sherlog",
-            callback_token="secret-callback-token",
             question="Which branch should I target?",
             choices=["main", "dev"],
         )
@@ -684,13 +682,11 @@ def test_trigger_failed_run_still_accepts_callbacks(tmp_path: Path) -> None:
             name="Sherlog",
             conversation_key="research:sherlog",
         )
-        callback_token = "secret-callback-token"
         run = server.store.create_run(
             agent_id=agent["id"],
             conversation_id=conversation["id"],
             conversation_key="research:sherlog",
             input_markdown="Research sherlog",
-            callback_token=callback_token,
             idempotency_key="idem_tf",
             request_id="run_tf",
         )
@@ -707,7 +703,6 @@ def test_trigger_failed_run_still_accepts_callbacks(tmp_path: Path) -> None:
         plan = server.store.record_plan(
             request_id="run_tf",
             conversation_key="research:sherlog",
-            callback_token=callback_token,
             steps=[{"id": "s1", "title": "Step one", "status": "in_progress"}],
         )
         assert plan["success"] is True
@@ -717,7 +712,6 @@ def test_trigger_failed_run_still_accepts_callbacks(tmp_path: Path) -> None:
         progress = server.store.record_progress(
             request_id="run_tf",
             conversation_key="research:sherlog",
-            callback_token=callback_token,
             message="Still working despite trigger failure",
             title="Working",
         )
@@ -774,14 +768,12 @@ def test_api_run_detail_returns_callback_events_without_secrets(tmp_path: Path) 
             conversation_id=conversation["id"],
             conversation_key="research:sherlog",
             input_markdown="Research sherlog",
-            callback_token="secret-callback-token",
             idempotency_key="idem_1",
             request_id="run_1",
         )
         server.store.record_progress(
             request_id="run_1",
             conversation_key="research:sherlog",
-            callback_token="secret-callback-token",
             message="Progress with secret-callback-token",
             title="Working",
             payload={"echo": "secret-callback-token"},
@@ -789,7 +781,6 @@ def test_api_run_detail_returns_callback_events_without_secrets(tmp_path: Path) 
         server.store.ask_user(
             request_id="run_1",
             conversation_key="research:sherlog",
-            callback_token="secret-callback-token",
             question="Question with secret-callback-token",
             choices=["Continue"],
             context="Context",
@@ -797,7 +788,6 @@ def test_api_run_detail_returns_callback_events_without_secrets(tmp_path: Path) 
         server.store.record_result(
             request_id="run_1",
             conversation_key="research:sherlog",
-            callback_token="secret-callback-token",
             status="done",
             title="Done",
             markdown="Final Markdown with secret-callback-token",
@@ -823,9 +813,11 @@ def test_api_run_detail_returns_callback_events_without_secrets(tmp_path: Path) 
     assert body["events"][-1]["title"] == "Done"
     assert "Final Markdown" in body["events"][-1]["markdown"]
     assert body["artifacts"][0]["content"].startswith("Artifact with")
-    assert "secret-callback-token" not in rendered
+    # No callback_token is stored on the run row; content is returned verbatim
+    # (the relay no longer redacts a per-run token from callback content).
     assert "callback_token_hash" not in rendered
-    assert "[redacted-callback-token]" in rendered
+    assert "callback_token" not in rendered
+    assert "Final Markdown with" in rendered
 
 
 def test_run_stream_returns_snapshot_for_terminal_run(tmp_path: Path) -> None:
@@ -851,14 +843,12 @@ def test_run_stream_returns_snapshot_for_terminal_run(tmp_path: Path) -> None:
             conversation_id=conversation["id"],
             conversation_key="research:sherlog",
             input_markdown="Research sherlog",
-            callback_token="secret-callback-token",
             idempotency_key="idem_stream",
             request_id="run_stream",
         )
         server.store.record_result(
             request_id="run_stream",
             conversation_key="research:sherlog",
-            callback_token="secret-callback-token",
             status="done",
             title="Done",
             markdown="Finished",
@@ -894,7 +884,6 @@ def test_api_dismiss_run_marks_stuck_run_done(tmp_path: Path) -> None:
             conversation_id=conversation["id"],
             conversation_key="research:sherlog",
             input_markdown="Research sherlog",
-            callback_token="secret-callback-token",
             idempotency_key="idem_1",
             request_id="run_1",
         )

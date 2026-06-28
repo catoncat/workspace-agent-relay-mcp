@@ -209,7 +209,7 @@ export async function createRun(
 }
 
 // Append guidance to the active run in this conversation (steer): same run,
-// rotated callback_token, same request_id. The backend returns the updated
+// same request_id (no credential rotation). The backend returns the updated
 // run on success / 502 (trigger failed but run updated). On 409 there is no
 // active run to steer (race: it went terminal between SSE status and send),
 // so fall back to creating a new turn. The response shape matches createRun

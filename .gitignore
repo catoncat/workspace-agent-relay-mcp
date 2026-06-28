@@ -20,3 +20,6 @@ cloudflared.local.yaml
 .cursor/
 .idea/
 .vscode/
+
+# Local scratch / generated output
+output/
