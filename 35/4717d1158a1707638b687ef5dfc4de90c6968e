@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-06-28-remove-callback-token.md
+  s_6c817d28ce93c6::t_863402b6cc551b 1-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "354717d1158a1707638b687ef5dfc4de90c6968e",
+  "prompts": {},
+  "sessions": {
+    "s_6c817d28ce93c6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0317e21e-f3a7-4d92-a66c-8a3b3cffc30d",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
