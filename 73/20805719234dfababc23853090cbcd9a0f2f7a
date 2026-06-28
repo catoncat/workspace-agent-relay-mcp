@@ -1,0 +1,28 @@
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_9ac40e568cf465::t_15a1c2dfa4af84 1117-1121,1137
+  s_9ac40e568cf465::t_577e4129718544 48-74
+tests/test_relay_store.py
+  s_9ac40e568cf465::t_fbe56896a91c97 1355,1361,1366-1367,1369,1373,1376-1378,1382-1385
+tests/test_hermes_translate.py
+  s_9ac40e568cf465::t_5b803012185d58 228-229,231-232
+docs/superpowers/specs/2026-06-28-polling-merge.md
+  s_9ac40e568cf465::t_8823f5f7b0a24e 170-204
+scripts/hermes_translate.py
+  s_9ac40e568cf465::t_3819441aee09a3 251-252,254,256,264-271,276-277,293-294,303-304,319,321
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "7320805719234dfababc23853090cbcd9a0f2f7a",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
