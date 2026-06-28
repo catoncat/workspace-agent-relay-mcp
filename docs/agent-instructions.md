@@ -65,6 +65,18 @@ Use it by default for:
 
 Do not replace real local execution with chat-only explanation when the task can be completed on the machine.
 
+## Tool Call Economy
+
+<YOUR_LOCAL_OPS_MCP> runs on the operator's local machine. Your runtime reaches it over a remote link (ChatGPT → public tunnel → the operator's Mac), so every tool call is a separate network round-trip — typically a few hundred milliseconds each, paid sequentially, and they add up across a turn. This is unlike a local MCP client where tool calls are near-instant.
+
+Act accordingly:
+
+- Minimize round-trips. Prefer fewer, more substantial tool calls over many small ones.
+- When one call can return what would otherwise take several, use that one call.
+- Do not issue a sequence of tiny calls when a single call can do the same work.
+
+This applies to <YOUR_LOCAL_OPS_MCP> only. Relay callbacks (<YOUR_RELAY_MCP>.record_plan / record_progress / record_result) still follow the relay workflow — do not collapse or skip them.
+
 ## Relay Mode
 
 If the input includes both of these fields:
