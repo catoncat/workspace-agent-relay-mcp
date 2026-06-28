@@ -1,0 +1,38 @@
+tests/test_web_api.py
+  s_6c817d28ce93c6::t_d4e8a659cf0fab 816-817,819-820
+  s_6c817d28ce93c6::t_3cd2af598056e1 416-418
+tests/test_mcp_callbacks.py
+  s_6c817d28ce93c6::t_a71d7edfde1d10 51,61,66
+tests/test_relay_store.py
+  s_6c817d28ce93c6::t_e54db8382e8010 150,155,159,168-170
+  s_6c817d28ce93c6::t_49354f3ada07a1 906,932-934,942,963-964,967,970,983,995,998,1001-1003,1011,1017,1024,1030-1033,1041,1069-1070,1076
+  s_6c817d28ce93c6::t_a4fc96f2744d78 345-349
+  s_6c817d28ce93c6::t_d48cc3e2548e65 1132
+  s_6c817d28ce93c6::t_cf448640f09a43 680-681,688-756
+  s_6c817d28ce93c6::t_1f673260b61d0b 224,252,257,273-275,280-282,288-289,292-295,300-303,305-311,314,335-337
+  s_6c817d28ce93c6::t_114e82e4edff85 503,523-524,529,536-539,541-542,546-551
+  s_6c817d28ce93c6::t_57ff45e7800fa0 60,75-93
+tests/test_tool_trace.py
+  s_6c817d28ce93c6::t_06e7176aa581ec 245,267-282,288-289,291,303-304,310-311,318-331,336,338,342,349-350,353-354,358,360,370,375
+  s_6c817d28ce93c6::t_0a7c2fb7258390 172,181-183,189-191
+tests/test_server_transport.py
+  s_6c817d28ce93c6::t_990489c4bd6b51 211,221,223-224,227-228,232-233,254-255
+tests/test_trigger_payload.py
+  s_6c817d28ce93c6::t_3408fa9af634a0 25,34,53,63-66,76,79,102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "966521c69137f2a1e335ab93422df7a0e46b2436",
+  "prompts": {},
+  "sessions": {
+    "s_6c817d28ce93c6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0317e21e-f3a7-4d92-a66c-8a3b3cffc30d",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
