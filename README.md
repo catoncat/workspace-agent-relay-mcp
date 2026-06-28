@@ -2,7 +2,12 @@
 
 Local relay + dashboard for ChatGPT **Workspace Agents**: the agent reports plan, progress, tool calls, and results back to your machine in real time.
 
-![Relay dashboard mirroring a ChatGPT Workspace Agent run](https://github.com/user-attachments/assets/cea599fe-9c2f-499e-86d5-c43ea170cc7d)
+<img width="1461" height="1057" alt="image" src="https://github.com/user-attachments/assets/2113f985-801f-4a79-a75c-6650f0563940" />
+
+
+<img width="1461" height="1057" alt="image" src="https://github.com/user-attachments/assets/82f6a6b3-6e75-4747-b6e1-5c526ddaaf12" />
+
+<img width="1256" height="2760" alt="image" src="https://github.com/user-attachments/assets/d10ff072-639b-4b02-8302-d401127ce800" />
 
 > **Why:** the Workspace Agent trigger API is fire-and-forget (`202` with no body). This relay gives the agent an MCP callback channel and you a live dashboard.
 
