@@ -1,0 +1,63 @@
+scripts/hermes_poller_cdp.py
+  s_9ac40e568cf465::t_08ee64e1280796 105-110,120-124
+  s_9ac40e568cf465::t_66fbf8ae658ae7 50,97-98,104,111-112,117,119,174-190,200,202-226,244-266
+  s_9ac40e568cf465::t_666b9e2ff5f86b 28-29
+  s_9ac40e568cf465::t_56ed26c8bb7fa0 268-272
+  s_9ac40e568cf465::t_a8d6e596eadbf2 241-243
+  s_9ac40e568cf465::t_67938c7cdc70b9 193,197-199
+  s_9ac40e568cf465::t_52db5b85949d9f 1-9,11-12,15-27,30-37,40-45,48-49,91-96,99-103,113-116,118,131-173,267,273-277
+  s_9ac40e568cf465::t_8d5ff6da59fc2a 125-130
+  s_9ac40e568cf465::t_8d07f255af323c 227-240
+  s_9ac40e568cf465::t_4c9f1747df7b84 46
+  s_9ac40e568cf465::t_29be1c3121199a 191-192,194-196,201
+  s_9ac40e568cf465::t_6e7a42257c65ca 10,13-14
+  s_9ac40e568cf465::t_75ea2a52e85562 38-39,47,51-90
+scripts/hermes_translate.py
+  s_9ac40e568cf465::t_0b4703b8320fa0 224-312
+  s_9ac40e568cf465::t_00da1d63260251 13-15,22-24
+  s_9ac40e568cf465::t_36b38ca80766b2 57
+  s_9ac40e568cf465::t_93a38e7379052d 1-12,16-21,25-56,58-223,313-360
+scripts/hermes_readback.py
+  s_9ac40e568cf465::t_f7ea63634bb51f 1-26,28-290
+  s_9ac40e568cf465::t_7024edc1b7498e 27
+tests/test_hermes_translate.py
+  s_9ac40e568cf465::t_b57763d4041e9e 64
+  s_9ac40e568cf465::t_c6f4b1109b6c33 190,193
+  s_9ac40e568cf465::t_ce61a1fdf008de 75-76,80-81,83-88
+  s_9ac40e568cf465::t_c9e254939bdc38 1-22,24-26,29-63,65-74,77-79,82,89-189,191-192,194-207
+  s_9ac40e568cf465::t_9324819b412298 208-323
+  s_9ac40e568cf465::t_4526925d6bc336 23,27-28
+scripts/hermes_live_demo.py
+  s_9ac40e568cf465::t_e2679e79aee36a 16
+  s_9ac40e568cf465::t_5ea29daa15b069 126-135,137-139,146-147,154,158-169,175
+  s_9ac40e568cf465::t_e88625047ece4c 28,34
+  s_9ac40e568cf465::t_4b9c6148eb3176 1-15,17-27,29-31,33,35-118,120-125,136,140-145,148-153,155-157,170-174,176-204
+  s_9ac40e568cf465::t_4d69a3441acb09 119
+  s_9ac40e568cf465::t_5b136fdb08c7b9 32
+scripts/hermes_fetch.py
+  s_9ac40e568cf465::t_c2667cbba2ffff 1-112
+scripts/hermes_poller.py
+  s_9ac40e568cf465::t_667ec7829a125a 248
+  s_9ac40e568cf465::t_20646d8b38fbda 243-247
+  s_9ac40e568cf465::t_fdd4d9dd1f88db 50-51
+  s_9ac40e568cf465::t_e1302c5d595ac6 87,89-93
+  s_9ac40e568cf465::t_c67b4312f33ddc 27-28
+  s_9ac40e568cf465::t_48642d413c5791 1-26,29-49,52-86,88,94-233,236-242,249-312
+  s_9ac40e568cf465::t_81e6ca130cc10a 234-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "ba4307112b4fa0853529fc1aadc3e6db9466ffab",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
