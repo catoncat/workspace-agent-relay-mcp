@@ -17,13 +17,13 @@
 - 新增测试、文档、spec。
 
 ### 需谨慎
-- `store/relay_store.py` 为数据层核心，任何改动须配套测试（callback_token 哈希、redaction、plan/event 结构均有断言）。
+- `store/relay_store.py` 为数据层核心，任何改动须配套测试（plan/event 结构、run 状态收盘、`callback_token_hash` 重建表迁移均有断言）。
 - `trigger.py` 中 `input_text` 的措辞、`server.py` 中的 `MCP_INSTRUCTIONS`、`docs/agent-instructions.md` 三处口径必须一致；修改任一处须同步另外两处。
 - 前端 `api/types.ts` 的类型须与后端 `_run_detail` 及 event payload 对齐。
 
 ### 禁止
 - 提交 `.env`、`cloudflared.local.yml`、`*.sqlite*`（已纳入 `.gitignore`，勿手动 `git add`）。
-- 将真实 `AUTH_TOKEN`、`AGENT_TOKEN`、`callback_token` 或私钥写入任何受版本控制的文件。
+- 将真实 `AUTH_TOKEN`、`AGENT_TOKEN` 或私钥写入任何受版本控制的文件。
 - 在无 spec 的情况下大幅修改协议结构（plan / progress / trace payload）。变更前先编写 `docs/superpowers/specs/YYYY-MM-DD-*.md`。
 
 ## 3. 运行
@@ -64,7 +64,7 @@ cd frontend && npm run build             # 前端，TS 与构建均须零错误
 
 - 后端测试覆盖 store、API 路由、MCP 工具、redaction、tool-trace 端点。
 - 前端无单元测试，`npm run build` 为唯一正确性门槛；修改前端后必须通过 build。
-- 端到端验证（agent 实际 bind + 调用工具 + trace 流达 dashboard）须通过发起真实 Workspace Agent run 完成，因 `callback_token` 仅以哈希存储，无法伪造。
+- 端到端验证（agent 实际 bind + 调用工具 + trace 流达 dashboard）须通过发起真实 Workspace Agent run 完成，因 MCP 连接经 OAuth/bearer 鉴权、`/internal/tool-trace` 经 shared bearer 投递，无法离线伪造。
 
 ## 5. 协议结构
 
@@ -72,7 +72,7 @@ cd frontend && npm run build             # 前端，TS 与构建均须零错误
 
 - **plan**：`record_plan` 写入 `plans` 表（`steps_json`）。每个 step 包含稳定 `id`、`title`、`status`。`record_progress` 的 `step_updates` 通过相同 `id` 更新状态。
 - **progress event**：`event_type="progress"`；payload 中 `trace: true` 表示由 notion-local-ops 自动镜像的工具调用，否则为 agent 主动写入的 narration。前端 `ThreadView` 依此标志分流渲染。
-- **trace payload**：`{trace, tool, title, args_summary, result_summary, started_at, duration_ms, ok, error}`。`/internal/tool-trace` 使用 body 中的 `callback_token` 鉴权（非 dashboard bearer），对已关闭的 run 返回 409。
+- **trace payload**：`{trace, tool, title, args_summary, result_summary, started_at, duration_ms, ok, error}`。`/internal/tool-trace` 使用 shared bearer（`WORKSPACE_AGENT_RELAY_AUTH_TOKEN`，非 dashboard OAuth）鉴权，对已关闭的 run 返回 409。
 - **agent token**：Dashboard 创建/更新 agent 时通过 `access_token` 写入 relay SQLite（`token_ref=local:<id>`），值不回前端。Legacy 仍支持 `env:<VAR_NAME>`（白名单见 `api/validation.py`）。`resolve_agent_token(config, store, token_ref)` 在 trigger 时解析；env token 仍从启动快照 `RelayConfig.agent_tokens` 读取。
 
 ## 6. 文档沉淀

@@ -131,8 +131,8 @@ Per run: your message → plan checklist → tool traces (from local-ops) → pr
 ## Pairing with notion-local-ops-mcp
 
 1. Agent calls `record_plan` on **this relay**.
-2. Agent calls `bind_relay_run` on **notion-local-ops-mcp** with `request_id` + `callback_token` from the trigger (no `relay_url` needed when configured locally).
-3. Traced tools POST to `/internal/tool-trace` on this relay → dashboard.
+2. Agent calls `bind_relay_run` on **notion-local-ops-mcp** with `request_id` (+ `conversation_key`) from the trigger (no `relay_url` needed when configured locally).
+3. Traced tools POST to `/internal/tool-trace` on this relay (shared bearer) → dashboard.
 
 Details: [notion-local-ops-mcp → Relay Bridge](https://github.com/catoncat/notion-local-ops-mcp#relay-bridge-mirror-tool-calls-to-a-dashboard).
 
@@ -150,9 +150,9 @@ tests/
 ## Security
 
 - Never commit `.env`, tunnels, or `*.sqlite*`.
-- `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` — dashboard + `/mcp` bearer.
+- `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` — dashboard + `/mcp` bearer, and the shared bearer for `/internal/tool-trace` (the notion-local-ops bridge). When unset, `/internal/tool-trace` is disabled.
 - Workspace Agent access tokens — stored in relay DB or `.env`; rotate if leaked.
-- Per-run `callback_token` stored hashed only; redacted in API/logs.
+- MCP tool writes route by `request_id` + `conversation_key` and are rejected once a run is terminal (`done`/`blocked`/`failed`/`superseded`).
 
 ## Status
 
