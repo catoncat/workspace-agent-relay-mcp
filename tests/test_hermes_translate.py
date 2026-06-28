@@ -225,9 +225,11 @@ def test_events_for_store_single_turn_completed_maps_last_to_result(tmp_path: Pa
     # user + echo skipped; two assistant events remain.
     assert [e["event_type"] for e in evs] == ["progress", "result"]
     assert evs[0]["markdown"] == "intermediate reasoning"
-    assert evs[0]["payload"] == {"polling": True}
+    assert evs[0]["payload"] == {"polling": True, "turn_ord": 0, "mapping_ord": 2}
+    assert evs[0]["create_time"] == 1.0
     assert evs[1]["markdown"] == "final answer"
-    assert evs[1]["payload"] == {"status": "done", "polling": True}
+    assert evs[1]["payload"] == {"status": "done", "polling": True, "turn_ord": 0, "mapping_ord": 3}
+    assert evs[1]["create_time"] == 1.0
     # source_key = ChatGPT node id; run_id from lookup.
     assert evs[0]["source_key"] == "a1"
     assert evs[1]["source_key"] == "a2"

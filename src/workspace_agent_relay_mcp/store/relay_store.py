@@ -45,36 +45,33 @@ def _epoch_to_iso(value: Any) -> str:
     return _now()
 
 
-def _filter_redundant_polling_progress(
-    callback: list[dict[str, Any]], polling: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Drop polling progress whose markdown repeats a callback question body.
+def _event_payload_dict(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    raw = row.get("payload_json")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return {}
 
-    ChatGPT assistant messages often land with a late create_time (streaming
-    completion), so they sort after the callback ask_user card even though they
-    are the same turn's visible narration. When the polling text embeds a
-    question we already render via callback, keep only the structured question
-    card and the callback narrations — do not show the duplicate wall of text."""
-    question_bodies = [
-        (row.get("markdown") or "").strip()
-        for row in callback
-        if row.get("event_type") == "question" and (row.get("markdown") or "").strip()
-    ]
-    if not question_bodies:
-        return polling
-    kept: list[dict[str, Any]] = []
-    for row in polling:
-        if row.get("event_type") != "progress":
-            kept.append(row)
-            continue
-        poll_md = (row.get("markdown") or "").strip()
-        if not poll_md:
-            kept.append(row)
-            continue
-        if any(q_md in poll_md for q_md in question_bodies):
-            continue
-        kept.append(row)
-    return kept
+
+def _merged_event_sort_key(row: dict[str, Any]) -> tuple[str, int, int]:
+    """Sort merged timeline: primary = sort timestamp, then callback before polling
+    at equal anchor, then id / mapping_ord."""
+    sort_at = str(row.get("created_at") or "")
+    if row.get("source_key"):
+        payload = _event_payload_dict(row)
+        mapping_ord = payload.get("mapping_ord")
+        sub = int(mapping_ord) if isinstance(mapping_ord, (int, float)) else 0
+        return (sort_at, 1, sub)
+    event_id = row.get("id")
+    return (sort_at, 0, int(event_id) if isinstance(event_id, int) else 0)
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -1117,13 +1114,11 @@ class RelayStore:
         return [_row_to_dict(row) or {} for row in rows]
 
     def list_events_merged(self, run_id: int) -> list[dict[str, Any]]:
-        """Unified timeline: callback events + polling-derived events, ordered by
-        created_at. Dedup rules:
-        - callback `result` wins over polling `result`
-        - polling progress that repeats a callback question body is dropped
-          (late ChatGPT create_time would otherwise sort it after the question card)
-        Other polling events are kept — they cover the cloud-side plane callback
-        cannot see."""
+        """Unified timeline: callback + polling, sorted by turn anchor / created_at.
+
+        Dedup: callback `result` wins over polling `result`. Polling events sort
+        by turn-anchor timestamp + mapping_ord (see spec §7), not assistant
+        streaming completion time. No content-based heuristics."""
         with self._lock, self._connect() as conn:
             callback_rows = conn.execute(
                 "SELECT * FROM events WHERE run_id = ? AND source_key IS NULL",
@@ -1138,9 +1133,8 @@ class RelayStore:
         polling = [_row_to_dict(row) or {} for row in polling_rows]
         if has_callback_result:
             polling = [row for row in polling if row.get("event_type") != "result"]
-        polling = _filter_redundant_polling_progress(callback, polling)
         merged = callback + polling
-        merged.sort(key=lambda row: (str(row.get("created_at") or ""), int(row.get("id") or 0)))
+        merged.sort(key=_merged_event_sort_key)
         return merged
 
     def record_polling_events(self, *, run_id: int, events: list[dict[str, Any]]) -> dict[str, Any]:

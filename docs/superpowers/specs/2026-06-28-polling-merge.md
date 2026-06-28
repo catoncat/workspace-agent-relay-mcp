@@ -167,3 +167,38 @@ cd frontend && pnpm run build          # 须零错误
 ## 变更记录
 
 - **2026-06-28**：初稿。锁定 polling 映射到现有 event_type、`source_key` 部分唯一索引幂等、internal 端点单写者、读取端仅终态去重、UI 零改。
+- **2026-06-28（结构合并 v2）**：排序改用 **turn 锚点 + mapping_ord**，不用 ChatGPT assistant `create_time`；去掉正文子串去重。槽位去重（callback `question` 占 turn 的 ask 槽、polling 不重复占同槽）待 callback `ask_user` 写入 `turn_ord` 后启用，**不**用场景关键词或题干匹配。
+
+## 7. 结构合并 v2（排序与槽位，无 hard code）
+
+### 7.1 问题
+
+- ChatGPT assistant 消息的 `create_time` 是流式完成时间，常晚于 callback `ask_user` / `user_message`，按时间排序会把 polling 推到 question 或答案后面。
+- 用 `q_md in poll_md` 去重是正文启发式，违反「不把具体场景写进代码」。
+
+### 7.2 写入（`events_for_store`）
+
+对每个绑定 run 的 mapping 消息维护：
+
+| 字段 | 含义 |
+|------|------|
+| `turn_ord` | 该 run 下第几个 user 节点（从 0 起，每遇到一个带 `request_id` 的 user 节点 +1） |
+| `mapping_ord` | 消息在 flatten 列表中的序号（稳定、与 create_time 无关） |
+| `create_time`（写入 store） | **当前 turn 的 user 节点 `create_time`**（turn 锚点），非 assistant 完成时间 |
+
+payload 携带 `turn_ord`、`mapping_ord`（实现标记，前端不读）。
+
+### 7.3 读取（`list_events_merged`）
+
+排序键：
+
+- callback：`created_at`, `id`
+- polling：turn 锚点 `created_at`, `mapping_ord`（从 payload 解析）
+
+合并后按 `(sort_at, sub_key)` 排序，`sub_key` 对 callback 用 `id`，对 polling 用 `mapping_ord`。
+
+去重（仅结构）：
+
+- callback `result` 优先于 polling `result`（已有）
+- **禁止**正文子串匹配
+- 待办：`ask_user` 在 question payload 写入 `turn_ord` 后，同 `turn_ord` 的 polling `progress`（非 trace）若 callback 已有 `question` 则丢弃（槽位归属，非场景分支）
