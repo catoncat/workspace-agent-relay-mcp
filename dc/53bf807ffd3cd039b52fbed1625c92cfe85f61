@@ -1,0 +1,28 @@
+AGENTS.md
+  s_6c817d28ce93c6::t_a75e103916b57e 67
+  s_6c817d28ce93c6::t_867f64e75e1eb4 75
+  s_6c817d28ce93c6::t_7d9cba69afe7fd 26
+  s_6c817d28ce93c6::t_f0b68e0538f0f9 20
+docs/agent-instructions.md
+  s_6c817d28ce93c6::t_1780c0035e0915 70,90,98,102,104
+  s_6c817d28ce93c6::t_4fbd873af3d511 142
+README.md
+  s_6c817d28ce93c6::t_4985554c6f16f2 134-135
+  s_6c817d28ce93c6::t_b0102defccfd0d 153,155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "dc53bf807ffd3cd039b52fbed1625c92cfe85f61",
+  "prompts": {},
+  "sessions": {
+    "s_6c817d28ce93c6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0317e21e-f3a7-4d92-a66c-8a3b3cffc30d",
+        "model": "glm-5.2"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
