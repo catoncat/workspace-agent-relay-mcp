@@ -1,0 +1,24 @@
+frontend/src/components/ThreadView.tsx
+  s_9ac40e568cf465::t_10130a62069a5c 42-44,47-52,68-85,87,92-108
+  s_9ac40e568cf465::t_7f5232f77945ca 448-449,454-455,495-525
+  s_9ac40e568cf465::t_08b9a59c8dc7dc 199,235,237
+  s_9ac40e568cf465::t_b487191af524c5 66-67
+  s_9ac40e568cf465::t_7ec389f2095762 712,717,724-728,733,747,752,771-778
+  s_9ac40e568cf465::t_f9f165522f60b3 526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "08f884ca6dcb52c47ffa647f08615066cf405b60",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
