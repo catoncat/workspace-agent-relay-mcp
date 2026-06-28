@@ -9,6 +9,7 @@ import { ThreadComposer, resolveComposerMode } from '@/features/relay/components
 import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
 import {
   useBootstrap,
+  useConversationPresence,
   useCreateConversation,
   useCreateRun,
   useDeleteConversation,
@@ -18,6 +19,7 @@ import {
   useRunDetailStream,
   useRunDetails,
   useRuns,
+  useSetInteractionMode,
   useSteer,
   useWorkingConversationIds,
 } from '@/features/relay/hooks'
@@ -43,6 +45,7 @@ export function RelayPage() {
   const conversations = bootstrapQuery.data?.conversations ?? EMPTY_CONVERSATIONS
 
   const runsQuery = useRuns(selectedConversationId)
+  useConversationPresence(selectedConversationId)
   const runs = runsQuery.data ?? EMPTY_RUNS
   const { details: runDetails, isLoading: runDetailsLoading } = useRunDetails(runs)
   useRunDetailStream(selectedRunId)
@@ -61,6 +64,7 @@ export function RelayPage() {
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
   const pinConversationMutation = usePinConversation()
+  const setInteractionModeMutation = useSetInteractionMode()
 
   const agentNameById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent.name])),
@@ -195,6 +199,12 @@ export function RelayPage() {
           loading={bootstrapQuery.isLoading}
           recentUrl={recentUrl}
           runCount={runDetails.length}
+          interactionMode={selectedConversation?.interaction_mode ?? 'relay'}
+          interactionModePending={setInteractionModeMutation.isPending}
+          onInteractionModeChange={(mode) => {
+            if (!selectedConversationId) return
+            setInteractionModeMutation.mutate({ id: selectedConversationId, interaction_mode: mode })
+          }}
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -203,6 +213,7 @@ export function RelayPage() {
 
         <ThreadComposer
           conversationKey={selectedConversation?.conversation_key}
+          interactionMode={selectedConversation?.interaction_mode ?? 'relay'}
           disabled={!selectedConversationId}
           dismissing={dismissRunMutation.isPending}
           mode={composerMode}

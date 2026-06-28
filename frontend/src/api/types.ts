@@ -16,12 +16,17 @@ export type TokenRef = {
   is_default: boolean
 }
 
+export type InteractionMode = 'relay' | 'pull'
+
 export type Conversation = {
   id: number
   agent_id: number
   name: string
   conversation_key: string
   pinned_at?: string | null
+  first_viewed_at?: string | null
+  presence_at?: string | null
+  interaction_mode?: InteractionMode
 }
 
 export type Run = {
@@ -39,6 +44,7 @@ export type Run = {
   trigger_error?: string | null
   conversation_url?: string
   idempotency_key?: string
+  interaction_mode?: InteractionMode
   created_at?: string
   completed_at?: string
 }

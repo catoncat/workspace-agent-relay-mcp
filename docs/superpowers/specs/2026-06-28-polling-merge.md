@@ -202,3 +202,20 @@ payload 携带 `turn_ord`、`mapping_ord`（实现标记，前端不读）。
 - callback `result` 优先于 polling `result`（已有）
 - **禁止**正文子串匹配
 - 待办：`ask_user` 在 question payload 写入 `turn_ord` 后，同 `turn_ord` 的 polling `progress`（非 trace）若 callback 已有 `question` 则丢弃（槽位归属，非场景分支）
+
+## 8. 交互感知轮询（poller 策略）
+
+- **从未打开**：relay `conversations.first_viewed_at IS NULL` 且关联 run 均已终态 → poller **不** `fetch_conversation`。
+- **已打开或仍有热 run**：`GET /internal/polling-targets?trigger_id=<agt_>` 返回 `fetch_hermes_ids`；poller 默认仅拉这些 Hermes 会话（`--no-smart` 恢复全量）。
+- **当前正在看**：dashboard `POST /api/conversations/{id}/presence` 心跳 → `presence_at` 新鲜 → `fast_hermes_ids`，watch 间隔 5s；否则 60s。
+- **绑定**：`POST /internal/runs/{id}/polling-events` 可带 `hermes_conversation_id`，写入 `runs.hermes_conversation_id` 供下轮 targets 查询。
+- **发现**：仍有热 run 但未绑定 Hermes id 时 `discover_in_progress=true`，每轮最多 `--discovery-limit` 个 in-progress Hermes 列表项用于 request_id 关联。
+
+## 9. Pull interaction mode（conversation 级）
+
+- `conversations.interaction_mode`：`relay`（默认）| `pull`；dashboard header 切换，`PATCH /api/conversations/{id}`。
+- Pull trigger 头：`request_id` + `conversation_key` + `relay_mode: pull`（**无** `relay_mcp:`、**无** completion contract）。
+- `build_trigger_input(interaction_mode="pull")` 为唯一文案源；[`runs.py`](src/workspace_agent_relay_mcp/api/routes/runs.py) create/steer 读 conversation 模式。
+- `runs.interaction_mode` 在 create 时快照。
+- Agent：**禁止** relay MCP 回调；**仍** `bind_relay_run`（tool trace）；可见消息靠 Hermes polling 进合并时间线。
+- 与 relay callback **互斥**于同一 turn；读取端无需改 merge 逻辑。

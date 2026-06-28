@@ -114,6 +114,73 @@ def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
     assert "record_plan" in rendered
 
 
+def test_build_trigger_input_pull_initial() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_pull_1",
+        conversation_key="research:sherlog",
+        user_input="Please research sherlog.",
+        interaction_mode="pull",
+    )
+
+    assert "request_id: relay_pull_1" in rendered
+    assert "conversation_key: research:sherlog" in rendered
+    assert "relay_mode: pull" in rendered
+    assert "relay_mcp:" not in rendered
+    assert "workspace-agent-relay-mcp.record_plan" not in rendered
+    assert "Completion contract:" not in rendered
+    assert "bind_relay_run" in rendered
+    assert rendered.endswith("Please research sherlog.")
+
+
+def test_build_trigger_input_pull_continuation_is_compact() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_pull_2",
+        conversation_key="research:sherlog",
+        user_input="Now add tests.",
+        is_continuation=True,
+        interaction_mode="pull",
+    )
+
+    assert "relay_mode: pull" in rendered
+    assert "Same pull mode as before" in rendered
+    assert "workspace-agent-relay-mcp.record_plan" not in rendered
+    assert "Completion contract:" not in rendered
+    assert rendered.endswith("Now add tests.")
+
+
+def test_build_trigger_input_pull_steer_same_turn() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_pull_3",
+        conversation_key="research:sherlog",
+        user_input="You didn't push.",
+        mode="steer",
+        interaction_mode="pull",
+    )
+
+    assert "relay_mode: pull" in rendered
+    assert "SAME turn" in rendered
+    assert "Operator added:" in rendered
+    assert "workspace-agent-relay-mcp.record_plan" not in rendered
+    assert rendered.endswith("You didn't push.")
+
+
+def test_build_trigger_input_pull_steer_answer() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_pull_4",
+        conversation_key="research:sherlog",
+        user_input="Target the dev branch.",
+        mode="steer",
+        answer=True,
+        interaction_mode="pull",
+    )
+
+    assert "relay_mode: pull" in rendered
+    assert "Operator answered:" in rendered
+    assert "Resume the current turn" in rendered
+    assert "workspace-agent-relay-mcp.record_plan" not in rendered
+    assert rendered.endswith("Target the dev branch.")
+
+
 class FakeResponse:
     def __init__(self, status: int, body: bytes, headers: dict[str, str]) -> None:
         self.status = status

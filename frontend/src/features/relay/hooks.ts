@@ -9,14 +9,16 @@ import {
   deleteAgent,
   deleteConversation,
   getRunDetail,
+  postConversationPresence,
   renameAgent,
   renameConversation,
   setConversationPinned,
+  setConversationInteractionMode,
   steerConversation,
   streamRun,
   updateAgent,
 } from '@/api/client'
-import type { Agent, Conversation, Run, RunDetail } from '@/api/types'
+import type { Agent, Conversation, InteractionMode, Run, RunDetail } from '@/api/types'
 import {
   bootstrapOptions,
   runDetailOptions,
@@ -55,6 +57,29 @@ export function useRuns(conversationId: number | null) {
     ...runsOptions(conversationId ?? 0),
     enabled: conversationId !== null,
   })
+}
+
+/** Tell the relay which conversation the operator is viewing (drives Hermes poller). */
+export function useConversationPresence(conversationId: number | null) {
+  useEffect(() => {
+    if (!conversationId) return
+    let cancelled = false
+    const ping = () => {
+      if (cancelled || document.visibilityState === 'hidden') return
+      void postConversationPresence(conversationId).catch(() => {})
+    }
+    ping()
+    const intervalId = window.setInterval(ping, 20_000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') ping()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [conversationId])
 }
 
 /** Poll each conversation's run list; derive sidebar "working" from latest run status. */
@@ -373,6 +398,39 @@ export function usePinConversation() {
     },
     onSuccess: (_conversation, { pinned }) => {
       toast.success(pinned ? 'Pinned' : 'Unpinned')
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(relayQueryKeys.bootstrap, context.previous)
+      }
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useSetInteractionMode() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, interaction_mode }: { id: number; interaction_mode: InteractionMode }) =>
+      setConversationInteractionMode(id, interaction_mode),
+    onMutate: async ({ id, interaction_mode }) => {
+      await queryClient.cancelQueries({ queryKey: relayQueryKeys.bootstrap })
+      const previous = queryClient.getQueryData<BootstrapData>(relayQueryKeys.bootstrap)
+      queryClient.setQueryData<BootstrapData>(relayQueryKeys.bootstrap, (current) => {
+        if (!current) return current
+        return {
+          ...current,
+          conversations: current.conversations.map((conversation) =>
+            conversation.id === id ? { ...conversation, interaction_mode } : conversation,
+          ),
+        }
+      })
+      return { previous }
+    },
+    onSuccess: (_conversation, { interaction_mode }) => {
+      toast.success(interaction_mode === 'pull' ? 'Pull mode' : 'Relay mode')
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
     onError: (err, _variables, context) => {

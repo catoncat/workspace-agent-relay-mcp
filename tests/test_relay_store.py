@@ -1404,3 +1404,155 @@ def test_record_polling_events_rejects_bad_event_type(tmp_path: Path) -> None:
             events=[{"source_key": "x", "event_type": "plan", "title": None,
                      "markdown": "m", "payload": {}, "create_time": 1.0}],
         )
+
+
+def test_conversation_presence_sets_first_viewed_once(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    assert conv.get("first_viewed_at") is None
+
+    first = store.record_conversation_presence(conv["id"])
+    assert first["first_viewed_at"]
+    assert first["presence_at"]
+
+    second = store.record_conversation_presence(conv["id"])
+    assert second["first_viewed_at"] == first["first_viewed_at"]
+    assert second["presence_at"] >= first["presence_at"]
+
+
+def test_polling_targets_skip_never_opened_terminal_runs(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="task",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    with store._connect(immediate=True) as conn:
+        conn.execute(
+            "UPDATE runs SET hermes_conversation_id = ?, status = 'done', completed_at = ? WHERE id = ?",
+            ("hermes-old", _now_iso(), run["id"]),
+        )
+
+    targets = store.get_polling_targets(trigger_id="agtch_test")
+    assert targets["fetch_hermes_ids"] == []
+    assert targets["discover_in_progress"] is False
+
+
+def test_polling_targets_fetch_when_viewed_or_hot(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="task",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "n1",
+            "event_type": "progress",
+            "title": None,
+            "markdown": "m",
+            "payload": {},
+            "create_time": 1.0,
+        }],
+        hermes_conversation_id="hermes-hot",
+    )
+    targets = store.get_polling_targets(trigger_id="agtch_test")
+    assert "hermes-hot" in targets["fetch_hermes_ids"]
+
+    store.record_conversation_presence(conv["id"])
+    targets2 = store.get_polling_targets(trigger_id="agtch_test")
+    assert "hermes-hot" in targets2["fast_hermes_ids"]
+
+
+def test_record_polling_events_binds_hermes_conversation_id(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "n1",
+            "event_type": "progress",
+            "title": None,
+            "markdown": "m",
+            "payload": {},
+            "create_time": 1.0,
+        }],
+        hermes_conversation_id="hermes-bind",
+    )
+    updated = store.get_run(run["id"])
+    assert updated["hermes_conversation_id"] == "hermes-bind"
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
+
+
+def test_conversation_interaction_mode_defaults_to_relay(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    assert conv.get("interaction_mode") == "relay"
+
+
+def test_update_conversation_interaction_mode(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    updated = store.update_conversation(conv["id"], interaction_mode="pull")
+    assert updated["interaction_mode"] == "pull"
+    with pytest.raises(ValueError):
+        store.update_conversation(conv["id"], interaction_mode="invalid")
+
+
+def test_create_run_snapshots_interaction_mode(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    store.update_conversation(conv["id"], interaction_mode="pull")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="task",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    assert run["interaction_mode"] == "pull"

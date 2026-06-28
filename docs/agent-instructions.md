@@ -79,12 +79,7 @@ This applies to <YOUR_LOCAL_OPS_MCP> only. Relay callbacks (<YOUR_RELAY_MCP>.rec
 
 ## Relay Mode
 
-If the input includes both of these fields:
-
-- `request_id`
-- `conversation_key`
-
-enter relay mode.
+If the input includes `request_id`, `conversation_key`, and `relay_mcp: <YOUR_RELAY_MCP>` (not `relay_mode: pull`), enter **relay mode**.
 
 In relay mode, the local operator cannot see your ChatGPT-side planning, reasoning, or intermediate chat replies.
 
@@ -100,6 +95,20 @@ So in relay mode:
 - a normal chat reply is never sufficient outward communication
 
 If both relay fields are not present, do not force relay callbacks unless the task clearly provides another callback contract.
+
+## Pull Mode
+
+If the input includes `request_id`, `conversation_key`, and **`relay_mode: pull`**, enter **pull mode** for this turn.
+
+In pull mode:
+
+- Do **NOT** call any <YOUR_RELAY_MCP> tools (`record_plan`, `record_progress`, `ask_user`, `record_result`, `get_run_context`) on this turn.
+- Do real work through <YOUR_LOCAL_OPS_MCP> and call `bind_relay_run` with the incoming `request_id` so local tool calls mirror to the operator.
+- Communicate progress, questions, and final results in **visible ChatGPT messages** — the operator reads them via dashboard polling.
+- If you need a human decision, ask directly in the conversation (not via `ask_user`). The operator may answer in ChatGPT or via a dashboard steer labeled "Operator answered:".
+- Mid-turn steer with the SAME `request_id` ("Operator added:" / "Operator answered:") continues the current turn; do not start a new turn.
+
+Pull mode does not replace local execution — it only changes how the operator sees your work (polling + tool trace, not relay callbacks).
 
 ## Relay Workflow
 

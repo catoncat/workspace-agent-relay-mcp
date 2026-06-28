@@ -4,12 +4,13 @@ from dataclasses import dataclass
 import json
 import secrets
 import time
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 
 
 REDACTED_SECRET = "[REDACTED]"
+InteractionMode = Literal["relay", "pull"]
 
 # urllib's default User-Agent is "Python-urllib/<version>". The ChatGPT trigger
 # endpoint's edge (Cloudflare) stalls such requests: the TLS+HTTP request is
@@ -19,6 +20,18 @@ REDACTED_SECRET = "[REDACTED]"
 # empirically: same URL/token/payload with this UA returns 202 in ~7-10s, while
 # the default Python-urllib UA hangs for the full 60s timeout.
 TRIGGER_USER_AGENT = "workspace-agent-relay-mcp/1.0 (+https://github.com/envvar/workspace-agent-relay-mcp)"
+
+_PULL_BIND = (
+    "Pull mode: do real work via notion-local-ops-mcp. "
+    "Call bind_relay_run with this request_id so local tool calls mirror to the operator. "
+    "Do NOT call workspace-agent-relay-mcp tools (record_plan, record_progress, ask_user, record_result) "
+    "on this turn — the operator reads your visible ChatGPT messages via polling."
+)
+_PULL_CONTINUATION = (
+    "Same pull mode as before: bind_relay_run for local tool mirroring; "
+    "communicate progress and results in visible ChatGPT messages; "
+    "do NOT call workspace-agent-relay-mcp tools on this turn."
+)
 
 
 def generate_request_id(prefix: str = "relay") -> str:
@@ -43,6 +56,23 @@ def redact_secret(value: Any, secret: str) -> Any:
     return _redact_secret(value, secret)
 
 
+def _trigger_header(
+    *,
+    request_id: str,
+    conversation_key: str,
+    interaction_mode: InteractionMode,
+) -> list[str]:
+    lines = [
+        f"request_id: {request_id}",
+        f"conversation_key: {conversation_key}",
+    ]
+    if interaction_mode == "pull":
+        lines.append("relay_mode: pull")
+    else:
+        lines.append("relay_mcp: workspace-agent-relay-mcp")
+    return lines
+
+
 def build_trigger_input(
     *,
     request_id: str,
@@ -51,12 +81,69 @@ def build_trigger_input(
     is_continuation: bool = False,
     mode: str = "initial",
     answer: bool = False,
+    interaction_mode: InteractionMode = "relay",
 ) -> str:
-    header = [
-        f"request_id: {request_id}",
-        f"conversation_key: {conversation_key}",
-        "relay_mcp: workspace-agent-relay-mcp",
-    ]
+    header = _trigger_header(
+        request_id=request_id,
+        conversation_key=conversation_key,
+        interaction_mode=interaction_mode,
+    )
+    if interaction_mode == "pull":
+        if mode == "steer":
+            if answer:
+                lead = (
+                    "This is the operator's answer to your question, appended to the SAME turn you were working on "
+                    "(same request_id as before)."
+                )
+                resume = (
+                    "Resume the current turn with this answer. Communicate in visible ChatGPT messages. "
+                    "Do NOT start a new turn. Do NOT call workspace-agent-relay-mcp tools on this turn."
+                )
+                label = "Operator answered:"
+            else:
+                lead = (
+                    "This is a follow-up instruction appended to the SAME turn you are already working on "
+                    "(same request_id as before)."
+                )
+                resume = (
+                    "Continue the current turn with this guidance. Communicate in visible ChatGPT messages. "
+                    "Do NOT start a new turn. Do NOT call workspace-agent-relay-mcp tools on this turn."
+                )
+                label = "Operator added:"
+            return "\n".join(
+                [
+                    *header,
+                    "",
+                    lead,
+                    resume,
+                    "If notion-local-ops-mcp was bound earlier this turn, keep using it.",
+                    "",
+                    label,
+                    user_input.strip(),
+                ]
+            )
+        if is_continuation:
+            return "\n".join(
+                [
+                    *header,
+                    "",
+                    _PULL_CONTINUATION,
+                    "",
+                    "User task:",
+                    user_input.strip(),
+                ]
+            )
+        return "\n".join(
+            [
+                *header,
+                "",
+                _PULL_BIND,
+                "",
+                "User task:",
+                user_input.strip(),
+            ]
+        )
+
     if mode == "steer":
         # Mid-turn follow-up: the operator appended guidance to THIS turn. We can
         # only send triggers, so this is another trigger to the same conversation,

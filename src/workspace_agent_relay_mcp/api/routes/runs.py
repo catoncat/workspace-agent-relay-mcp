@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
-from ...store.relay_store import TERMINAL_STATUSES, USER_REPLY_STATUSES
+from ...store.relay_store import TERMINAL_STATUSES, USER_REPLY_STATUSES, VALID_INTERACTION_MODES
 from ...store.bus import RunEventBus
 from ...trigger import (
     TriggerClient,
@@ -23,6 +23,11 @@ from ..errors import json_error
 from ..validation import resolve_agent_token, validate_trigger_url
 
 logger = logging.getLogger("workspace_agent_relay_mcp.trigger")
+
+
+def _conversation_interaction_mode(conversation: dict[str, Any]) -> str:
+    mode = str(conversation.get("interaction_mode") or "relay").strip().lower()
+    return mode if mode in VALID_INTERACTION_MODES else "relay"
 
 
 def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
@@ -105,11 +110,13 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         # has seen the full protocol before. Send a compact reminder instead of
         # the full contract to avoid bloating context every turn.
         is_continuation = len(store.list_runs_for_conversation(int(conversation["id"]))) > 0
+        interaction_mode = _conversation_interaction_mode(conversation)
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,
             user_input=input_markdown,
             is_continuation=is_continuation,
+            interaction_mode=interaction_mode,  # type: ignore[arg-type]
         )
         store.create_run(
             agent_id=int(agent["id"]),
@@ -215,6 +222,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             user_input=input_markdown,
             mode="steer",
             answer=is_answer,
+            interaction_mode=_conversation_interaction_mode(conversation),  # type: ignore[arg-type]
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         try:

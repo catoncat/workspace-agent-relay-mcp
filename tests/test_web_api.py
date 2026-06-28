@@ -158,6 +158,56 @@ def test_api_can_pin_conversation_without_name(tmp_path: Path) -> None:
     assert unpin_response.json()["pinned_at"] is None
 
 
+def test_api_conversation_presence_sets_first_viewed(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        response = client.post(f"/api/conversations/{conversation['id']}/presence", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_viewed_at"]
+    assert body["presence_at"]
+
+
+def test_api_patch_conversation_interaction_mode(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        response = client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"interaction_mode": "pull"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["interaction_mode"] == "pull"
+
+
+def test_api_pull_mode_run_uses_pull_trigger(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"interaction_mode": "pull"},
+        )
+        run_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Research sherlog"},
+        )
+
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["interaction_mode"] == "pull"
+    call = trigger_client.calls[0]
+    assert "relay_mode: pull" in call["input_text"]
+    assert "workspace-agent-relay-mcp.record_plan" not in call["input_text"]
+    assert call["input_text"].endswith("Research sherlog")
+
+
 def test_api_can_delete_agent(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 

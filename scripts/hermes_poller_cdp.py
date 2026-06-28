@@ -36,6 +36,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -63,18 +64,29 @@ def load_auth_token() -> str:
     return ""
 
 
-def post_polling_events(relay_url: str, token: str, run_id: int, events: list[dict]) -> dict:
-    body = {"events": [
-        {
-            "source_key": e["source_key"],
-            "event_type": e["event_type"],
-            "title": e.get("title"),
-            "markdown": e.get("markdown"),
-            "payload": e.get("payload") or {},
-            "create_time": e.get("create_time"),
-        }
-        for e in events
-    ]}
+def post_polling_events(
+    relay_url: str,
+    token: str,
+    run_id: int,
+    events: list[dict],
+    *,
+    hermes_conversation_id: str | None = None,
+) -> dict:
+    body: dict = {
+        "events": [
+            {
+                "source_key": e["source_key"],
+                "event_type": e["event_type"],
+                "title": e.get("title"),
+                "markdown": e.get("markdown"),
+                "payload": e.get("payload") or {},
+                "create_time": e.get("create_time"),
+            }
+            for e in events
+        ],
+    }
+    if hermes_conversation_id:
+        body["hermes_conversation_id"] = hermes_conversation_id
     req = urllib.request.Request(
         f"{relay_url.rstrip('/')}/internal/runs/{run_id}/polling-events",
         data=json.dumps(body).encode("utf-8"),
@@ -88,6 +100,36 @@ def post_polling_events(relay_url: str, token: str, run_id: int, events: list[di
         return {"success": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}"}
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def fetch_polling_targets(relay_url: str, token: str, trigger_id: str) -> dict:
+    url = f"{relay_url.rstrip('/')}/internal/polling-targets?trigger_id={urllib.parse.quote(trigger_id)}"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:
+        return {"fetch_hermes_ids": [], "fast_hermes_ids": [], "discover_in_progress": True,
+                "error": f"HTTP {e.code}"}
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return {"fetch_hermes_ids": [], "fast_hermes_ids": [], "discover_in_progress": True,
+                "error": f"{type(e).__name__}: {e}"}
+
+
+def should_fetch_conversation(cid: str, item: dict, targets: dict, *, discovery_budget: int) -> tuple[bool, str]:
+    """Return (fetch?, reason_tag)."""
+    fetch_set = set(targets.get("fetch_hermes_ids") or [])
+    if cid in fetch_set:
+        return True, "target"
+    status = item.get("fiber_status")
+    is_terminal = status in ("completed", "failed")
+    if not is_terminal and targets.get("discover_in_progress") and discovery_budget > 0:
+        return True, "discover"
+    return False, "skip"
 
 
 def main() -> int:
@@ -110,6 +152,10 @@ def main() -> int:
                     help="relay shared bearer (default: WORKSPACE_AGENT_RELAY_AUTH_TOKEN from env/.env)")
     ap.add_argument("--interval", type=float, default=0,
                     help="seconds between passes; 0 = single pass (otherwise loops until Ctrl-C)")
+    ap.add_argument("--no-smart", action="store_true",
+                    help="fetch every listed conversation (legacy); default uses relay polling-targets")
+    ap.add_argument("--discovery-limit", type=int, default=3,
+                    help="max in-progress Hermes convs to fetch per pass when binding hot unmapped runs")
     args = ap.parse_args()
 
     out_dir = Path(os.path.expanduser(args.out_dir))
@@ -171,11 +217,23 @@ def main() -> int:
                 agent_id = agents[0]["id"]
             print(f"  using agent={agent_id}")
 
-            def one_pass() -> int:
+            def one_pass() -> tuple[int, float]:
                 # Re-check session each pass (long-running loops outlive a single JWT).
                 if not h.refresh_session() and not h.wait_for_session(timeout=20):
                     print("  ! session lost mid-loop — re-login in the relay Chrome and restart", file=sys.stderr)
-                    return 2
+                    return 2, float(args.interval or 60)
+                targets: dict = {}
+                if not args.no_smart:
+                    targets = fetch_polling_targets(args.relay_url, relay_token, agent_id)
+                    if targets.get("error"):
+                        print(f"  ! polling-targets: {targets['error']}", file=sys.stderr)
+                    fetch_n = len(targets.get("fetch_hermes_ids") or [])
+                    fast_n = len(targets.get("fast_hermes_ids") or [])
+                    print(
+                        f"  targets: fetch={fetch_n} fast={fast_n} "
+                        f"discover={'on' if targets.get('discover_in_progress') else 'off'} "
+                        f"active_convs={len(targets.get('active_conversation_ids') or [])}"
+                    )
                 all_items: list[dict] = []
                 cursor = None
                 for _ in range(args.pages):
@@ -186,6 +244,8 @@ def main() -> int:
                 print(f"  listed {len(all_items)} runs")
                 new_count = 0
                 bound_count = 0
+                skipped = 0
+                discovery_left = args.discovery_limit if not args.no_smart else 0
                 for it in all_items:
                     cid = it.get("id")
                     status = it.get("fiber_status")
@@ -198,7 +258,25 @@ def main() -> int:
                     is_terminal = status in ("completed", "failed")
                     if cid in seen["seen"] and is_terminal and not args.refetch:
                         continue
-                    print(tag + ("  (seen, in-progress → refetch)" if cid in seen["seen"] else "  (NEW)"))
+                    if not args.no_smart:
+                        smart_fetch, reason = should_fetch_conversation(
+                            cid, it, targets, discovery_budget=discovery_left,
+                        )
+                        if not smart_fetch:
+                            skipped += 1
+                            continue
+                        if reason == "discover":
+                            discovery_left -= 1
+                    else:
+                        reason = "legacy"
+                    suffix = ""
+                    if cid in seen["seen"]:
+                        suffix = "  (seen, in-progress → refetch)"
+                    elif reason == "discover":
+                        suffix = "  (discover)"
+                    elif reason == "target":
+                        suffix = "  (target)"
+                    print(tag + suffix)
                     if args.list_only:
                         continue
                     conv = h.fetch_conversation(cid)
@@ -231,7 +309,10 @@ def main() -> int:
                             for ev in store_events:
                                 by_run.setdefault(int(ev["run_id"]), []).append(ev)
                             for run_id, evs in by_run.items():
-                                res = post_polling_events(args.relay_url, relay_token, run_id, evs)
+                                res = post_polling_events(
+                                    args.relay_url, relay_token, run_id, evs,
+                                    hermes_conversation_id=cid,
+                                )
                                 if res.get("success"):
                                     print(f"     applied run={run_id}: inserted={res.get('inserted')} of {len(evs)}")
                                 else:
@@ -245,25 +326,37 @@ def main() -> int:
                     new_count += 1
                 seen["last_run"] = int(time.time())
                 save_seen(out_dir, seen)
-                print(f"== pass done: {new_count} new fetched, {bound_count} turns bound; records in {out_dir} ==")
-                return 0
+                sleep_sec = float(args.interval or 60)
+                if not args.no_smart and targets:
+                    fast = set(targets.get("fast_hermes_ids") or [])
+                    active = bool(targets.get("active_conversation_ids"))
+                    if active or fast:
+                        sleep_sec = float(targets.get("interval_active_sec") or 5)
+                    else:
+                        sleep_sec = float(targets.get("interval_idle_sec") or 60)
+                print(
+                    f"== pass done: {new_count} fetched, {skipped} skipped (unwatched), "
+                    f"{bound_count} turns bound; records in {out_dir} =="
+                )
+                return 0, sleep_sec
 
             if args.interval <= 0:
-                return one_pass()
-            print(f"== watch mode: interval={args.interval}s; Ctrl-C to stop ==")
+                rc, _ = one_pass()
+                return rc
+            print(f"== watch mode: smart={'on' if not args.no_smart else 'off'}; Ctrl-C to stop ==")
             pass_no = 0
             while True:
                 pass_no += 1
                 print(f"\n== pass #{pass_no} @ {time.strftime('%Y-%m-%d %H:%M:%S')} ==")
                 try:
-                    rc = one_pass()
+                    rc, sleep_sec = one_pass()
                 except Exception as exc:
                     print(f"  pass crashed: {exc}", file=sys.stderr)
-                    rc = 0
+                    rc, sleep_sec = 0, float(args.interval or 60)
                 if rc == 2:
                     return 2
-                print(f"   sleeping {args.interval}s …")
-                time.sleep(args.interval)
+                print(f"   sleeping {sleep_sec}s …")
+                time.sleep(sleep_sec)
         finally:
             # Intentionally do NOT close the created tab and do NOT call browser.close().
             # Closing the only tab would close the relay window and could disturb a

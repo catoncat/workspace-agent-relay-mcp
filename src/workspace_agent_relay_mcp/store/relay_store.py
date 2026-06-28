@@ -14,6 +14,19 @@ if TYPE_CHECKING:
 
 
 TERMINAL_STATUSES = {"done", "blocked", "failed", "superseded"}
+# Runs that may still receive ChatGPT-side updates; poller keeps refetching their
+# Hermes conversation even when the dashboard conversation was never opened.
+POLLING_HOT_RUN_STATUSES = (
+    "draft",
+    "sent",
+    "pending",
+    "running",
+    "accepted",
+    "waiting",
+    "needs_user",
+    "trigger_failed",
+)
+PRESENCE_TTL_SEC = 45
 # Active runs paused on a human decision (set by ask_user). Steering such a run
 # is the operator's ANSWER — it resumes the SAME turn rather than starting a new
 # one, so the route labels the steer trigger accordingly and steer_run transitions
@@ -26,6 +39,7 @@ TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
 MAX_STEP_TITLE_LEN = 200
+VALID_INTERACTION_MODES = frozenset({"relay", "pull"})
 
 
 def _now() -> str:
@@ -72,6 +86,13 @@ def _merged_event_sort_key(row: dict[str, Any]) -> tuple[str, int, int]:
         return (sort_at, 1, sub)
     event_id = row.get("id")
     return (sort_at, 0, int(event_id) if isinstance(event_id, int) else 0)
+
+
+def _normalize_interaction_mode(value: Any) -> str:
+    mode = str(value or "relay").strip().lower()
+    if mode not in VALID_INTERACTION_MODES:
+        raise ValueError(f"interaction_mode must be one of {sorted(VALID_INTERACTION_MODES)}, got {value!r}")
+    return mode
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -349,8 +370,20 @@ class RelayStore:
                     """
                 )
             conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
-            if "pinned_at" not in conv_cols:
-                conn.execute("ALTER TABLE conversations ADD COLUMN pinned_at TEXT")
+            conv_migrations = {
+                "pinned_at": "TEXT",
+                "first_viewed_at": "TEXT",
+                "presence_at": "TEXT",
+                "interaction_mode": "TEXT NOT NULL DEFAULT 'relay'",
+            }
+            for column, column_type in conv_migrations.items():
+                if column not in conv_cols:
+                    conn.execute(f"ALTER TABLE conversations ADD COLUMN {column} {column_type}")
+            if "hermes_conversation_id" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN hermes_conversation_id TEXT")
+            run_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+            if "interaction_mode" not in run_cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN interaction_mode TEXT")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS agent_secrets (
@@ -483,8 +516,8 @@ class RelayStore:
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO conversations (agent_id, name, conversation_key, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO conversations (agent_id, name, conversation_key, interaction_mode, created_at, updated_at)
+                VALUES (?, ?, ?, 'relay', ?, ?)
                 """,
                 (agent_id, name, conversation_key, now, now),
             )
@@ -509,6 +542,165 @@ class RelayStore:
             raise KeyError(f"Conversation not found: {conversation_id}")
         return _row_to_dict(row) or {}
 
+    def get_agent_by_trigger_id(self, trigger_id: str) -> dict[str, Any] | None:
+        tid = trigger_id.strip()
+        if not tid:
+            return None
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM agents WHERE trigger_id = ?", (tid,)).fetchone()
+        return _row_to_dict(row)
+
+    def record_conversation_presence(self, conversation_id: int) -> dict[str, Any]:
+        """Dashboard heartbeat while a conversation is open. Sets presence_at every
+        call; first_viewed_at is written once on the first heartbeat."""
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute(
+                "SELECT id, first_viewed_at FROM conversations WHERE id = ? AND archived_at IS NULL",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Conversation not found: {conversation_id}")
+            if row["first_viewed_at"]:
+                conn.execute(
+                    "UPDATE conversations SET presence_at = ?, updated_at = ? WHERE id = ?",
+                    (now, now, conversation_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE conversations
+                    SET first_viewed_at = ?, presence_at = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, now, conversation_id),
+                )
+            updated = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+        return _row_to_dict(updated) or {}
+
+    def get_polling_targets(
+        self,
+        *,
+        trigger_id: str,
+        presence_ttl_sec: int = PRESENCE_TTL_SEC,
+    ) -> dict[str, Any]:
+        """Tell the Hermes poller which ChatGPT conversations to fetch.
+
+        Rules (structural, not scenario-specific):
+        - Never fetch Hermes convs only tied to relay conversations the operator
+          never opened, when all associated runs are terminal.
+        - Always fetch when the relay conversation was opened (first_viewed_at) or
+          any associated run is still hot (non-terminal).
+        - fast_hermes_ids ⊆ fetch_hermes_ids for conversations with a recent
+          dashboard presence heartbeat.
+        - discover_in_progress when the agent has hot runs without a known
+          hermes_conversation_id (poller may fetch a few in-progress Hermes
+          list items to bind request_id).
+        """
+        agent = self.get_agent_by_trigger_id(trigger_id)
+        if agent is None:
+            return {
+                "trigger_id": trigger_id,
+                "agent_id": None,
+                "active_conversation_ids": [],
+                "fetch_hermes_ids": [],
+                "fast_hermes_ids": [],
+                "discover_in_progress": False,
+                "interval_active_sec": 5,
+                "interval_idle_sec": 60,
+            }
+        agent_id = int(agent["id"])
+        cutoff = datetime.fromtimestamp(
+            datetime.now(UTC).timestamp() - max(1, int(presence_ttl_sec)),
+            UTC,
+        ).isoformat()
+        terminal = tuple(TERMINAL_STATUSES)
+        hot = tuple(POLLING_HOT_RUN_STATUSES)
+        placeholders_terminal = ",".join("?" * len(terminal))
+        placeholders_hot = ",".join("?" * len(hot))
+        with self._lock, self._connect() as conn:
+            active_rows = conn.execute(
+                """
+                SELECT id FROM conversations
+                WHERE agent_id = ? AND archived_at IS NULL
+                  AND presence_at IS NOT NULL AND presence_at >= ?
+                ORDER BY id
+                """,
+                (agent_id, cutoff),
+            ).fetchall()
+            fetch_rows = conn.execute(
+                f"""
+                SELECT DISTINCT r.hermes_conversation_id AS cid
+                FROM runs r
+                JOIN conversations c ON c.id = r.conversation_id
+                WHERE r.agent_id = ?
+                  AND r.hermes_conversation_id IS NOT NULL
+                  AND TRIM(r.hermes_conversation_id) != ''
+                  AND (
+                    c.first_viewed_at IS NOT NULL
+                    OR r.status NOT IN ({placeholders_terminal})
+                  )
+                ORDER BY cid
+                """,
+                (agent_id, *terminal),
+            ).fetchall()
+            fast_rows = conn.execute(
+                f"""
+                SELECT DISTINCT r.hermes_conversation_id AS cid
+                FROM runs r
+                JOIN conversations c ON c.id = r.conversation_id
+                WHERE r.agent_id = ?
+                  AND r.hermes_conversation_id IS NOT NULL
+                  AND TRIM(r.hermes_conversation_id) != ''
+                  AND c.presence_at IS NOT NULL AND c.presence_at >= ?
+                ORDER BY cid
+                """,
+                (agent_id, cutoff),
+            ).fetchall()
+            hot_unmapped = conn.execute(
+                f"""
+                SELECT COUNT(*) AS n FROM runs
+                WHERE agent_id = ?
+                  AND status IN ({placeholders_hot})
+                  AND (hermes_conversation_id IS NULL OR TRIM(hermes_conversation_id) = '')
+                """,
+                (agent_id, *hot),
+            ).fetchone()
+        fetch_hermes_ids = [str(row["cid"]) for row in fetch_rows if row["cid"]]
+        fast_hermes_ids = [str(row["cid"]) for row in fast_rows if row["cid"]]
+        active_conversation_ids = [int(row["id"]) for row in active_rows]
+        discover = int(hot_unmapped["n"] or 0) > 0 if hot_unmapped else False
+        return {
+            "trigger_id": trigger_id,
+            "agent_id": agent_id,
+            "active_conversation_ids": active_conversation_ids,
+            "fetch_hermes_ids": fetch_hermes_ids,
+            "fast_hermes_ids": fast_hermes_ids,
+            "discover_in_progress": discover,
+            "interval_active_sec": 5,
+            "interval_idle_sec": 60,
+        }
+
+    def _bind_run_hermes_conversation(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        run_id: int,
+        hermes_conversation_id: str,
+    ) -> None:
+        cid = hermes_conversation_id.strip()
+        if not cid:
+            return
+        conn.execute(
+            """
+            UPDATE runs
+            SET hermes_conversation_id = ?, updated_at = ?
+            WHERE id = ?
+              AND (hermes_conversation_id IS NULL OR TRIM(hermes_conversation_id) = '')
+            """,
+            (cid, _now(), run_id),
+        )
+
     def rename_agent(self, agent_id: int, *, name: str) -> dict[str, Any]:
         if not name or not name.strip():
             raise ValueError("name must not be empty")
@@ -524,7 +716,7 @@ class RelayStore:
         return _row_to_dict(row) or {}
 
     def update_conversation(self, conversation_id: int, **fields: Any) -> dict[str, Any]:
-        allowed = {"name", "pinned"}
+        allowed = {"name", "pinned", "interaction_mode"}
         unknown = sorted(set(fields) - allowed)
         if unknown:
             raise ValueError(f"unsupported field(s): {', '.join(unknown)}")
@@ -542,6 +734,9 @@ class RelayStore:
         if "pinned" in fields:
             sets.append("pinned_at = ?")
             params.append(now if bool(fields["pinned"]) else None)
+        if "interaction_mode" in fields:
+            sets.append("interaction_mode = ?")
+            params.append(_normalize_interaction_mode(fields["interaction_mode"]))
         params.append(conversation_id)
         with self._lock, self._connect(immediate=True) as conn:
             row = conn.execute(
@@ -604,6 +799,7 @@ class RelayStore:
                 raise ValueError("conversation_key does not match conversation_id.")
             if conversation["agent_id"] != agent_id:
                 raise ValueError("agent_id does not own conversation_id.")
+            interaction_mode = _normalize_interaction_mode(conversation["interaction_mode"])
             # Zombie cleanup: when a new turn starts, close out older non-terminal
             # runs in the same conversation. The user moved on; their late
             # callbacks (if any) must be rejected as run_closed rather than
@@ -619,9 +815,10 @@ class RelayStore:
                 """
                 INSERT INTO runs (
                     request_id, agent_id, conversation_id, conversation_key,
-                    idempotency_key, input_markdown, parent_run_id, status, trigger_status, created_at, updated_at
+                    idempotency_key, input_markdown, interaction_mode, parent_run_id,
+                    status, trigger_status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
                 """,
                 (
                     request_id,
@@ -630,6 +827,7 @@ class RelayStore:
                     conversation_key,
                     idempotency_key,
                     input_markdown,
+                    interaction_mode,
                     parent_run_id,
                     now,
                     now,
@@ -1137,7 +1335,13 @@ class RelayStore:
         merged.sort(key=_merged_event_sort_key)
         return merged
 
-    def record_polling_events(self, *, run_id: int, events: list[dict[str, Any]]) -> dict[str, Any]:
+    def record_polling_events(
+        self,
+        *,
+        run_id: int,
+        events: list[dict[str, Any]],
+        hermes_conversation_id: str | None = None,
+    ) -> dict[str, Any]:
         """Idempotent write of polling-derived events (from ChatGPT conversation
         readback). Each event must carry a stable `source_key` (the ChatGPT
         mapping node id); the partial unique index on (run_id, source_key) makes
@@ -1178,6 +1382,12 @@ class RelayStore:
                 )
                 if cur.rowcount > 0:
                     inserted += 1
+            if isinstance(hermes_conversation_id, str) and hermes_conversation_id.strip():
+                self._bind_run_hermes_conversation(
+                    conn,
+                    run_id=run_id,
+                    hermes_conversation_id=hermes_conversation_id,
+                )
         if inserted > 0:
             self._notify_run(run_id)
         return {"success": True, "inserted": inserted}

@@ -10,7 +10,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 # Paths that must NOT be swallowed by the SPA fallback — they belong to MCP,
 # OAuth discovery, or API and need to fall through to their own handlers.
-_NON_SPA_PREFIXES = ("/api/", "/mcp", "/.well-known", "/assets/", "/messages", "/oauth/")
+_NON_SPA_PREFIXES = ("/api/", "/internal/", "/mcp", "/.well-known", "/assets/", "/messages", "/oauth/")
 
 
 def frontend_dist() -> Path:

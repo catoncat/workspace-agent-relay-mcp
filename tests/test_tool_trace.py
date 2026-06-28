@@ -509,3 +509,40 @@ def test_internal_polling_events_rejects_missing_source_key(tmp_path: Path) -> N
 
     assert response.status_code == 400
     assert response.json()["success"] is False
+
+
+def test_internal_polling_targets_requires_trigger_id(tmp_path: Path) -> None:
+    client, _store = _http_client(tmp_path, auth_token="local-secret")
+    with client:
+        response = client.get(
+            "/internal/polling-targets",
+            headers={"Authorization": "Bearer local-secret"},
+        )
+    assert response.status_code == 400
+
+
+def test_internal_polling_targets_returns_fetch_set(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "n1",
+            "event_type": "progress",
+            "title": None,
+            "markdown": "m",
+            "payload": {},
+            "create_time": 1.0,
+        }],
+        hermes_conversation_id="hermes-1",
+    )
+    store.record_conversation_presence(run["conversation_id"])
+    with client:
+        response = client.get(
+            "/internal/polling-targets?trigger_id=agtch_test",
+            headers={"Authorization": "Bearer local-secret"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert "hermes-1" in body["fetch_hermes_ids"]
+    assert "hermes-1" in body["fast_hermes_ids"]
