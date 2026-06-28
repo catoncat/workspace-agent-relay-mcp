@@ -379,3 +379,133 @@ def test_internal_tool_trace_rejects_missing_required_fields(tmp_path: Path) -> 
     assert missing_tool.json()["success"] is False
     assert malformed.status_code == 400
     assert malformed.json() == {"success": False, "error": "malformed JSON body"}
+
+
+# ---------------------------------------------------------------------------
+# HTTP-level tests for POST /internal/runs/{run_id}/polling-events
+# ---------------------------------------------------------------------------
+
+
+def _polling_body(**overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "events": [
+            {
+                "source_key": "node_a",
+                "event_type": "progress",
+                "title": None,
+                "markdown": "polled reasoning",
+                "payload": {"polling": True},
+                "create_time": 1700000000.0,
+            },
+            {
+                "source_key": "node_b",
+                "event_type": "progress",
+                "title": None,
+                "markdown": "more polled reasoning",
+                "payload": {"polling": True},
+                "create_time": 1700000001.0,
+            },
+        ]
+    }
+    body.update(overrides)
+    return body
+
+
+def test_internal_polling_events_with_correct_bearer_returns_200_and_creates_events(
+    tmp_path: Path,
+) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+    headers = {"Authorization": "Bearer local-secret"}
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json=_polling_body(),
+            headers=headers,
+        )
+        detail = client.get(f"/api/runs/{run['id']}", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["inserted"] == 2
+    events = detail.json()["events"]
+    polling = [e for e in events if e.get("source_key")]
+    assert len(polling) == 2
+    assert {e["source_key"] for e in polling} == {"node_a", "node_b"}
+    assert any(e["markdown"] == "polled reasoning" for e in polling)
+
+
+def test_internal_polling_events_idempotent_on_repost(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+    headers = {"Authorization": "Bearer local-secret"}
+
+    with client:
+        first = client.post(f"/internal/runs/{run['id']}/polling-events", json=_polling_body(), headers=headers)
+        second = client.post(f"/internal/runs/{run['id']}/polling-events", json=_polling_body(), headers=headers)
+        detail = client.get(f"/api/runs/{run['id']}", headers=headers)
+
+    assert first.json()["inserted"] == 2
+    assert second.json()["inserted"] == 0
+    polling = [e for e in detail.json()["events"] if e.get("source_key")]
+    assert len(polling) == 2  # no duplicates
+
+
+def test_internal_polling_events_wrong_bearer_returns_401(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json=_polling_body(),
+            headers={"Authorization": "Bearer wrong"},
+        )
+
+    assert response.status_code == 401
+
+
+def test_internal_polling_events_unknown_run_returns_404(tmp_path: Path) -> None:
+    client, _store = _http_client(tmp_path, auth_token="local-secret")
+
+    with client:
+        response = client.post(
+            "/internal/runs/999/polling-events",
+            json=_polling_body(),
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["success"] is False
+
+
+def test_internal_polling_events_rejects_bad_event_type(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json={"events": [{"source_key": "x", "event_type": "plan", "markdown": "m", "create_time": 1.0}]},
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+
+
+def test_internal_polling_events_rejects_missing_source_key(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+
+    with client:
+        response = client.post(
+            f"/internal/runs/{run['id']}/polling-events",
+            json={"events": [{"event_type": "progress", "markdown": "m", "create_time": 1.0}]},
+            headers={"Authorization": "Bearer local-secret"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False

@@ -32,6 +32,51 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _epoch_to_iso(value: Any) -> str:
+    """Convert a ChatGPT message create_time (float epoch seconds) to an ISO
+    timestamp matching callback events' created_at format, so polling and
+    callback events sort together lexicographically. Non-numeric values fall
+    back to now."""
+    if isinstance(value, (int, float)) and value > 0:
+        try:
+            return datetime.fromtimestamp(float(value), UTC).isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+    return _now()
+
+
+def _filter_redundant_polling_progress(
+    callback: list[dict[str, Any]], polling: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Drop polling progress whose markdown repeats a callback question body.
+
+    ChatGPT assistant messages often land with a late create_time (streaming
+    completion), so they sort after the callback ask_user card even though they
+    are the same turn's visible narration. When the polling text embeds a
+    question we already render via callback, keep only the structured question
+    card and the callback narrations — do not show the duplicate wall of text."""
+    question_bodies = [
+        (row.get("markdown") or "").strip()
+        for row in callback
+        if row.get("event_type") == "question" and (row.get("markdown") or "").strip()
+    ]
+    if not question_bodies:
+        return polling
+    kept: list[dict[str, Any]] = []
+    for row in polling:
+        if row.get("event_type") != "progress":
+            kept.append(row)
+            continue
+        poll_md = (row.get("markdown") or "").strip()
+        if not poll_md:
+            kept.append(row)
+            continue
+        if any(q_md in poll_md for q_md in question_bodies):
+            continue
+        kept.append(row)
+    return kept
+
+
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -135,7 +180,7 @@ class RelayStore:
                 run_id,
                 {
                     "run": self.get_run(run_id),
-                    "events": self.list_events(run_id),
+                    "events": self.list_events_merged(run_id),
                     "artifacts": self.list_artifacts(run_id),
                     "plan": self.get_plan(run_id),
                 },
@@ -317,6 +362,17 @@ class RelayStore:
                     updated_at TEXT NOT NULL
                 );
                 """
+            )
+            # Polling-derived events (from ChatGPT conversation readback) carry a
+            # source_key = the ChatGPT mapping node id. Callback events have
+            # source_key = NULL. A partial unique index dedups polling writes
+            # idempotently per (run_id, node_id) without constraining callback rows.
+            event_cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+            if "source_key" not in event_cols:
+                conn.execute("ALTER TABLE events ADD COLUMN source_key TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_polling_key "
+                "ON events(run_id, source_key) WHERE source_key IS NOT NULL"
             )
 
     def get_agent(self, agent_id: int) -> dict[str, Any]:
@@ -1050,9 +1106,87 @@ class RelayStore:
         return self.get_run(run_id)
 
     def list_events(self, run_id: int) -> list[dict[str, Any]]:
+        """Callback-only events (source_key IS NULL). Used for the agent's own
+        get_run_context view — the agent does not need to see its own polled
+        chat messages echoed back."""
         with self._lock, self._connect() as conn:
-            rows = conn.execute("SELECT * FROM events WHERE run_id = ? ORDER BY id", (run_id,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM events WHERE run_id = ? AND source_key IS NULL ORDER BY id",
+                (run_id,),
+            ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]
+
+    def list_events_merged(self, run_id: int) -> list[dict[str, Any]]:
+        """Unified timeline: callback events + polling-derived events, ordered by
+        created_at. Dedup rules:
+        - callback `result` wins over polling `result`
+        - polling progress that repeats a callback question body is dropped
+          (late ChatGPT create_time would otherwise sort it after the question card)
+        Other polling events are kept — they cover the cloud-side plane callback
+        cannot see."""
+        with self._lock, self._connect() as conn:
+            callback_rows = conn.execute(
+                "SELECT * FROM events WHERE run_id = ? AND source_key IS NULL",
+                (run_id,),
+            ).fetchall()
+            polling_rows = conn.execute(
+                "SELECT * FROM events WHERE run_id = ? AND source_key IS NOT NULL",
+                (run_id,),
+            ).fetchall()
+        callback = [_row_to_dict(row) or {} for row in callback_rows]
+        has_callback_result = any(row.get("event_type") == "result" for row in callback)
+        polling = [_row_to_dict(row) or {} for row in polling_rows]
+        if has_callback_result:
+            polling = [row for row in polling if row.get("event_type") != "result"]
+        polling = _filter_redundant_polling_progress(callback, polling)
+        merged = callback + polling
+        merged.sort(key=lambda row: (str(row.get("created_at") or ""), int(row.get("id") or 0)))
+        return merged
+
+    def record_polling_events(self, *, run_id: int, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Idempotent write of polling-derived events (from ChatGPT conversation
+        readback). Each event must carry a stable `source_key` (the ChatGPT
+        mapping node id); the partial unique index on (run_id, source_key) makes
+        re-polls a no-op. After inserting any new row, notify the run so the
+        dashboard SSE pushes the merged timeline."""
+        allowed = {"progress", "result"}
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT request_id FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Run not found: {run_id}")
+            request_id = str(row["request_id"])
+            inserted = 0
+            for event in events:
+                event_type = str(event.get("event_type") or "")
+                if event_type not in allowed:
+                    raise ValueError(f"polling event_type must be one of {sorted(allowed)}, got {event_type!r}")
+                source_key = event.get("source_key")
+                if not isinstance(source_key, str) or not source_key.strip():
+                    raise ValueError("polling event requires a non-empty source_key")
+                create_time = event.get("create_time")
+                created_at = _epoch_to_iso(create_time)
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO events
+                        (run_id, request_id, event_type, title, markdown, payload_json, created_at, source_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        request_id,
+                        event_type,
+                        event.get("title"),
+                        event.get("markdown"),
+                        _json_dumps(event.get("payload") or {}),
+                        created_at,
+                        source_key.strip(),
+                    ),
+                )
+                if cur.rowcount > 0:
+                    inserted += 1
+        if inserted > 0:
+            self._notify_run(run_id)
+        return {"success": True, "inserted": inserted}
 
     def list_artifacts(self, run_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:

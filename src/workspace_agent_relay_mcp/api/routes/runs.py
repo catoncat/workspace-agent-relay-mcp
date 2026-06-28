@@ -28,7 +28,7 @@ logger = logging.getLogger("workspace_agent_relay_mcp.trigger")
 def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
     return {
         "run": store.get_run(run_id),
-        "events": store.list_events(run_id),
+        "events": store.list_events_merged(run_id),
         "artifacts": store.list_artifacts(run_id),
         "plan": store.get_plan(run_id),
     }

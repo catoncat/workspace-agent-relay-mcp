@@ -1222,3 +1222,185 @@ def test_concurrent_store_instances_serialize_callbacks_via_store_lock(
     events = setup_store.list_events(run["id"])
     assert run["status"] == "done"
     assert [event["event_type"] for event in events] == ["progress", "result"]
+
+
+def _make_run_for_polling(store: RelayStore, *, request_id: str = "poll_run") -> dict:
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conversation = store.create_conversation(
+        agent_id=agent["id"], name="Poll", conversation_key="research:poll"
+    )
+    return store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:poll",
+        input_markdown="task",
+        idempotency_key=request_id,
+        request_id=request_id,
+    )
+
+
+def test_record_polling_events_is_idempotent(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    events = [
+        {"source_key": "node_a", "event_type": "progress", "title": None,
+         "markdown": "thinking", "payload": {"polling": True}, "create_time": 1700000000.0},
+        {"source_key": "node_b", "event_type": "progress", "title": None,
+         "markdown": "more thinking", "payload": {"polling": True}, "create_time": 1700000001.0},
+    ]
+    first = store.record_polling_events(run_id=run["id"], events=events)
+    assert first["success"] is True
+    assert first["inserted"] == 2
+    # Re-post the same source_keys: no new rows.
+    second = store.record_polling_events(run_id=run["id"], events=events)
+    assert second["inserted"] == 0
+    polling = [e for e in store.list_events_merged(run["id"]) if e.get("source_key")]
+    assert len(polling) == 2
+    assert {e["source_key"] for e in polling} == {"node_a", "node_b"}
+
+
+def test_list_events_merged_drops_polling_result_when_callback_result_exists(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.record_progress(
+        request_id="poll_run", conversation_key="research:poll", message="working",
+    )
+    store.record_result(
+        request_id="poll_run", conversation_key="research:poll",
+        status="done", title="Done", markdown="callback result",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[
+            {"source_key": "p1", "event_type": "progress", "title": None,
+             "markdown": "polled message", "payload": {"polling": True}, "create_time": 1700000002.0},
+            {"source_key": "p2", "event_type": "result", "title": None,
+             "markdown": "polled result", "payload": {"status": "done", "polling": True}, "create_time": 1700000003.0},
+        ],
+    )
+    merged = store.list_events_merged(run["id"])
+    result_events = [e for e in merged if e["event_type"] == "result"]
+    # Only the callback result survives; the polling result candidate is dropped.
+    assert len(result_events) == 1
+    assert result_events[0]["markdown"] == "callback result"
+    assert result_events[0].get("source_key") is None
+    # Polling progress is still kept (covers the cloud-side plane).
+    assert any(e.get("source_key") == "p1" and e["markdown"] == "polled message" for e in merged)
+
+
+def test_list_events_merged_keeps_polling_result_when_no_callback_result(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    # No callback result ever arrives (agent failed to call record_result).
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[
+            {"source_key": "p1", "event_type": "progress", "title": None,
+             "markdown": "polled reasoning", "payload": {"polling": True}, "create_time": 1700000002.0},
+            {"source_key": "p2", "event_type": "result", "title": None,
+             "markdown": "polled final answer", "payload": {"status": "done", "polling": True}, "create_time": 1700000003.0},
+        ],
+    )
+    merged = store.list_events_merged(run["id"])
+    result_events = [e for e in merged if e["event_type"] == "result"]
+    assert len(result_events) == 1
+    assert result_events[0]["markdown"] == "polled final answer"
+    assert result_events[0].get("source_key") == "p2"
+
+
+def test_list_events_callback_only_excludes_polling(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.record_progress(
+        request_id="poll_run", conversation_key="research:poll", message="callback progress",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{"source_key": "p1", "event_type": "progress", "title": None,
+                 "markdown": "polled", "payload": {"polling": True}, "create_time": 1700000000.0}],
+    )
+    callback_only = store.list_events(run["id"])
+    assert all(e.get("source_key") is None for e in callback_only)
+    assert any(e["markdown"] == "callback progress" for e in callback_only)
+    assert all(e["markdown"] != "polled" for e in callback_only)
+    # Merged view includes both.
+    merged = store.list_events_merged(run["id"])
+    assert any(e.get("source_key") == "p1" for e in merged)
+
+
+def test_list_events_merged_orders_by_created_at(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    # Callback progress lands first (server now, lower id).
+    store.record_progress(
+        request_id="poll_run", conversation_key="research:poll", message="callback after",
+    )
+    # Polling event with an earlier create_time (higher id, but earlier timestamp)
+    # must sort BEFORE the callback event in the merged timeline.
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{"source_key": "p1", "event_type": "progress", "title": None,
+                 "markdown": "polled before", "payload": {"polling": True}, "create_time": 1700000000.0}],
+    )
+    merged = store.list_events_merged(run["id"])
+    assert merged[0]["markdown"] == "polled before"
+    assert merged[0].get("source_key") == "p1"
+    assert merged[1]["markdown"] == "callback after"
+
+
+def test_list_events_merged_drops_polling_that_repeats_question_body(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    q_body = "MCP 最核心是在帮 AI/Agent 解决什么问题？"
+    store.record_progress(
+        request_id="poll_run",
+        conversation_key="research:poll",
+        message="已设计 MCP 答题闯关，并准备好第一关题目。",
+        title="闯关玩法已开启",
+    )
+    store.ask_user(
+        request_id="poll_run",
+        conversation_key="research:poll",
+        question=q_body,
+        choices=["A", "B", "C", "D"],
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "poll_q_dup",
+            "event_type": "progress",
+            "title": None,
+            "markdown": f"可以，我们升级成 MCP 答题闯关。第一关：{q_body} A. … B. …",
+            "payload": {"polling": True},
+            "create_time": 1700000099.0,
+        }],
+    )
+    merged = store.list_events_merged(run["id"])
+    poll_rows = [e for e in merged if e.get("source_key")]
+    assert poll_rows == []
+    assert any(e["event_type"] == "question" and e["markdown"] == q_body for e in merged)
+
+
+def test_record_polling_events_rejects_unknown_run(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    with pytest.raises(KeyError):
+        store.record_polling_events(
+            run_id=999,
+            events=[{"source_key": "x", "event_type": "progress", "title": None,
+                     "markdown": "m", "payload": {}, "create_time": 1.0}],
+        )
+
+
+def test_record_polling_events_rejects_bad_event_type(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    with pytest.raises(ValueError):
+        store.record_polling_events(
+            run_id=run["id"],
+            events=[{"source_key": "x", "event_type": "plan", "title": None,
+                     "markdown": "m", "payload": {}, "create_time": 1.0}],
+        )
