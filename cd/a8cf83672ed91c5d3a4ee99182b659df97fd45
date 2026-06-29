@@ -1,0 +1,30 @@
+tests/test_web_api.py
+  s_9e18395a928954::t_a3470f5a7df035 607,622
+  s_9e18395a928954::t_2b7e5dec2bde6c 983-984,987-990,992-993,997-1000,1002
+  s_9e18395a928954::t_9125e2310bff6b 782-783,786,790-792
+  s_9e18395a928954::t_b753b5e254b27f 503-507
+  s_9e18395a928954::t_f782ef13cdf713 2-4,47-65,89-109
+  s_9e18395a928954::t_83f7764954194f 508-509,512
+  s_9e18395a928954::t_2032f0c92cea3a 531-562
+  s_9e18395a928954::t_7ccfceddb9f24a 563-564
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_9e18395a928954::t_44d6b0ea3ee0e5 38-101,192-196,203-204,278-281,288-289
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_9e18395a928954::t_d5d4cb4dd17901 877-896
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "cda8cf83672ed91c5d3a4ee99182b659df97fd45",
+  "prompts": {},
+  "sessions": {
+    "s_9e18395a928954": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1344-e0d1-7391-87d9-1ef24709fc96",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
