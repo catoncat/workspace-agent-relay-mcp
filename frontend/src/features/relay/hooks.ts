@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -9,16 +9,18 @@ import {
   deleteAgent,
   deleteConversation,
   getRunDetail,
+  getPullSyncStatus,
   postConversationPresence,
   renameAgent,
   renameConversation,
   setConversationPinned,
   setConversationInteractionMode,
+  setConversationPollingPaused,
   steerConversation,
   streamRun,
   updateAgent,
 } from '@/api/client'
-import type { Agent, Conversation, InteractionMode, Run, RunDetail } from '@/api/types'
+import type { Agent, Conversation, InteractionMode, PullSyncState, Run, RunDetail } from '@/api/types'
 import {
   bootstrapOptions,
   runDetailOptions,
@@ -69,7 +71,7 @@ export function useConversationPresence(conversationId: number | null) {
       void postConversationPresence(conversationId).catch(() => {})
     }
     ping()
-    const intervalId = window.setInterval(ping, 20_000)
+    const intervalId = window.setInterval(ping, 10_000)
     const onVisibility = () => {
       if (document.visibilityState === 'visible') ping()
     }
@@ -80,6 +82,84 @@ export function useConversationPresence(conversationId: number | null) {
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [conversationId])
+}
+
+/** Pull-mode sync pill: poller online/offline + catch-up state for the active run. */
+export function usePullSyncStatus(
+  conversationId: number | null,
+  _interactionMode: InteractionMode,
+  latestRunId: number | undefined,
+) {
+  const queryClient = useQueryClient()
+  const autoPauseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const query = useQuery({
+    queryKey: relayQueryKeys.pullSync(conversationId ?? 0),
+    queryFn: () => getPullSyncStatus(conversationId!),
+    enabled: conversationId !== null,
+    refetchInterval: (q) => {
+      const state = q.state.data?.state
+      if (state === 'syncing' || state === 'offline') return 3_000
+      if (state === 'paused') return 10_000
+      return 8_000
+    },
+  })
+
+  const resumeMutation = useMutation({
+    mutationFn: () => setConversationPollingPaused(conversationId!, false),
+    onSuccess: () => {
+      if (!conversationId) return
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.pullSync(conversationId) })
+    },
+    onError: () => {
+      toast.error('Could not resume sync')
+    },
+  })
+
+  useEffect(() => {
+    if (!conversationId) return
+    void queryClient.invalidateQueries({ queryKey: relayQueryKeys.pullSync(conversationId) })
+  }, [conversationId, latestRunId, queryClient])
+
+  useEffect(() => {
+    if (autoPauseTimer.current) {
+      window.clearTimeout(autoPauseTimer.current)
+      autoPauseTimer.current = null
+    }
+    if (!conversationId) return undefined
+    const data = query.data
+    if (!data?.visible || !data || data.polling_paused || data.state !== 'live' || data.needs_sync) return undefined
+    autoPauseTimer.current = window.setTimeout(() => {
+      void setConversationPollingPaused(conversationId, true).then(() => {
+        void queryClient.invalidateQueries({ queryKey: relayQueryKeys.pullSync(conversationId) })
+      })
+    }, 6_000)
+    return () => {
+      if (autoPauseTimer.current) {
+        window.clearTimeout(autoPauseTimer.current)
+        autoPauseTimer.current = null
+      }
+    }
+  }, [
+    conversationId,
+    query.data?.visible,
+    query.data?.state,
+    query.data?.needs_sync,
+    query.data?.polling_paused,
+    queryClient,
+  ])
+
+  const visible = query.data?.visible === true
+  const state: PullSyncState = !visible ? 'idle' : (query.data?.state ?? 'idle')
+  const intervalActiveSec = query.data?.interval_active_sec ?? 5
+
+  return {
+    visible,
+    state,
+    intervalActiveSec,
+    isLoading: query.isPending,
+    resume: () => resumeMutation.mutate(),
+    resumePending: resumeMutation.isPending,
+  }
 }
 
 /** Poll each conversation's run list; derive sidebar "working" from latest run status. */

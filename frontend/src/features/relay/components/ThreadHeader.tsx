@@ -1,8 +1,9 @@
 import { ClipboardCopy, ExternalLink, MoreHorizontal } from 'lucide-react'
 import { useCallback } from 'react'
 import { toast } from 'sonner'
-import type { Conversation, InteractionMode } from '@/api/types'
+import type { Conversation, InteractionMode, PullSyncState } from '@/api/types'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { PullSyncIndicator } from '@/features/relay/components/PullSyncIndicator'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,11 @@ type Props = {
   interactionMode?: InteractionMode
   onInteractionModeChange?: (mode: InteractionMode) => void
   interactionModePending?: boolean
+  pullSyncVisible?: boolean
+  pullSyncState?: PullSyncState
+  pullSyncIntervalSec?: number
+  onPullSyncResume?: () => void
+  pullSyncResumePending?: boolean
 }
 
 export function ThreadHeader({
@@ -34,6 +40,11 @@ export function ThreadHeader({
   interactionMode = 'relay',
   onInteractionModeChange,
   interactionModePending = false,
+  pullSyncVisible = false,
+  pullSyncState = 'idle',
+  pullSyncIntervalSec = 5,
+  onPullSyncResume,
+  pullSyncResumePending = false,
 }: Props) {
   const title = selectedConversation?.name ?? (loading ? 'Loading...' : 'No conversation selected')
   const conversationKey = selectedConversation?.conversation_key
@@ -91,6 +102,14 @@ export function ThreadHeader({
               </Button>
             ))}
           </div>
+        ) : null}
+        {pullSyncVisible ? (
+          <PullSyncIndicator
+            state={pullSyncState}
+            intervalActiveSec={pullSyncIntervalSec}
+            onResume={onPullSyncResume}
+            resumePending={pullSyncResumePending}
+          />
         ) : null}
         {hasMenuActions ? (
           <DropdownMenu>

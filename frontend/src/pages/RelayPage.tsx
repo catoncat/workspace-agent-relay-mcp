@@ -15,6 +15,7 @@ import {
   useDeleteConversation,
   useDismissRun,
   usePinConversation,
+  usePullSyncStatus,
   useRenameConversation,
   useRunDetailStream,
   useRunDetails,
@@ -84,6 +85,8 @@ export function RelayPage() {
   )
   const latestRun = runDetails[runDetails.length - 1]?.run
   const latestRunStatus = latestRun?.status
+  const interactionMode = selectedConversation?.interaction_mode ?? 'relay'
+  const pullSync = usePullSyncStatus(selectedConversationId, interactionMode, latestRun?.id)
   // Route composer sends: continue the latest run (steer) when it is in-flight
   // OR paused on ask_user (answering resumes the same turn); otherwise start a
   // new turn. steerConversation falls back to createRun on 409, so a race that
@@ -199,8 +202,13 @@ export function RelayPage() {
           loading={bootstrapQuery.isLoading}
           recentUrl={recentUrl}
           runCount={runDetails.length}
-          interactionMode={selectedConversation?.interaction_mode ?? 'relay'}
+          interactionMode={interactionMode}
           interactionModePending={setInteractionModeMutation.isPending}
+          pullSyncVisible={pullSync.visible}
+          pullSyncState={pullSync.state}
+          pullSyncIntervalSec={pullSync.intervalActiveSec}
+          onPullSyncResume={() => pullSync.resume()}
+          pullSyncResumePending={pullSync.resumePending}
           onInteractionModeChange={(mode) => {
             if (!selectedConversationId) return
             setInteractionModeMutation.mutate({ id: selectedConversationId, interaction_mode: mode })

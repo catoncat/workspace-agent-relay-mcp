@@ -18,6 +18,20 @@ export type TokenRef = {
 
 export type InteractionMode = 'relay' | 'pull'
 
+export type PullSyncState = 'idle' | 'offline' | 'syncing' | 'live' | 'paused'
+
+export type PullSyncStatus = {
+  visible: boolean
+  state: PullSyncState
+  polling_paused?: boolean
+  needs_sync?: boolean
+  poller_online: boolean
+  last_heartbeat_at?: string | null
+  interval_active_sec?: number
+  run_id?: number
+  run_status?: string
+}
+
 export type Conversation = {
   id: number
   agent_id: number
