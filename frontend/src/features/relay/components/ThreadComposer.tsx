@@ -62,11 +62,6 @@ export function ThreadComposer({
   const hasText = Boolean(text.trim())
   const isMultiline = text.includes('\n')
   const showWorkingButton = isSending || dismissing || (isAgentWorking && !hasText)
-  const statusText = isSending
-    ? 'Triggering agent…'
-    : dismissing
-      ? 'Marking turn as finished…'
-      : null
 
   const isReplying = mode === 'replying'
   const hasQueuedMessages = queuedMessages.length > 0
@@ -143,7 +138,12 @@ export function ThreadComposer({
     <footer className="shrink-0 p-3">
       <div className="mx-auto max-w-3xl">
         {hasQueuedMessages ? (
-          <div className="relative z-0 mx-2 mb-[-10px] rounded-t-2xl border border-input bg-background px-3 pt-2 pb-5 text-sm shadow-xs sm:mx-10 sm:rounded-t-3xl sm:px-4">
+          <div
+            className={cn(
+              'relative z-0 mx-2 mb-[-10px] rounded-t-2xl border border-input bg-background px-3 pt-2 pb-5 text-sm shadow-xs sm:mx-10 sm:rounded-t-3xl sm:px-4',
+              queueFlushPending && 'ring-1 ring-primary/15',
+            )}
+          >
             <div className="flex flex-col gap-1">
               {queuedMessages.map((message) => (
                 <QueuedMessageRow
@@ -158,11 +158,6 @@ export function ThreadComposer({
                 />
               ))}
             </div>
-            {queueFlushPending ? (
-              <div className="mt-1 px-7 text-xs text-muted-foreground">
-                当前回复结束后会按上方顺序合并成一条消息发送。
-              </div>
-            ) : null}
           </div>
         ) : null}
         <div
@@ -200,7 +195,6 @@ export function ThreadComposer({
             actionButton
           )}
         </div>
-        {statusText ? <div className="mt-1.5 px-1 text-xs text-muted-foreground">{statusText}</div> : null}
       </div>
     </footer>
   )
@@ -294,7 +288,11 @@ function QueuedMessageRow({
 
   return (
     <div className="flex min-h-9 items-center gap-2">
-      <CornerDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      {queueFlushPending ? (
+        <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+      ) : (
+        <CornerDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      )}
       <div className="min-w-0 flex-1 truncate text-base text-foreground">{message.text}</div>
       <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
         <Button

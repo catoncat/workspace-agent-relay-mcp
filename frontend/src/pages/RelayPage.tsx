@@ -7,7 +7,7 @@ import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
 import { WorkspaceCommandMenu } from '@/components/WorkspaceCommandMenu'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
-import type { Agent, Conversation, RelaySettings, Run, Workspace } from '@/api/types'
+import type { Agent, Conversation, RelaySettings, Run, RunDetail, Workspace } from '@/api/types'
 import { ThreadComposer, resolveComposerMode } from '@/features/relay/components/ThreadComposer'
 import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
 import {
@@ -20,6 +20,12 @@ import {
   updateQueuedMessagesForConversation,
   type QueuedMessageBuckets,
 } from '@/features/relay/queueModel'
+import {
+  addOptimisticMessage,
+  getOptimisticMessagesForConversation,
+  removeOptimisticMessage,
+  type OptimisticMessageBuckets,
+} from '@/features/relay/optimisticMessageModel'
 import {
   useBootstrap,
   useCreateConversation,
@@ -62,6 +68,7 @@ export function RelayPage() {
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false)
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false)
   const [queuedMessagesByConversation, setQueuedMessagesByConversation] = useState<QueuedMessageBuckets>({})
+  const [optimisticMessagesByConversation, setOptimisticMessagesByConversation] = useState<OptimisticMessageBuckets>({})
   const [flushQueuedConversationId, setFlushQueuedConversationId] = useState<number | null>(null)
   const queuedMessagesByConversationRef = useRef<QueuedMessageBuckets>(queuedMessagesByConversation)
   const dispatchingConversationIdsRef = useRef<Set<number>>(new Set())
@@ -88,6 +95,10 @@ export function RelayPage() {
   const queuedMessages = useMemo(
     () => getQueuedMessagesForConversation(queuedMessagesByConversation, activeConversationId),
     [activeConversationId, queuedMessagesByConversation],
+  )
+  const optimisticMessages = useMemo(
+    () => getOptimisticMessagesForConversation(optimisticMessagesByConversation, activeConversationId),
+    [activeConversationId, optimisticMessagesByConversation],
   )
   const queueFlushPending = flushQueuedConversationId === activeConversationId
 
@@ -171,6 +182,20 @@ export function RelayPage() {
     sending,
   )
 
+  const appendOptimisticMessage = useCallback((conversationId: number, text: string) => {
+    const id = nanoid()
+    setOptimisticMessagesByConversation((current) =>
+      addOptimisticMessage(current, conversationId, text, () => id),
+    )
+    return id
+  }, [])
+
+  const clearOptimisticMessage = useCallback((conversationId: number, id: string) => {
+    setOptimisticMessagesByConversation((current) =>
+      removeOptimisticMessage(current, conversationId, id),
+    )
+  }, [])
+
   useEffect(() => {
     if (visibleConversations.length === 0) {
       if (selectedConversationId && !bootstrapQuery.isFetching) {
@@ -204,12 +229,22 @@ export function RelayPage() {
       // Cmd/Ctrl+Enter is explicit guidance: reuse the current active run's
       // request_id. Normal Enter while the agent is busy only updates the local
       // FIFO queue; it is not dispatched until the queue is closed/flushed.
-      const canSteerCurrentRun = intent === 'steer' && steerTargetRun
+      const steerRun = intent === 'steer' ? steerTargetRun : null
       const localDispatchPending = dispatchingConversationIdsRef.current.has(conversationId)
-      const detail = canSteerCurrentRun
-        ? await steerMutation.mutateAsync({ input: trimmed, runId: steerTargetRun?.id })
-        : agentWorking || sending || localDispatchPending
-          ? null
+      if (!steerRun && (agentWorking || sending || localDispatchPending)) {
+        setQueuedMessagesByConversation((current) =>
+          updateQueuedMessagesForConversation(current, conversationId, (queue) =>
+            appendQueuedMessage(queue, trimmed, nanoid),
+          ),
+        )
+        return
+      }
+
+      const optimisticMessageId = appendOptimisticMessage(conversationId, trimmed)
+      let detail: RunDetail
+      try {
+        detail = steerRun
+          ? await steerMutation.mutateAsync({ input: trimmed, runId: steerRun.id })
           : await (async () => {
               dispatchingConversationIdsRef.current.add(conversationId)
               try {
@@ -219,17 +254,24 @@ export function RelayPage() {
                 throw error
               }
             })()
-      if (detail === null) {
-        setQueuedMessagesByConversation((current) =>
-          updateQueuedMessagesForConversation(current, conversationId, (queue) =>
-            appendQueuedMessage(queue, trimmed, nanoid),
-          ),
-        )
-        return
+      } catch (error) {
+        clearOptimisticMessage(conversationId, optimisticMessageId)
+        throw error
       }
+      clearOptimisticMessage(conversationId, optimisticMessageId)
       navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(conversationId), runId: String(detail.run.id) } })
     },
-    [activeConversationId, agentWorking, createRunMutation, navigate, sending, steerMutation, steerTargetRun],
+    [
+      activeConversationId,
+      agentWorking,
+      appendOptimisticMessage,
+      clearOptimisticMessage,
+      createRunMutation,
+      navigate,
+      sending,
+      steerMutation,
+      steerTargetRun,
+    ],
   )
 
   const handleDismiss = useCallback(async () => {
@@ -304,14 +346,17 @@ export function RelayPage() {
     setFlushQueuedConversationId(null)
     if (!merged) return
 
+    const optimisticMessageId = appendOptimisticMessage(conversationId, merged)
     void createRunMutation.mutateAsync(merged)
       .then((detail) => {
+        clearOptimisticMessage(conversationId, optimisticMessageId)
         navigate({
           to: '/c/$conversationId/r/$runId',
           params: { conversationId: String(conversationId), runId: String(detail.run.id) },
         })
       })
       .catch(() => {
+        clearOptimisticMessage(conversationId, optimisticMessageId)
         setQueuedMessagesByConversation((current) =>
           updateQueuedMessagesForConversation(current, conversationId, (queue) => [
             ...messagesToFlush,
@@ -322,7 +367,9 @@ export function RelayPage() {
       })
   }, [
     agentWorking,
+    appendOptimisticMessage,
     activeConversationId,
+    clearOptimisticMessage,
     createRunMutation,
     flushQueuedConversationId,
     navigate,
@@ -445,7 +492,12 @@ export function RelayPage() {
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ThreadView details={runDetails} loading={threadLoading} onSend={handleSend} />
+          <ThreadView
+            details={runDetails}
+            loading={threadLoading}
+            optimisticMessages={optimisticMessages}
+            onSend={handleSend}
+          />
         </div>
 
         <ThreadComposer

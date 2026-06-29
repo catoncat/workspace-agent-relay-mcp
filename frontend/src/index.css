@@ -230,6 +230,18 @@
   animation: fade-in-up 0.18s ease-out both;
 }
 
+@keyframes relay-message-sweep {
+  from {
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(230%) skewX(-18deg);
+  }
+}
+.animate-relay-message-sweep {
+  animation: relay-message-sweep 1.45s cubic-bezier(0.35, 0, 0.25, 1) infinite;
+}
+
 @keyframes working-node-path-a {
   0%,
   100% {

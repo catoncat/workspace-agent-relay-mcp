@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ThreadProse } from '@/components/ThreadProse'
+import type { OptimisticMessage } from '@/features/relay/optimisticMessageModel'
 import type { SendIntent } from '@/features/relay/sendIntent'
 import { cn } from '@/lib/utils'
 import {
@@ -127,13 +128,19 @@ export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
 type Props = {
   details: RunDetail[]
   loading?: boolean
+  optimisticMessages?: OptimisticMessage[]
   onSend?: (text: string, intent?: SendIntent) => void | Promise<void>
 }
 
-export function ThreadView({ details, loading = false, onSend }: Props) {
+export function ThreadView({
+  details,
+  loading = false,
+  optimisticMessages = [],
+  onSend,
+}: Props) {
   const activeDetail = useMemo(() => pickActiveRunDetail(details), [details])
 
-  if (loading) {
+  if (loading && optimisticMessages.length === 0) {
     return (
       <Conversation className="h-full">
         <ConversationContent className="mx-auto max-w-3xl gap-6">
@@ -143,7 +150,7 @@ export function ThreadView({ details, loading = false, onSend }: Props) {
     )
   }
 
-  if (details.length === 0) {
+  if (details.length === 0 && optimisticMessages.length === 0) {
     return (
       <Conversation className="h-full">
         <ConversationEmptyState
@@ -172,9 +179,27 @@ export function ThreadView({ details, loading = false, onSend }: Props) {
             authoritativeRunId={activeDetail?.run.id ?? null}
           />
         ))}
+        {optimisticMessages.map((message) => (
+          <OptimisticUserMessage key={message.id} message={message} />
+        ))}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
+  )
+}
+
+function OptimisticUserMessage({ message }: { message: OptimisticMessage }) {
+  return (
+    <Message from="user" className="animate-fade-in-up">
+      <MessageContent className="relative isolate overflow-hidden ring-1 ring-primary/15">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 z-0 w-2/3 animate-relay-message-sweep bg-gradient-to-r from-transparent via-primary/25 to-transparent opacity-80 motion-reduce:hidden"
+        />
+        <span className="sr-only">Triggering agent…</span>
+        <ThreadProse className="relative z-10">{message.text}</ThreadProse>
+      </MessageContent>
+    </Message>
   )
 }
 
