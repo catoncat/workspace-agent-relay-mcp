@@ -61,13 +61,9 @@ fi
 
 SERVER_URL="http://${WORKSPACE_AGENT_RELAY_HOST}:${WORKSPACE_AGENT_RELAY_PORT}"
 PID_FILE="${WORKSPACE_AGENT_RELAY_STATE_DIR}/relay-server.pid"
-POLLER_PID_FILE="${WORKSPACE_AGENT_RELAY_STATE_DIR}/hermes-poller.pid"
-POLLER_LOG="${WORKSPACE_AGENT_RELAY_STATE_DIR}/hermes-poller.log"
-HERMES_CDP="${HERMES_CDP:-http://127.0.0.1:9223}"
 SERVER_PID=""
 SERVER_OWNED=false
 CLOUDFLARED_PID=""
-POLLER_PID=""
 
 relay_health_ok() {
   python - <<'PY'
@@ -193,96 +189,9 @@ relay_supervisor_healthy() {
   relay_health_ok
 }
 
-resolve_hermes_agent_id() {
-  if [[ -n "${HERMES_AGENT_ID:-}" ]]; then
-    echo "$HERMES_AGENT_ID"
-    return 0
-  fi
-  python - <<'PY'
-import os
-import sqlite3
-
-state = os.environ.get("WORKSPACE_AGENT_RELAY_STATE_DIR", "")
-db = os.path.join(state, "relay.sqlite")
-if not os.path.isfile(db):
-    raise SystemExit(0)
-conn = sqlite3.connect(db)
-row = conn.execute(
-    "SELECT hermes_agent_id FROM agents WHERE hermes_agent_id IS NOT NULL AND TRIM(hermes_agent_id) != '' ORDER BY id LIMIT 1"
-).fetchone()
-if row and row[0]:
-    print(row[0].strip())
-PY
-}
-
-cdp_health_ok() {
-  python - <<'PY'
-import os
-import sys
-import urllib.request
-
-cdp = os.environ.get("HERMES_CDP", "http://127.0.0.1:9223").rstrip("/")
-try:
-    with urllib.request.urlopen(f"{cdp}/json/version", timeout=1.5) as response:
-        body = response.read(256).decode("utf-8", "replace")
-except OSError:
-    sys.exit(1)
-if "Browser" not in body:
-    sys.exit(1)
-PY
-}
-
-poller_healthy() {
-  if [[ -z "$POLLER_PID" && -f "$POLLER_PID_FILE" ]]; then
-    POLLER_PID="$(cat "$POLLER_PID_FILE" 2>/dev/null || true)"
-  fi
-  [[ -n "$POLLER_PID" ]] && kill -0 "$POLLER_PID" >/dev/null 2>&1
-}
-
-start_poller() {
-  local agent_id
-  agent_id="$(resolve_hermes_agent_id || true)"
-  if [[ -z "$agent_id" ]]; then
-    echo "Hermes poller skipped: set HERMES_AGENT_ID or bind agents.hermes_agent_id in relay DB." >&2
-    return 0
-  fi
-  if ! cdp_health_ok; then
-    echo "Hermes poller skipped: relay Chrome CDP not reachable at ${HERMES_CDP}." >&2
-    return 0
-  fi
-  HERMES_CDP="$HERMES_CDP" python scripts/hermes_poller_cdp.py \
-    --agent "$agent_id" \
-    --cdp "$HERMES_CDP" \
-    --interval 20 \
-    --limit 15 \
-    --pages 1 >>"$POLLER_LOG" 2>&1 &
-  POLLER_PID=$!
-  echo "$POLLER_PID" >"$POLLER_PID_FILE"
-  echo "Started Hermes poller pid=${POLLER_PID} agent=${agent_id}" >&2
-}
-
-ensure_poller() {
-  if poller_healthy; then
-    return 0
-  fi
-  POLLER_PID=""
-  start_poller
-}
-
 cleanup() {
   if [[ -n "$CLOUDFLARED_PID" ]]; then
     kill "$CLOUDFLARED_PID" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "$POLLER_PID" ]]; then
-    kill "$POLLER_PID" >/dev/null 2>&1 || true
-    rm -f "$POLLER_PID_FILE"
-  elif [[ -f "$POLLER_PID_FILE" ]]; then
-    local old_pid
-    old_pid="$(cat "$POLLER_PID_FILE" 2>/dev/null || true)"
-    if [[ -n "$old_pid" ]]; then
-      kill "$old_pid" >/dev/null 2>&1 || true
-    fi
-    rm -f "$POLLER_PID_FILE"
   fi
   if [[ "$SERVER_OWNED" == true && -n "$SERVER_PID" ]]; then
     kill "$SERVER_PID" >/dev/null 2>&1 || true
@@ -292,15 +201,9 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 ensure_relay_server
-ensure_poller
 
 echo "Dashboard: ${SERVER_URL}/"
 echo "MCP endpoint: ${SERVER_URL}/mcp"
-if poller_healthy; then
-  echo "Hermes poller: running (pid=${POLLER_PID}, log=${POLLER_LOG})"
-else
-  echo "Hermes poller: not running (see ${POLLER_LOG})"
-fi
 
 if command -v cloudflared >/dev/null 2>&1; then
   if [[ -n "${WORKSPACE_AGENT_RELAY_CLOUDFLARED_CONFIG:-}" ]]; then
@@ -322,7 +225,6 @@ if command -v cloudflared >/dev/null 2>&1; then
       echo "Relay server became unhealthy; stopping tunnel." >&2
       exit 1
     fi
-    ensure_poller
     if ! kill -0 "$CLOUDFLARED_PID" >/dev/null 2>&1; then
       wait "$CLOUDFLARED_PID"
       exit $?
@@ -335,7 +237,6 @@ else
     wait "$SERVER_PID"
   else
     while relay_supervisor_healthy; do
-      ensure_poller
       sleep 2
     done
     echo "Relay server became unhealthy." >&2

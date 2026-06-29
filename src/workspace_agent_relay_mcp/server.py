@@ -56,7 +56,6 @@ LOCAL_STATE_TOOL = {
 }
 
 MCP_INSTRUCTIONS = (
-    "If the trigger input includes relay_mode: pull, do NOT use tools on this server for that turn — the operator reads your visible ChatGPT messages via polling instead.\n"
     "This server (workspace-agent-relay-mcp) is the local operator's only window into the current turn. "
     "They cannot see ChatGPT-side planning, reasoning, or chat replies — only what you write here "
     "(and local tool traces after bind_relay_run on your local-ops MCP).\n"

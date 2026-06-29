@@ -1,4 +1,3 @@
-import type { InteractionMode } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,7 +10,6 @@ type ComposerMode = 'idle' | 'sending' | 'waiting' | 'replying'
 
 type Props = {
   conversationKey?: string
-  interactionMode?: InteractionMode
   disabled?: boolean
   dismissing?: boolean
   mode?: ComposerMode
@@ -22,7 +20,6 @@ type Props = {
 export function ThreadComposer({
   disabled = false,
   dismissing = false,
-  interactionMode = 'relay',
   mode = 'idle',
   onDismiss,
   onSend,
@@ -47,9 +44,7 @@ export function ThreadComposer({
         ? 'Add instruction to current work…'
         : isReplying
           ? 'Answer the agent…'
-          : interactionMode === 'pull'
-            ? 'Send a task (pull mode — results via chat polling)…'
-            : 'Send a task to the Workspace Agent…'
+          : 'Send a task to the Workspace Agent…'
 
   const submit = async () => {
     const trimmed = text.trim()
