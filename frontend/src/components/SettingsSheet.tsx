@@ -1,18 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
-import { Bot, Check, ChevronDown, Folder, Info, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
+import { Bot, Check, KeyRound, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Agent, RelaySettings, Workspace } from '@/api/types'
+import type { Agent, RelaySettings } from '@/api/types'
 import { Button } from '@/components/ui/button'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Input } from '@/components/ui/input'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
 import {
   Dialog,
   DialogContent,
@@ -21,15 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Input } from '@/components/ui/input'
 import {
   useCreateAgent,
   useDeleteAgent,
-  useDeleteWorkspace,
   useRenameAgent,
   useUpdateAgent,
   useUpdateSettings,
-  useUpdateWorkspace,
 } from '@/features/relay/hooks'
 import { cn } from '@/lib/utils'
 
@@ -40,8 +29,14 @@ type Props = {
   onTokenChange: (value: string) => void
   agents: Agent[]
   settings: RelaySettings
-  workspaces: Workspace[]
 }
+
+type SettingsPanel = 'connection' | 'agents'
+
+const PANELS: Array<{ id: SettingsPanel; label: string }> = [
+  { id: 'connection', label: 'Connection' },
+  { id: 'agents', label: 'Agents' },
+]
 
 export function SettingsSheet({
   open,
@@ -50,34 +45,50 @@ export function SettingsSheet({
   onTokenChange,
   agents,
   settings,
-  workspaces,
 }: Props) {
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
-        <TooltipProvider delay={200}>
-          <SheetHeader>
-            <SheetTitle>Settings</SheetTitle>
-            <SheetDescription>Connect this browser and choose the local execution context.</SheetDescription>
-          </SheetHeader>
+  const [activePanel, setActivePanel] = useState<SettingsPanel>('agents')
 
-          <div className="flex flex-col gap-8 px-4 pb-8">
-            <ConnectionSection token={token} onTokenChange={onTokenChange} />
-            <CurrentAgentSection agents={agents} currentAgentId={settings.current_agent_id} />
-            <WorkspacesSection
-              workspaces={workspaces}
-              currentWorkspaceId={settings.current_workspace_id}
-            />
-            <AgentsSection agents={agents} />
-            <AddAgentSection />
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[min(720px,calc(100svh-1rem))] w-[min(760px,calc(100vw-1rem))] max-w-none flex-col overflow-hidden p-0 sm:max-w-none">
+        <DialogHeader className="border-b px-4 py-3 pr-11 sm:px-5">
+          <DialogTitle className="text-base">Settings</DialogTitle>
+          <DialogDescription className="sr-only">Workspace Agent Relay settings</DialogDescription>
+        </DialogHeader>
+
+        <div className="border-b px-3 py-2 sm:px-4">
+          <div className="grid grid-cols-2 rounded-lg bg-muted p-1">
+            {PANELS.map((panel) => (
+              <button
+                key={panel.id}
+                type="button"
+                onClick={() => setActivePanel(panel.id)}
+                className={cn(
+                  'h-8 rounded-md text-sm font-medium transition-colors',
+                  activePanel === panel.id
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {panel.label}
+              </button>
+            ))}
           </div>
-        </TooltipProvider>
-      </SheetContent>
-    </Sheet>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {activePanel === 'connection' ? (
+            <ConnectionPanel token={token} onTokenChange={onTokenChange} />
+          ) : (
+            <AgentsPanel agents={agents} currentAgentId={settings.current_agent_id} />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-function ConnectionSection({
+function ConnectionPanel({
   token,
   onTokenChange,
 }: {
@@ -85,579 +96,186 @@ function ConnectionSection({
   onTokenChange: (value: string) => void
 }) {
   return (
-    <section className="space-y-3">
-      <SectionHeading
-        title="Connection"
-        hint="Matches the relay server's access password. Saved only in this browser."
-      />
+    <div className="mx-auto w-full max-w-xl p-4 sm:p-6">
       <div className="space-y-2">
-        <label htmlFor="relay-token" className="text-sm font-medium leading-none">
+        <label htmlFor="relay-token" className="flex items-center gap-2 text-sm font-medium">
+          <KeyRound className="size-4 text-muted-foreground" />
           Access password
         </label>
         <Input
           id="relay-token"
           type="password"
           value={token}
-          onChange={(e) => onTokenChange(e.target.value)}
+          onChange={(event) => onTokenChange(event.target.value)}
           placeholder="Enter relay password"
           autoComplete="off"
         />
       </div>
-    </section>
+    </div>
   )
 }
 
-function CurrentAgentSection({
-  agents,
-  currentAgentId,
-}: {
-  agents: Agent[]
-  currentAgentId: number | null
-}) {
-  const updateSettingsMutation = useUpdateSettings()
+function AgentsPanel({ agents, currentAgentId }: { agents: Agent[]; currentAgentId: number | null }) {
+  const [addOpen, setAddOpen] = useState(false)
 
   return (
-    <section className="space-y-3">
-      <SectionHeading
-        title="Current backend"
-        hint="New threads use this Workspace Agent backend. Workspaces control the directory; this only chooses the executor."
-      />
+    <div className="p-3 sm:p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-sm text-muted-foreground">{agents.length} configured</div>
+        <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+          <Plus />
+          Add agent
+        </Button>
+      </div>
+
       {agents.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No backend configured. Add one below.</p>
+        <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-lg border border-dashed text-center">
+          <Bot className="size-5 text-muted-foreground" />
+          <Button type="button" size="sm" onClick={() => setAddOpen(true)}>
+            <Plus />
+            Add agent
+          </Button>
+        </div>
       ) : (
-        <ul className="divide-y rounded-lg border">
-          {agents.map((agent) => {
-            const active = agent.id === currentAgentId
-            return (
-              <li key={agent.id} className="flex items-center gap-2 px-3 py-2.5">
-                <Bot className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{agent.name}</span>
-                {!agent.token_configured ? (
-                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                    No token
-                  </span>
-                ) : null}
-                {active ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                    <Check className="size-3" />
-                    Current
-                  </span>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={updateSettingsMutation.isPending}
-                    onClick={() =>
-                      updateSettingsMutation.mutate(
-                        { current_agent_id: agent.id },
-                        { onSuccess: () => toast.success('Current backend updated') },
-                      )
-                    }
-                  >
-                    Use
-                  </Button>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-function WorkspacesSection({
-  workspaces,
-  currentWorkspaceId,
-}: {
-  workspaces: Workspace[]
-  currentWorkspaceId: number | null
-}) {
-  const updateSettingsMutation = useUpdateSettings()
-
-  return (
-    <section className="space-y-3">
-      <SectionHeading
-        title="Workspaces"
-        hint="A workspace is a named local directory. New threads inherit the current workspace; each run stores a directory snapshot."
-      />
-      <ul className="divide-y rounded-lg border">
-        <li className="flex items-center gap-2 px-3 py-2.5">
-          <Folder className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">无目录</span>
-            <span className="block truncate text-xs text-muted-foreground">Do not send working_directory</span>
-          </span>
-          {currentWorkspaceId === null ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              <Check className="size-3" />
-              Current
-            </span>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={updateSettingsMutation.isPending}
-              onClick={() =>
-                updateSettingsMutation.mutate(
-                  { current_workspace_id: null },
-                  { onSuccess: () => toast.success('Workspace cleared') },
-                )
-              }
-            >
-              Use
-            </Button>
-          )}
-        </li>
-        {workspaces.map((workspace) => (
-          <WorkspaceRow
-            key={workspace.id}
-            workspace={workspace}
-            active={workspace.id === currentWorkspaceId}
-          />
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-function WorkspaceRow({ workspace, active }: { workspace: Workspace; active: boolean }) {
-  const updateSettingsMutation = useUpdateSettings()
-  const updateWorkspaceMutation = useUpdateWorkspace()
-  const deleteWorkspaceMutation = useDeleteWorkspace()
-  const [isEditing, setIsEditing] = useState(false)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-  const [draftName, setDraftName] = useState(workspace.name)
-  const [draftDirectory, setDraftDirectory] = useState(workspace.working_directory ?? '')
-
-  useEffect(() => {
-    setDraftName(workspace.name)
-    setDraftDirectory(workspace.working_directory ?? '')
-  }, [workspace.name, workspace.working_directory])
-
-  const commitUpdate = useCallback(async () => {
-    const name = draftName.trim()
-    const directory = draftDirectory.trim()
-    if (!name) {
-      toast.error('Workspace name is required')
-      return
-    }
-    try {
-      await updateWorkspaceMutation.mutateAsync({
-        id: workspace.id,
-        name,
-        working_directory: directory || null,
-      })
-      toast.success('Workspace updated')
-      setIsEditing(false)
-    } catch {
-      // toast handled by mutation
-    }
-  }, [draftDirectory, draftName, updateWorkspaceMutation, workspace.id])
-
-  const handleDelete = useCallback(async () => {
-    try {
-      await deleteWorkspaceMutation.mutateAsync(workspace.id)
-      toast.success('Workspace deleted')
-      setDeleteOpen(false)
-    } catch {
-      // toast handled by mutation
-    }
-  }, [deleteWorkspaceMutation, workspace.id])
-
-  return (
-    <li className="px-3 py-2.5">
-      <Dialog
-        open={deleteOpen}
-        onOpenChange={(open) => !deleteWorkspaceMutation.isPending && setDeleteOpen(open)}
-      >
-        {isEditing ? (
-          <div className="space-y-2">
-            <Input
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              placeholder="Workspace name"
-              autoComplete="off"
-            />
-            <Input
-              value={draftDirectory}
-              onChange={(event) => setDraftDirectory(event.target.value)}
-              placeholder="/absolute/path/to/repo"
-              autoComplete="off"
-            />
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                disabled={updateWorkspaceMutation.isPending}
-                onClick={() => void commitUpdate()}
-              >
-                Save
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setDraftName(workspace.name)
-                  setDraftDirectory(workspace.working_directory ?? '')
-                  setIsEditing(false)
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Folder className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{workspace.name}</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {workspace.working_directory || 'No directory'}
-              </span>
-            </span>
-            {active ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                <Check className="size-3" />
-                Current
-              </span>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={updateSettingsMutation.isPending}
-                onClick={() =>
-                  updateSettingsMutation.mutate(
-                    { current_workspace_id: workspace.id },
-                    { onSuccess: () => toast.success('Current workspace updated') },
-                  )
-                }
-              >
-                Use
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground"
-              title={`Edit ${workspace.name}`}
-              onClick={() => setIsEditing(true)}
-            >
-              <Pencil />
-              <span className="sr-only">Edit {workspace.name}</span>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground hover:text-destructive"
-              title={`Delete ${workspace.name}`}
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 />
-              <span className="sr-only">Delete {workspace.name}</span>
-            </Button>
-          </div>
-        )}
-        <DialogContent className="gap-3" showCloseButton={false}>
-          <DialogHeader className="gap-1.5">
-            <DialogTitle>Delete workspace?</DialogTitle>
-            <DialogDescription>
-              Threads in "{workspace.name}" move to 无目录. Existing run directory snapshots are kept.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={deleteWorkspaceMutation.isPending}
-              onClick={() => setDeleteOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleteWorkspaceMutation.isPending}
-              onClick={() => void handleDelete()}
-            >
-              {deleteWorkspaceMutation.isPending ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </li>
-  )
-}
-
-function AgentsSection({ agents }: { agents: Agent[] }) {
-  const renameAgentMutation = useRenameAgent()
-  const deleteAgentMutation = useDeleteAgent()
-
-  return (
-    <section className="space-y-3">
-      <SectionHeading
-        title="Execution backends"
-        hint="Each backend maps to a Workspace Agent trigger. Names are only for your dashboard."
-      />
-      {agents.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No backends yet. Add one below.</p>
-      ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y rounded-lg border bg-background">
           {agents.map((agent) => (
-            <AgentRow
-              key={agent.id}
-              agent={agent}
-              onRename={async (name) => {
-                await renameAgentMutation.mutateAsync({ id: agent.id, name })
-                toast.success('Backend renamed')
-              }}
-              onDelete={async () => {
-                await deleteAgentMutation.mutateAsync(agent.id)
-                toast.success('Backend deleted')
-              }}
-              deleting={deleteAgentMutation.isPending}
-            />
+            <AgentRow key={agent.id} agent={agent} current={agent.id === currentAgentId} />
           ))}
         </ul>
       )}
-    </section>
+
+      <AddAgentDialog open={addOpen} onOpenChange={setAddOpen} />
+    </div>
   )
 }
 
-function AgentRow({
-  agent,
-  onRename,
-  onDelete,
-  deleting = false,
-}: {
-  agent: Agent
-  onRename: (name: string) => void | Promise<unknown>
-  onDelete: () => void | Promise<unknown>
-  deleting?: boolean
-}) {
+function AgentRow({ agent, current }: { agent: Agent; current: boolean }) {
+  const renameAgentMutation = useRenameAgent()
   const updateAgentMutation = useUpdateAgent()
-  const [isRenaming, setIsRenaming] = useState(false)
-  const [isEditingToken, setIsEditingToken] = useState(false)
+  const updateSettingsMutation = useUpdateSettings()
+  const deleteAgentMutation = useDeleteAgent()
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [draftName, setDraftName] = useState(agent.name)
-  const [draftToken, setDraftToken] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [name, setName] = useState(agent.name)
+  const [accessToken, setAccessToken] = useState('')
 
   useEffect(() => {
-    setDraftName(agent.name)
-  }, [agent.name])
+    setName(agent.name)
+    setAccessToken('')
+  }, [agent.id, agent.name])
 
-  useEffect(() => {
-    if (isRenaming) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
-  }, [isRenaming])
+  const canSaveName = name.trim().length > 0 && name.trim() !== agent.name && !renameAgentMutation.isPending
+  const canSaveToken = accessToken.trim().length > 0 && !updateAgentMutation.isPending
 
-  const commitRename = useCallback(async () => {
-    const trimmed = draftName.trim()
-    if (!trimmed) {
-      setDraftName(agent.name)
-      setIsRenaming(false)
-      return
-    }
-    if (trimmed !== agent.name) {
-      try {
-        await onRename(trimmed)
-      } catch {
-        setDraftName(agent.name)
-      }
-    }
-    setIsRenaming(false)
-  }, [agent.name, draftName, onRename])
-
-  const commitToken = useCallback(async () => {
-    const trimmed = draftToken.trim()
-    if (!trimmed) {
-      setIsEditingToken(false)
-      setDraftToken('')
-      return
-    }
+  async function handleUseCurrent() {
     try {
-      await updateAgentMutation.mutateAsync({ id: agent.id, access_token: trimmed })
-      toast.success('Access token saved')
-      setDraftToken('')
-      setIsEditingToken(false)
+      await updateSettingsMutation.mutateAsync({ current_agent_id: agent.id })
+      toast.success('Current agent updated')
     } catch {
       // toast handled in mutation
     }
-  }, [agent.id, draftToken, updateAgentMutation])
+  }
 
-  const handleDelete = useCallback(async () => {
+  async function handleSaveName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!canSaveName) return
     try {
-      await onDelete()
+      await renameAgentMutation.mutateAsync({ id: agent.id, name: name.trim() })
+      toast.success('Agent renamed')
+    } catch {
+      setName(agent.name)
+    }
+  }
+
+  async function handleSaveToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!canSaveToken) return
+    try {
+      await updateAgentMutation.mutateAsync({ id: agent.id, access_token: accessToken.trim() })
+      setAccessToken('')
+      toast.success('Access token saved')
+    } catch {
+      // toast handled in mutation
+    }
+  }
+
+  async function handleDelete() {
+    try {
+      await deleteAgentMutation.mutateAsync(agent.id)
+      toast.success('Agent deleted')
       setDeleteOpen(false)
     } catch {
       // toast handled in mutation
     }
-  }, [onDelete])
+  }
 
   return (
-    <li className="px-3 py-2.5">
-      <Dialog open={deleteOpen} onOpenChange={(open) => !deleting && setDeleteOpen(open)}>
-      <div className="flex items-center gap-2">
-        <Bot className="size-4 shrink-0 text-muted-foreground" />
-        {isRenaming ? (
-          <input
-            ref={inputRef}
-            value={draftName}
-            aria-label={`Rename ${agent.name}`}
-            onChange={(e) => setDraftName(e.target.value)}
-            onBlur={() => void commitRename()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                void commitRename()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                setDraftName(agent.name)
-                setIsRenaming(false)
-              }
-            }}
-            className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/50"
-          />
-        ) : (
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">{agent.name}</span>
-        )}
-        <div className="flex shrink-0 items-center gap-0.5">
-          {!agent.token_configured ? (
-            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-              No token
-            </span>
-          ) : null}
-          {!isRenaming ? (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground"
-          title={`Rename ${agent.name}`}
-              onClick={() => setIsRenaming(true)}
-            >
-              <Pencil />
-              <span className="sr-only">Rename {agent.name}</span>
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-destructive"
-            title={`Delete ${agent.name}`}
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2 />
-            <span className="sr-only">Delete {agent.name}</span>
-          </Button>
-          <InfoTip>
-            <div className="space-y-1.5 font-mono text-[11px] leading-relaxed">
-              <p>
-                <span className="text-background/70">Trigger</span>
-                <br />
-                {agent.trigger_id || '—'}
-              </p>
-              <p>
-                <span className="text-background/70">URL</span>
-                <br />
-                {agent.trigger_url || '—'}
-              </p>
-              <p>
-                <span className="text-background/70">Token</span>
-                <br />
-                {agent.token_configured ? 'Configured (stored on relay)' : 'Not configured'}
-              </p>
+    <li className="p-3 sm:p-4">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          <Bot className="size-4" />
+        </span>
+
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium">{agent.name}</span>
+                {current ? <StatusPill tone="primary">Current</StatusPill> : null}
+                {!agent.token_configured ? <StatusPill tone="warning">No token</StatusPill> : null}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">{agent.trigger_id || 'No trigger id'}</div>
             </div>
-          </InfoTip>
-        </div>
-      </div>
-      {isEditingToken ? (
-        <div className="mt-2 space-y-2 pl-6">
-          <Input
-            autoFocus
-            type="password"
-            value={draftToken}
-            onChange={(e) => setDraftToken(e.target.value)}
-            placeholder="Paste Workspace Agent access token"
-            autoComplete="off"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                void commitToken()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                setIsEditingToken(false)
-                setDraftToken('')
-              }
-            }}
-          />
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              size="sm"
-              disabled={updateAgentMutation.isPending || !draftToken.trim()}
-              onClick={() => void commitToken()}
-            >
-              Save token
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setIsEditingToken(false)
-                setDraftToken('')
-              }}
-            >
-              Cancel
+            {!current ? (
+              <Button type="button" size="sm" variant="outline" disabled={updateSettingsMutation.isPending} onClick={() => void handleUseCurrent()}>
+                <Check />
+                Use
+              </Button>
+            ) : null}
+            <Button type="button" size="icon-sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setDeleteOpen(true)}>
+              <Trash2 />
+              <span className="sr-only">Delete {agent.name}</span>
             </Button>
           </div>
+
+          <form onSubmit={handleSaveName} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <Input value={name} onChange={(event) => setName(event.target.value)} autoComplete="off" aria-label={`Name for ${agent.name}`} />
+            <Button type="submit" variant="outline" disabled={!canSaveName} className="sm:w-20">
+              Save
+            </Button>
+          </form>
+
+          <div className="truncate rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
+            {agent.trigger_url || 'No trigger URL'}
+          </div>
+
+          <form onSubmit={handleSaveToken} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <Input
+              type="password"
+              value={accessToken}
+              onChange={(event) => setAccessToken(event.target.value)}
+              placeholder={agent.token_configured ? 'Replace access token' : 'Paste access token'}
+              autoComplete="off"
+              aria-label={`Access token for ${agent.name}`}
+            />
+            <Button type="submit" variant="outline" disabled={!canSaveToken} className="sm:w-20">
+              Save
+            </Button>
+          </form>
         </div>
-      ) : (
-        <div className="mt-1.5 pl-6">
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="h-auto px-0 text-xs text-muted-foreground"
-            onClick={() => setIsEditingToken(true)}
-          >
-            {agent.token_configured ? 'Update access token' : 'Add access token'}
-          </Button>
-        </div>
-      )}
+      </div>
+
+      <Dialog open={deleteOpen} onOpenChange={(value) => !deleteAgentMutation.isPending && setDeleteOpen(value)}>
         <DialogContent className="gap-3" showCloseButton={false}>
           <DialogHeader className="gap-1.5">
-            <DialogTitle>Delete backend?</DialogTitle>
-            <DialogDescription>
-              This permanently removes "{agent.name}" and all of its threads and run history from this
-              relay.
-            </DialogDescription>
+            <DialogTitle>Delete agent?</DialogTitle>
+            <DialogDescription>This removes "{agent.name}" from this relay.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={deleting}
-              onClick={() => setDeleteOpen(false)}
-            >
+            <Button variant="outline" size="sm" disabled={deleteAgentMutation.isPending} onClick={() => setDeleteOpen(false)}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={deleting}
-              onClick={() => void handleDelete()}
-            >
-              {deleting ? 'Deleting...' : 'Delete'}
+            <Button variant="destructive" size="sm" disabled={deleteAgentMutation.isPending} onClick={() => void handleDelete()}>
+              {deleteAgentMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -666,9 +284,8 @@ function AgentRow({
   )
 }
 
-function AddAgentSection() {
+function AddAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const createAgentMutation = useCreateAgent()
-  const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [triggerUrl, setTriggerUrl] = useState('')
   const [accessToken, setAccessToken] = useState('')
@@ -679,137 +296,94 @@ function AddAgentSection() {
     triggerUrl.trim().length > 0 &&
     accessToken.trim().length > 0
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function reset() {
+    setName('')
+    setTriggerUrl('')
+    setAccessToken('')
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!canSubmit) return
-    createAgentMutation.mutate(
-      {
+    try {
+      await createAgentMutation.mutateAsync({
         name: name.trim(),
         trigger_url: triggerUrl.trim(),
         access_token: accessToken.trim(),
-      },
-      {
-        onSuccess: () => {
-          toast.success('Agent added')
-          setName('')
-          setTriggerUrl('')
-          setAccessToken('')
-          setOpen(false)
-        },
-      },
-    )
+      })
+      toast.success('Agent added')
+      reset()
+      onOpenChange(false)
+    } catch {
+      // toast handled in mutation
+    }
   }
 
   return (
-    <section>
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger
-          className={cn(
-            'flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-2.5 text-sm font-medium transition-colors',
-            'hover:bg-muted/50 data-panel-open:bg-muted/30',
-          )}
-        >
-          <Plus className="size-4 text-muted-foreground" />
-          <span className="flex-1 text-left">Add backend</span>
-          <ChevronDown className="size-4 text-muted-foreground transition-transform data-panel-open:rotate-180" />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-3">
-          <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border bg-muted/20 p-3">
-            <div className="space-y-2">
-              <label htmlFor="agent-name" className="text-sm font-medium">
-                Name
-              </label>
-              <Input
-                id="agent-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Work backend"
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="agent-trigger-url" className="text-sm font-medium">
-                  Trigger URL
-                </label>
-                <InfoTip side="top">
-                  Paste the trigger URL from your Workspace Agent settings in ChatGPT.
-                </InfoTip>
-              </div>
-              <Input
-                id="agent-trigger-url"
-                value={triggerUrl}
-                onChange={(e) => setTriggerUrl(e.target.value)}
-                placeholder="https://api.chatgpt.com/v1/workspace_agents/…/trigger"
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="agent-access-token" className="text-sm font-medium">
-                  Access token
-                </label>
-                <InfoTip side="top">
-                  From the same Workspace Agent settings page in ChatGPT. Stored on this relay only;
-                  never sent back to the browser after save.
-                </InfoTip>
-              </div>
-              <Input
-                id="agent-access-token"
-                type="password"
-                value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
-                placeholder="at-…"
-                autoComplete="off"
-              />
-            </div>
-
-            <Button type="submit" disabled={!canSubmit} className="w-full">
-              {createAgentMutation.isPending ? 'Adding...' : 'Add backend'}
+    <Dialog open={open} onOpenChange={(value) => !createAgentMutation.isPending && onOpenChange(value)}>
+      <DialogContent className="w-[min(440px,calc(100vw-1rem))] gap-4">
+        <DialogHeader className="gap-1.5">
+          <DialogTitle>Add agent</DialogTitle>
+          <DialogDescription className="sr-only">Add Workspace Agent connection</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-2">
+            <label htmlFor="agent-name" className="text-sm font-medium">
+              Name
+            </label>
+            <Input id="agent-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="off" />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="agent-trigger-url" className="text-sm font-medium">
+              Trigger URL
+            </label>
+            <Input id="agent-trigger-url" value={triggerUrl} onChange={(event) => setTriggerUrl(event.target.value)} autoComplete="off" />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="agent-access-token" className="text-sm font-medium">
+              Access token
+            </label>
+            <Input
+              id="agent-access-token"
+              type="password"
+              value={accessToken}
+              onChange={(event) => setAccessToken(event.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={createAgentMutation.isPending}
+              onClick={() => {
+                reset()
+                onOpenChange(false)
+              }}
+            >
+              Cancel
             </Button>
-          </form>
-        </CollapsibleContent>
-      </Collapsible>
-    </section>
+            <Button type="submit" disabled={!canSubmit}>
+              {createAgentMutation.isPending ? 'Adding...' : 'Add'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-function SectionHeading({ title, hint }: { title: string; hint: string }) {
+function StatusPill({ children, tone }: { children: string; tone: 'primary' | 'warning' }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <InfoTip side="top">{hint}</InfoTip>
-    </div>
-  )
-}
-
-function InfoTip({
-  children,
-  side = 'left',
-}: {
-  children: ReactNode
-  side?: 'top' | 'left' | 'right' | 'bottom'
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="size-7 text-muted-foreground hover:text-foreground"
-          >
-            <Info className="size-3.5" />
-            <span className="sr-only">More info</span>
-          </Button>
-        }
-      />
-      <TooltipContent side={side} className="max-w-xs text-left font-sans">
-        {children}
-      </TooltipContent>
-    </Tooltip>
+    <span
+      className={cn(
+        'inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+        tone === 'primary'
+          ? 'bg-primary/10 text-primary'
+          : 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+      )}
+    >
+      {children}
+    </span>
   )
 }
