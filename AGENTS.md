@@ -83,6 +83,8 @@ cd frontend && pnpm run build          # 前端，TS 与构建均须零错误
 
 - dashboard 与 SSE 只读取本仓 callback/local tool trace 事件（`list_events`）。
 - trigger 输入固定使用 `request_id` + `conversation_key` + `relay_mcp: workspace-agent-relay-mcp`；不存在 pull mode 分支。
+- dashboard composer 默认 **排队/新请求**：创建新的 `request_id`，不把旧 active run 标为 `superseded`。
+- **引导**（steer）必须由 UI 显式触发或 `Cmd+Enter` 触发：复用目标 run 的 `request_id`，只改变当前 run 的计划/方向，不单独收盘。
 
 ## 6. 文档沉淀
 

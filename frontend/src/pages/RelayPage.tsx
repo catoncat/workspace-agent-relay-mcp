@@ -21,7 +21,8 @@ import {
   useSteer,
   useWorkingConversationIds,
 } from '@/features/relay/hooks'
-import { shouldSteerLatestRun } from '@/lib/runStatus'
+import type { SendIntent } from '@/features/relay/sendIntent'
+import { RUN_TERMINAL_STATUSES } from '@/lib/runStatus'
 import { useAuth } from '@/providers/AuthContext'
 
 const EMPTY_AGENTS: Agent[] = []
@@ -78,21 +79,28 @@ export function RelayPage() {
     () => runDetails.map((detail) => detail.run.conversation_url).find(Boolean) ?? null,
     [runDetails],
   )
-  const latestRun = runDetails[runDetails.length - 1]?.run
-  const latestRunStatus = latestRun?.status
-  // Route composer sends: continue the latest run (steer) when it is in-flight
-  // OR paused on ask_user (answering resumes the same turn); otherwise start a
-  // new turn. steerConversation falls back to createRun on 409, so a race that
-  // turns the run terminal between SSE status and send is still safe.
-  const shouldSteer = shouldSteerLatestRun(latestRunStatus)
+  const selectedRun = selectedRunId
+    ? runDetails.find((detail) => detail.run.id === selectedRunId)?.run
+    : null
+  const latestActiveRun = useMemo(() => {
+    for (let index = runDetails.length - 1; index >= 0; index -= 1) {
+      const run = runDetails[index]?.run
+      if (run && !RUN_TERMINAL_STATUSES.has(run.status)) return run
+    }
+    return null
+  }, [runDetails])
+  const steerTargetRun = selectedRun && !RUN_TERMINAL_STATUSES.has(selectedRun.status)
+    ? selectedRun
+    : latestActiveRun
+  const steerTargetStatus = steerTargetRun?.status
   const sending = createRunMutation.isPending || steerMutation.isPending
-  const composerMode = resolveComposerMode(latestRunStatus, sending)
+  const composerMode = resolveComposerMode(steerTargetStatus, sending)
 
   const conversationIds = useMemo(() => conversations.map((c) => c.id), [conversations])
   const workingConversationIds = useWorkingConversationIds(
     conversationIds,
     selectedConversationId,
-    latestRunStatus,
+    steerTargetStatus,
     sending,
   )
 
@@ -117,26 +125,23 @@ export function RelayPage() {
   }, [navigate, runDetails, selectedConversationId, selectedRunId])
 
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, intent: SendIntent = 'queue') => {
       const trimmed = text.trim()
       if (!trimmed || !selectedConversationId) return
-      // If the latest run is in-flight OR paused on ask_user, append to it
-      // (steer): same turn, plan gets updated rather than redone, and an
-      // ask_user answer resumes that turn. Otherwise start a new turn.
-      // steerConversation falls back to createRun on 409, so this is safe even
-      // if the run went terminal between SSE status and send.
-      const detail = shouldSteer
-        ? await steerMutation.mutateAsync(trimmed)
+      // Queue is the default: create a distinct request_id. Steer is explicit:
+      // reuse the selected/current active run's request_id as guidance.
+      const detail = intent === 'steer' && steerTargetRun
+        ? await steerMutation.mutateAsync({ input: trimmed, runId: steerTargetRun?.id })
         : await createRunMutation.mutateAsync(trimmed)
       navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(selectedConversationId), runId: String(detail.run.id) } })
     },
-    [shouldSteer, createRunMutation, navigate, selectedConversationId, steerMutation],
+    [createRunMutation, navigate, selectedConversationId, steerMutation, steerTargetRun?.id],
   )
 
   const handleDismiss = useCallback(async () => {
-    if (!latestRun?.id) return
-    await dismissRunMutation.mutateAsync(latestRun.id)
-  }, [dismissRunMutation, latestRun?.id])
+    if (!steerTargetRun?.id) return
+    await dismissRunMutation.mutateAsync(steerTargetRun.id)
+  }, [dismissRunMutation, steerTargetRun?.id])
 
   const handleCreateConversation = useCallback(
     async (values: CreateConversationInput) => {
@@ -206,6 +211,7 @@ export function RelayPage() {
           disabled={!selectedConversationId}
           dismissing={dismissRunMutation.isPending}
           mode={composerMode}
+          canSteer={Boolean(steerTargetRun)}
           onDismiss={handleDismiss}
           onSend={handleSend}
         />

@@ -81,7 +81,7 @@ def test_build_trigger_input_steer_reuses_request_id_for_same_turn() -> None:
     assert "record_result" in rendered
     assert "Do not use record_progress as the final answer channel" in rendered
     assert "do not start a new turn" in rendered.lower() or "Do NOT start a new turn" in rendered
-    assert "Operator added:" in rendered
+    assert "Operator guidance:" in rendered
     assert rendered.endswith("You didn't push.")
     # Steer must NOT carry the initial contract or the continuation reminder.
     assert "Completion contract:" not in rendered
@@ -91,7 +91,7 @@ def test_build_trigger_input_steer_reuses_request_id_for_same_turn() -> None:
 def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
     """When answer=True, a steer is the operator's reply to an ask_user on this
     run: it must be framed as the answer (resume the turn) and labeled
-    "Operator answered:" — not the generic "Operator added:" guidance framing."""
+    "Operator answered:" — not the generic "Operator guidance:" framing."""
     rendered = build_trigger_input(
         request_id="relay_789",
         conversation_key="research:sherlog",
@@ -110,7 +110,7 @@ def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
     assert "Operator answered:" in rendered
     assert rendered.endswith("Target the dev branch.")
     # Must NOT use the generic guidance label.
-    assert "Operator added:" not in rendered
+    assert "Operator guidance:" not in rendered
     # Same steer guardrails apply.
     assert "Do NOT start a new turn" in rendered
     assert "record_plan" in rendered

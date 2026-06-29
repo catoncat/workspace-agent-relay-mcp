@@ -211,7 +211,7 @@ export async function createRun(
   throw new Error(formatApiError(text))
 }
 
-// Append guidance to the active run in this conversation (steer): same run,
+// Guide the active run in this conversation (steer): same run,
 // same request_id (no credential rotation). The backend returns the updated
 // run on success / 502 (trigger failed but run updated). On 409 there is no
 // active run to steer (race: it went terminal between SSE status and send),
@@ -220,11 +220,12 @@ export async function createRun(
 export async function steerConversation(
   conversationId: number,
   input_markdown: string,
+  runId?: number | null,
 ): Promise<CreateRunResponse> {
   const response = await fetch(`/api/conversations/${conversationId}/steer`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ input_markdown }),
+    body: JSON.stringify({ input_markdown, ...(runId ? { run_id: runId } : {}) }),
   })
   const text = await response.text()
   let body: unknown = null

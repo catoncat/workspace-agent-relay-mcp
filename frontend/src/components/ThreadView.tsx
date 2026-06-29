@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ThreadProse } from '@/components/ThreadProse'
+import type { SendIntent } from '@/features/relay/sendIntent'
 import { cn } from '@/lib/utils'
 import {
   RUN_ACTIVE_STATUSES,
@@ -126,7 +127,7 @@ export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
 type Props = {
   details: RunDetail[]
   loading?: boolean
-  onSend?: (text: string) => void | Promise<void>
+  onSend?: (text: string, intent?: SendIntent) => void | Promise<void>
 }
 
 export function ThreadView({ details, loading = false, onSend }: Props) {
@@ -183,15 +184,13 @@ function RunThread({
   authoritativeRunId,
 }: {
   detail: RunDetail
-  onSend?: (text: string) => void | Promise<void>
+  onSend?: (text: string, intent?: SendIntent) => void | Promise<void>
   authoritativeRunId: number | null
 }) {
   const run = detail.run
   const isActive = ACTIVE_STATUSES.has(run.status)
   const isAuthoritative = authoritativeRunId === run.id
-  const planSuperseded =
-    run.status === 'superseded' ||
-    Boolean(isActive && detail.plan && authoritativeRunId != null && !isAuthoritative)
+  const planSuperseded = run.status === 'superseded'
   const planEventCount = detail.events.filter((event) => event.event_type === 'plan').length
   const planRevised = planEventCount >= 2
   const planActive = isActive && isAuthoritative
@@ -452,7 +451,7 @@ function RunProgressTimeline({
   isActive: boolean
   hasResultEvent: boolean
   runStatus: string
-  onSend?: (text: string) => void | Promise<void>
+  onSend?: (text: string, intent?: SendIntent) => void | Promise<void>
 }) {
   const segments = useMemo(() => buildTimelineSegments(events), [events])
   const lastNarrationIndex = useMemo(() => {
@@ -717,7 +716,7 @@ function QuestionEvent({
   event: RunEvent
   answer?: RunEvent
   runStatus: string
-  onSend?: (text: string) => void | Promise<void>
+  onSend?: (text: string, intent?: SendIntent) => void | Promise<void>
 }) {
   const payload = eventPayload(event)
   const choices = stringArray(payload.choices)
@@ -731,7 +730,7 @@ function QuestionEvent({
   const handlePick = (choice: string) => {
     if (!answerable || picked) return
     setPicked(choice)
-    void onSend?.(choice)
+    void onSend?.(choice, 'steer')
   }
 
   return (
@@ -814,7 +813,7 @@ function TerminalStatus({ run }: { run: Run }) {
       <RunTerminalMessage
         status={run.status}
         title="Superseded by newer turn"
-        description="A newer turn was sent before this one produced a final callback, so late updates from this run are ignored."
+        description="This historical run was explicitly replaced, so late updates from it are ignored."
       />
     )
   }
@@ -903,7 +902,7 @@ function phaseHint(detail: RunDetail): string | null {
   }
   if (run.status === 'trigger_failed' || run.trigger_status === 'failed' || run.status === 'failed') {
     const reason = run.trigger_error?.trim()
-    const base = 'Trigger did not return a clean 202. This run stays open for late callbacks, but sending a newer turn will supersede it.'
+    const base = 'Trigger did not return a clean 202. This run stays open for late callbacks; sending a newer request will not close it.'
     return reason ? `${base}\n${reason}` : base
   }
   if (run.trigger_status === 'accepted') {

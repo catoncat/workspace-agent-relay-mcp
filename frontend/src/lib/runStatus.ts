@@ -35,16 +35,6 @@ export function isConversationWorking(status: string | undefined): boolean {
   return isComposerBusy(status) && !isUserReplyStatus(status)
 }
 
-/** Sending from the composer should CONTINUE the latest run (steer) rather than
- *  start a new turn. True for in-flight work AND for a paused question
- *  (`needs_user`): answering an ask_user resumes the SAME turn instead of
- *  superseding it into a new one. Terminal runs and `trigger_failed` (never
- *  started) fall through to createRun. */
-export function shouldSteerLatestRun(status: string | undefined): boolean {
-  if (!status) return false
-  return isComposerBusy(status) || isUserReplyStatus(status)
-}
-
 export function latestRunStatusFromRuns(
   runs: ReadonlyArray<{ id: number; status: string }> | undefined,
 ): string | undefined {

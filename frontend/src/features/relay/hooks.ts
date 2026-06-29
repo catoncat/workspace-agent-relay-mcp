@@ -201,11 +201,11 @@ export function useSteer(conversationId: number | null) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (input: string) => {
+    mutationFn: async ({ input, runId }: { input: string; runId?: number | null }) => {
       if (!conversationId) throw new Error('Select a conversation before sending a task.')
       // steerConversation falls back to createRun on 409 (no active run), so
       // this returns a RunDetail either way.
-      const { run, triggerFailed, warning } = await steerConversation(conversationId, input)
+      const { run, triggerFailed, warning } = await steerConversation(conversationId, input, runId)
       const detail = await getRunDetail(run.id)
       if (triggerFailed) {
         toast.warning(

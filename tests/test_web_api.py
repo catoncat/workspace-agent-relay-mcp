@@ -367,11 +367,15 @@ def test_api_follow_up_reuses_conversation_key_but_generates_new_message_ids(tmp
             f"/api/conversations/{conversation['id']}/runs",
             json={"input_markdown": "Second message"},
         ).json()
+        first_detail = client.get(f"/api/runs/{first['id']}").json()
+        second_detail = client.get(f"/api/runs/{second['id']}").json()
 
     assert first["conversation_key"] == "research:sherlog"
     assert second["conversation_key"] == "research:sherlog"
     assert first["request_id"] != second["request_id"]
     assert first["idempotency_key"] != second["idempotency_key"]
+    assert first_detail["run"]["status"] == "accepted"
+    assert second_detail["run"]["status"] == "accepted"
     assert [call["conversation_key"] for call in trigger_client.calls] == [
         "research:sherlog",
         "research:sherlog",
@@ -419,6 +423,37 @@ def test_api_steer_route_appends_to_active_run(tmp_path: Path) -> None:
         user_messages = [e for e in detail["events"] if e["event_type"] == "user_message"]
         assert len(user_messages) == 1
         assert user_messages[0]["markdown"] == "You didn't push."
+
+
+def test_api_steer_route_can_target_selected_active_run(tmp_path: Path) -> None:
+    """When multiple request_ids are open in a conversation, explicit steer can
+    guide the selected run instead of implicitly picking the newest run."""
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        first = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "First message"},
+        ).json()
+        second = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Second message"},
+        ).json()
+
+        steer_response = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={"input_markdown": "Guide the first one", "run_id": first["id"]},
+        )
+        assert steer_response.status_code == 200
+        steered = steer_response.json()
+
+    assert steered["id"] == first["id"]
+    assert steered["request_id"] == first["request_id"]
+    assert steered["request_id"] != second["request_id"]
+    steer_call = trigger_client.calls[-1]
+    assert f"request_id: {first['request_id']}" in steer_call["input_text"]
+    assert "Guide the first one" in steer_call["input_text"]
 
 
 def test_api_steer_route_returns_409_when_no_active_run(tmp_path: Path) -> None:
@@ -508,7 +543,7 @@ def test_api_steer_route_answers_ask_user_on_same_run(tmp_path: Path) -> None:
         assert steer_call["conversation_key"] == "research:sherlog"
         assert "request_id: run_1" in steer_call["input_text"]
         assert "Operator answered:" in steer_call["input_text"]
-        assert "Operator added:" not in steer_call["input_text"]
+        assert "Operator guidance:" not in steer_call["input_text"]
         assert steer_call["input_text"].endswith("Target the dev branch.")
 
         # The user_message event is persisted on the same run.

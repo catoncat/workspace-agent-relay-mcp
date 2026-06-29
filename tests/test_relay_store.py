@@ -784,8 +784,7 @@ def test_record_result_invalid_status_does_not_append_events(tmp_path: Path) -> 
 
 
 def test_record_result_rejects_superseded_status(tmp_path: Path) -> None:
-    """`superseded` is system-only (set when a newer turn starts). Agents must not
-    be able to set it via record_result. See 2026-06-27-relay-turn-plan-semantics.md."""
+    """`superseded` is system-only. Agents must not set it via record_result."""
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -811,10 +810,13 @@ def test_record_result_rejects_superseded_status(tmp_path: Path) -> None:
     assert store.list_events(run["id"]) == []
 
 
-def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
-    """Starting a new turn closes out older non-terminal runs in the same
-    conversation: they become `superseded` (terminal), emit a system event, and
-    their late callbacks are rejected as run_closed."""
+def test_create_run_keeps_older_active_runs_open(tmp_path: Path) -> None:
+    """Starting a new queued turn does not close older non-terminal runs.
+
+    Queue/new-request sends have their own request_id and must not poison the
+    current run: late callbacks for the older request still land on the older
+    run until that run records its own result.
+    """
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")
     conversation = store.create_conversation(agent_id=agent["id"], name="Sherlog", conversation_key="research:sherlog")
@@ -852,37 +854,39 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
     )
 
     first_after = store.get_run_by_request_id("run_1")
-    assert first_after["status"] == "superseded"
-    assert first_after["completed_at"] is not None
-    assert first_after["superseded_by_run_id"] == second["id"]
-    assert first_after["supersede_reason"] == "follow_up_started"
+    assert first_after["status"] == "accepted"
+    assert first_after["completed_at"] is None
+    assert first_after["superseded_by_run_id"] is None
+    assert first_after["supersede_reason"] is None
     assert store.get_run_by_request_id("run_2")["status"] == "draft"
     assert first["parent_run_id"] is None
     assert second["parent_run_id"] == first["id"]
 
-    # A system event explains the supersede.
+    # No system event closes the older run; queue/new request is distinct from
+    # steer and from explicit replacement.
     events = store.list_events(first["id"])
     system_events = [e for e in events if e["event_type"] == "system"]
-    assert len(system_events) == 1
-    assert "Superseded" in (system_events[0]["title"] or "")
-    system_payload = json.loads(system_events[0]["payload_json"])
-    assert system_payload["reason"] == "follow_up_started"
-    assert system_payload["superseded_by_run_id"] == second["id"]
-    assert system_payload["superseded_by_request_id"] == "run_2"
+    assert system_events == []
 
     # The first run's plan is still readable (frozen snapshot, not deleted).
     assert store.get_plan(first["id"]) is not None
 
-    # Late callback to the superseded run is rejected as run_closed.
+    # Late callback to the still-active older run is accepted.
     late = store.record_progress(
         request_id="run_1",
         conversation_key="research:sherlog",
         message="late",
     )
-    assert late["success"] is False
-    assert late["error"]["code"] == "run_closed"
+    assert late["success"] is True
 
-    # Already-terminal runs are NOT touched by a third turn.
+    # Already-terminal runs are not touched by a third turn.
+    store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        status="done",
+        title="First done",
+        markdown="first final",
+    )
     store.record_result(
         request_id="run_2",
         conversation_key="research:sherlog",
@@ -898,7 +902,8 @@ def test_create_run_supersedes_older_active_runs(tmp_path: Path) -> None:
         idempotency_key="run_3",
         request_id="run_3",
     )
-    # run_2 was already terminal (done); it must not flip to superseded.
+    # run_2 was already terminal (done); it must stay done.
+    assert store.get_run_by_request_id("run_1")["status"] == "done"
     assert store.get_run_by_request_id("run_2")["status"] == "done"
     assert third["status"] == "draft"
     assert third["parent_run_id"] is None

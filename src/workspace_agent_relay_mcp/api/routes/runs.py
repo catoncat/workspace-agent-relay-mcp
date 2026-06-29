@@ -102,8 +102,9 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         input_markdown = str(payload.get("input_markdown") or "")
         conversation_key = str(conversation["conversation_key"])
         # Continuation = this conversation already has prior runs, so the agent
-        # has seen the full protocol before. Send a compact reminder instead of
-        # the full contract to avoid bloating context every turn.
+        # has seen the full protocol before. A new run no longer supersedes active
+        # runs; it is a distinct request_id that ChatGPT can queue behind current
+        # work without closing the current relay run locally.
         is_continuation = len(store.list_runs_for_conversation(int(conversation["id"]))) > 0
         trigger_input = build_trigger_input(
             request_id=request_id,
@@ -159,14 +160,12 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         return JSONResponse(run)
 
     async def steer_run(request: Request) -> JSONResponse:
-        # Operator appends guidance to the active run in this conversation
-        # (steer). We can only send triggers, so this is another trigger to the
-        # same conversation_key, bookkept on the SAME run row: the same
-        # request_id is reused, so the agent's callbacks land on the existing
-        # run and can UPDATE its plan rather than start a new one. If no run is
-        # active, return 409 so the frontend falls back to create_run (a new
-        # turn). No credential rotation is involved — callbacks authenticate
-        # via the MCP/OAuth layer plus request_id routing.
+        # Operator guides an active run in this conversation (steer). We can only
+        # send triggers, so this is another trigger to the same conversation_key,
+        # bookkept on the SAME run row: the same request_id is reused, so the
+        # agent's callbacks land on the existing run and can update its plan
+        # rather than start a new one. If no run is active, return 409 so the
+        # frontend can fall back to a queued/new request.
         try:
             payload = await json_body(request)
         except ValueError as exc:
@@ -186,10 +185,22 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             access_token = resolve_agent_token(config, store, str(agent["token_ref"]))
         except ValueError as exc:
             return json_error(str(exc), status_code=400)
+        requested_run_id = payload.get("run_id")
         runs = store.list_runs_for_conversation(int(conversation["id"]))
-        active = next((r for r in runs if r["status"] not in TERMINAL_STATUSES), None)
+        if requested_run_id is not None:
+            try:
+                requested_run_id_int = int(requested_run_id)
+            except (TypeError, ValueError):
+                return json_error("run_id must be an integer when provided", status_code=400)
+            active = next((r for r in runs if int(r["id"]) == requested_run_id_int), None)
+            if active is None:
+                return json_error("run not found in this conversation", status_code=404)
+            if active["status"] in TERMINAL_STATUSES:
+                return json_error("run is already terminal; send a new request instead", status_code=409)
+        else:
+            active = next((r for r in runs if r["status"] not in TERMINAL_STATUSES), None)
         if active is None:
-            return json_error("no active run to steer; send a new turn instead", status_code=409)
+            return json_error("no active run to steer; send a new request instead", status_code=409)
         # Steering a run that is paused on ask_user (needs_user) is the operator's
         # ANSWER: it resumes the same turn. Label the trigger accordingly so the
         # agent treats it as an answer to its question, not brand-new guidance.

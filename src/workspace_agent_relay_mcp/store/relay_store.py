@@ -19,8 +19,9 @@ TERMINAL_STATUSES = {"done", "blocked", "failed", "superseded"}
 # one, so the route labels the steer trigger accordingly and steer_run transitions
 # the run out of the question state.
 USER_REPLY_STATUSES = {"needs_user", "question", "ask_user"}
-# Agent-settable result statuses. `superseded` is system-only (set when a newer
-# turn starts in the same conversation), so record_result must reject it.
+# Agent-settable result statuses. `superseded` is system-only, so record_result
+# must reject it. New dashboard sends no longer mark active runs as superseded;
+# superseded is retained for historical rows and explicit replacement flows.
 VALID_RESULT_STATUSES = {"done", "blocked", "failed"}
 TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
@@ -574,7 +575,6 @@ class RelayStore:
         request_id: str,
     ) -> dict[str, Any]:
         now = _now()
-        superseded_run_ids: list[int] = []
         with self._lock, self._connect(immediate=True) as conn:
             conversation = conn.execute(
                 f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE id = ?",
@@ -586,11 +586,6 @@ class RelayStore:
                 raise ValueError("conversation_key does not match conversation_id.")
             if conversation["agent_id"] != agent_id:
                 raise ValueError("agent_id does not own conversation_id.")
-            # Zombie cleanup: when a new turn starts, close out older non-terminal
-            # runs in the same conversation. The user moved on; their late
-            # callbacks (if any) must be rejected as run_closed rather than
-            # polluting the new turn. `superseded` is system-only — agents cannot
-            # set it via record_result.
             existing_rows = conn.execute(
                 "SELECT id, status FROM runs WHERE conversation_id = ? ORDER BY id",
                 (conversation_id,),
@@ -619,34 +614,7 @@ class RelayStore:
                 ),
             )
             row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-            new_run_id = int(row["id"])
-            for run_id in active_run_ids:
-                conn.execute(
-                    """
-                    UPDATE runs
-                    SET status = 'superseded', completed_at = ?, updated_at = ?,
-                        superseded_by_run_id = ?, supersede_reason = ?
-                    WHERE id = ?
-                    """,
-                    (now, now, new_run_id, "follow_up_started", run_id),
-                )
-                self._append_event_conn(
-                    conn,
-                    run_id=run_id,
-                    request_id="system",
-                    event_type="system",
-                    title="Superseded by follow-up",
-                    markdown=None,
-                    payload={
-                        "reason": "follow_up_started",
-                        "superseded_by_run_id": new_run_id,
-                        "superseded_by_request_id": request_id,
-                    },
-                )
-                superseded_run_ids.append(run_id)
         payload = _row_to_dict(row) or {}
-        for rid in superseded_run_ids:
-            self._notify_run(rid)
         self._notify_run(int(payload["id"]))
         return payload
 

@@ -115,6 +115,16 @@ In relay mode, visible ChatGPT replies are not a sufficient outward communicatio
 
 In relay mode, the agent MUST NOT use dashboard polling or visible ChatGPT messages as the completion or reporting channel for the work.
 
+### Request Identity, Queue, And Steer
+
+Each `request_id` is one independently closable work unit.
+
+A queued/new request arrives with a fresh `request_id`. For that request, the agent MUST execute the normal Relay workflow and MUST eventually call `<YOUR_RELAY_MCP>.record_result` exactly once.
+
+A steer/guidance message arrives with the SAME `request_id` as an existing unfinished work unit. For that message, the agent MUST continue the current work unit, keep using the same `request_id`, update the plan or progress as needed, and MUST NOT treat the guidance itself as a separate result.
+
+If a steer/guidance message asks the agent to resend, restate, or complete the final answer, and the agent has delivered that final answer, the agent MUST close the current `request_id` with `<YOUR_RELAY_MCP>.record_result` rather than placing the final answer only in `<YOUR_RELAY_MCP>.record_progress`.
+
 ## Relay Workflow
 
 In relay mode, the following workflow is mandatory.

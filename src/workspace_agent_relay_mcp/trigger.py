@@ -69,7 +69,7 @@ def build_trigger_input(
         conversation_key=conversation_key,
     )
     if mode == "steer":
-        # Mid-turn follow-up: the operator appended guidance to THIS turn. We can
+        # Mid-turn follow-up: the operator is guiding THIS turn. We can
         # only send triggers, so this is another trigger to the same conversation,
         # bookkept on the same run (same request_id). Ask the agent to continue
         # the current turn rather than start over: revise the plan via
@@ -78,11 +78,11 @@ def build_trigger_input(
         #
         # When answer=True, this steer is the operator's reply to an ask_user
         # question on this run: frame it as the answer and ask the agent to RESUME
-        # the turn with it (not merely "added guidance"), so the agent picks up
+        # the turn with it (not merely guidance), so the agent picks up
         # where it paused instead of treating it as a brand-new directive.
         if answer:
             lead = (
-                "This is the operator's answer to your ask_user question, appended to the SAME turn you were working on "
+                "This is the operator's answer to your ask_user question for the SAME turn you were working on "
                 "(same request_id as before — keep using it for all further callbacks)."
             )
             resume = (
@@ -91,14 +91,14 @@ def build_trigger_input(
             label = "Operator answered:"
         else:
             lead = (
-                "This is a follow-up instruction appended to the SAME turn you are already working on "
+                "This is operator guidance for the SAME turn you are already working on "
                 "(same request_id as before — keep using it for all further callbacks)."
             )
             resume = (
                 "Continue the current turn: if the direction changed, call workspace-agent-relay-mcp.record_plan again with the revised steps and/or mark old steps as skipped via record_progress step_updates. "
                 "Do NOT start a new turn, and do NOT use record_result to signal a plan change."
             )
-            label = "Operator added:"
+            label = "Operator guidance:"
         return "\n".join(
             [
                 *header,

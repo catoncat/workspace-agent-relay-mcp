@@ -160,6 +160,7 @@ tests/
 - `WORKSPACE_AGENT_RELAY_AUTH_TOKEN` — dashboard + `/mcp` bearer, and the shared bearer for `/internal/tool-trace` (the notion-local-ops bridge). When unset, `/internal/tool-trace` is disabled.
 - Workspace Agent access tokens — stored in relay DB or `.env`; rotate if leaked.
 - MCP tool writes route by `request_id` + `conversation_key` and are rejected once a run is terminal (`done`/`blocked`/`failed`/`superseded`).
+- Dashboard sends default to queue/new request: Enter creates a fresh `request_id` and does not close the current active run. Explicit steer/guidance reuses the selected active run's `request_id`.
 
 ## Status
 
