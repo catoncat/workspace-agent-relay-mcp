@@ -34,8 +34,8 @@
 .venv/bin/python -m workspace_agent_relay_mcp.server   # 或安装后直接 workspace-agent-relay-mcp
 # 默认监听 127.0.0.1:8799，读取当前目录或仓根的 .env
 
-# 带 cloudflared tunnel + supervisor（支持 rolling-reload）：
-./scripts/dev-tunnel.sh        # 子命令：start | reload | status
+# 带 cloudflared tunnel + supervisor：
+./scripts/dev-tunnel.sh
 
 # 前端 dashboard 开发模式（推荐日常改 UI 时使用）：
 ./scripts/dev-dashboard.sh     # 检查后端健康 → Vite :5173，/api 代理到 :8799

@@ -26,6 +26,16 @@ TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
 MAX_STEP_TITLE_LEN = 200
+AGENT_PUBLIC_COLUMNS = "id, name, trigger_url, trigger_id, token_ref, created_at, updated_at"
+CONVERSATION_PUBLIC_COLUMNS = (
+    "id, agent_id, name, conversation_key, created_at, updated_at, archived_at, pinned_at"
+)
+RUN_PUBLIC_COLUMNS = (
+    "id, request_id, agent_id, conversation_id, conversation_key, "
+    "parent_run_id, superseded_by_run_id, supersede_reason, trigger_error, "
+    "idempotency_key, input_markdown, trigger_status, trigger_http_status, "
+    "trigger_x_request_id, conversation_url, status, created_at, updated_at, completed_at"
+)
 
 
 def _now() -> str:
@@ -325,7 +335,7 @@ class RelayStore:
 
     def get_agent(self, agent_id: int) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+            row = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents WHERE id = ?", (agent_id,)).fetchone()
         if row is None:
             raise KeyError(f"Agent not found: {agent_id}")
         return _row_to_dict(row) or {}
@@ -391,7 +401,7 @@ class RelayStore:
                 """,
                 (agent_id, token, now),
             )
-            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+            row = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents WHERE id = ?", (agent_id,)).fetchone()
         if row is None:
             raise KeyError(f"Agent not found: {agent_id}")
         return _row_to_dict(row) or {}
@@ -412,21 +422,21 @@ class RelayStore:
                 """,
                 (name, trigger_url, trigger_id, token_ref, now, now),
             )
-            row = conn.execute("SELECT * FROM agents WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents WHERE name = ?", (name,)).fetchone()
         if row is None:
             raise KeyError(f"Agent not found: {name}")
         return _row_to_dict(row) or {}
 
     def get_agent_by_name(self, name: str) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM agents WHERE name = ?", (name,)).fetchone()
+            row = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents WHERE name = ?", (name,)).fetchone()
         if row is None:
             raise KeyError(f"Agent not found: {name}")
         return _row_to_dict(row) or {}
 
     def list_agents(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
-            rows = conn.execute("SELECT * FROM agents ORDER BY name").fetchall()
+            rows = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents ORDER BY name").fetchall()
         return [_row_to_dict(row) or {} for row in rows]
 
     def create_conversation(self, *, agent_id: int, name: str, conversation_key: str) -> dict[str, Any]:
@@ -439,14 +449,18 @@ class RelayStore:
                 """,
                 (agent_id, name, conversation_key, now, now),
             )
-            row = conn.execute("SELECT * FROM conversations WHERE conversation_key = ?", (conversation_key,)).fetchone()
+            row = conn.execute(
+                f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE conversation_key = ?",
+                (conversation_key,),
+            ).fetchone()
         return _row_to_dict(row) or {}
 
     def list_conversations(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM conversations
+                SELECT id, agent_id, name, conversation_key, created_at, updated_at, archived_at, pinned_at
+                FROM conversations
                 WHERE archived_at IS NULL
                 ORDER BY (pinned_at IS NULL) ASC, pinned_at DESC, updated_at DESC
                 """
@@ -455,7 +469,10 @@ class RelayStore:
 
     def get_conversation(self, conversation_id: int) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            row = conn.execute(
+                f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
         if row is None:
             raise KeyError(f"Conversation not found: {conversation_id}")
         return _row_to_dict(row) or {}
@@ -465,7 +482,7 @@ class RelayStore:
         if not tid:
             return None
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM agents WHERE trigger_id = ?", (tid,)).fetchone()
+            row = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents WHERE trigger_id = ?", (tid,)).fetchone()
         return _row_to_dict(row)
 
     def rename_agent(self, agent_id: int, *, name: str) -> dict[str, Any]:
@@ -477,7 +494,7 @@ class RelayStore:
                 "UPDATE agents SET name = ?, updated_at = ? WHERE id = ?",
                 (name.strip(), now, agent_id),
             )
-            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+            row = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents WHERE id = ?", (agent_id,)).fetchone()
         if row is None:
             raise KeyError(f"Agent not found: {agent_id}")
         return _row_to_dict(row) or {}
@@ -513,7 +530,10 @@ class RelayStore:
                 f"UPDATE conversations SET {', '.join(sets)} WHERE id = ?",
                 params,
             )
-            row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            row = conn.execute(
+                f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
         return _row_to_dict(row) or {}
 
     def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
@@ -556,7 +576,10 @@ class RelayStore:
         now = _now()
         superseded_run_ids: list[int] = []
         with self._lock, self._connect(immediate=True) as conn:
-            conversation = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            conversation = conn.execute(
+                f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
             if conversation is None:
                 raise ValueError(f"Conversation not found: {conversation_id}")
             if conversation["conversation_key"] != conversation_key:
@@ -595,7 +618,7 @@ class RelayStore:
                     now,
                 ),
             )
-            row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+            row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE request_id = ?", (request_id,)).fetchone()
             new_run_id = int(row["id"])
             for run_id in active_run_ids:
                 conn.execute(
@@ -646,7 +669,7 @@ class RelayStore:
         """
         now = _now()
         with self._lock, self._connect(immediate=True) as conn:
-            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE id = ?", (run_id,)).fetchone()
             if row is None:
                 raise KeyError(f"Run not found: {run_id}")
             run = _row_to_dict(row) or {}
@@ -683,7 +706,7 @@ class RelayStore:
         return self.get_run(run_id)
 
     def _get_run_by_request_id_conn(self, conn: sqlite3.Connection, request_id: str) -> dict[str, Any]:
-        row = conn.execute("SELECT * FROM runs WHERE request_id = ?", (request_id,)).fetchone()
+        row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row is None:
             raise KeyError(f"Run not found: {request_id}")
         return _row_to_dict(row) or {}
@@ -694,7 +717,7 @@ class RelayStore:
 
     def get_run(self, run_id: int) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE id = ?", (run_id,)).fetchone()
         if row is None:
             raise KeyError(f"Run not found: {run_id}")
         return _row_to_dict(row) or {}
@@ -1070,7 +1093,7 @@ class RelayStore:
         """Operator marks a non-terminal run finished when the agent never called record_result."""
         now = _now()
         with self._lock, self._connect(immediate=True) as conn:
-            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE id = ?", (run_id,)).fetchone()
             if row is None:
                 raise KeyError(f"Run not found: {run_id}")
             run = _row_to_dict(row) or {}
@@ -1113,7 +1136,10 @@ class RelayStore:
 
     def list_runs_for_conversation(self, conversation_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
-            rows = conn.execute("SELECT * FROM runs WHERE conversation_id = ? ORDER BY id DESC", (conversation_id,)).fetchall()
+            rows = conn.execute(
+                f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE conversation_id = ? ORDER BY id DESC",
+                (conversation_id,),
+            ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]
 
     def get_run_context(self, conversation_key: str, limit: int = 5) -> dict[str, Any]:

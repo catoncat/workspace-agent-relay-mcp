@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sqlite3
 import threading
 
 import pytest
@@ -1238,6 +1239,109 @@ def test_new_schema_excludes_retired_polling_and_pull_columns(tmp_path: Path) ->
     assert {"hermes_conversation_id", "interaction_mode"}.isdisjoint(run_cols)
     assert "source_key" not in event_cols
     assert "hermes_agent_id" not in agent_cols
+
+
+def test_existing_polling_pull_schema_is_hidden_from_public_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "relay.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE agents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                trigger_url TEXT NOT NULL,
+                trigger_id TEXT NOT NULL,
+                token_ref TEXT NOT NULL,
+                hermes_agent_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                conversation_key TEXT NOT NULL UNIQUE,
+                interaction_mode TEXT NOT NULL DEFAULT 'relay',
+                first_viewed_at TEXT,
+                presence_at TEXT,
+                polling_paused INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT
+            );
+            CREATE TABLE runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL UNIQUE,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                conversation_key TEXT NOT NULL,
+                hermes_conversation_id TEXT,
+                interaction_mode TEXT NOT NULL DEFAULT 'relay',
+                idempotency_key TEXT NOT NULL,
+                input_markdown TEXT NOT NULL,
+                trigger_status TEXT NOT NULL DEFAULT 'draft',
+                trigger_http_status INTEGER,
+                trigger_x_request_id TEXT,
+                conversation_url TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                title TEXT,
+                markdown TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                source_key TEXT
+            );
+            CREATE TABLE artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE plans (
+                run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+                steps_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE poller_heartbeats (
+                hermes_agent_id TEXT PRIMARY KEY,
+                checked_at TEXT NOT NULL
+            );
+            INSERT INTO agents (id, name, trigger_url, trigger_id, token_ref, hermes_agent_id, created_at, updated_at)
+            VALUES (1, 'default', 'https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger', 'agtch_test', 'env:TOKEN', 'agt_hermes', 'now', 'now');
+            INSERT INTO conversations (id, agent_id, name, conversation_key, interaction_mode, first_viewed_at, presence_at, polling_paused, created_at, updated_at, archived_at)
+            VALUES (1, 1, 'Old', 'old:key', 'pull', 'old', 'old', 1, 'now', 'now', NULL);
+            INSERT INTO runs (id, request_id, agent_id, conversation_id, conversation_key, hermes_conversation_id, interaction_mode, idempotency_key, input_markdown, trigger_status, status, created_at, updated_at)
+            VALUES (1, 'run_1', 1, 1, 'old:key', 'hconv', 'pull', 'idem_1', 'old task', 'accepted', 'accepted', 'now', 'now');
+            INSERT INTO events (id, run_id, request_id, event_type, title, markdown, payload_json, created_at, source_key)
+            VALUES (1, 1, 'run_1', 'progress', 'Polled', 'old polling event', '{}', 'now', 'node_1');
+            """
+        )
+
+    store = RelayStore(db_path)
+
+    retired_agent_fields = {"hermes_agent_id"}
+    retired_conversation_fields = {"first_viewed_at", "presence_at", "interaction_mode", "polling_paused"}
+    retired_run_fields = {"hermes_conversation_id", "interaction_mode"}
+    agent_rows = [store.get_agent(1), store.get_agent_by_name("default"), store.list_agents()[0]]
+    conversation_rows = [store.get_conversation(1), store.list_conversations()[0]]
+    run_rows = [store.get_run(1), store.get_run_by_request_id("run_1"), store.list_runs_for_conversation(1)[0]]
+
+    assert all(retired_agent_fields.isdisjoint(row) for row in agent_rows)
+    assert all(retired_conversation_fields.isdisjoint(row) for row in conversation_rows)
+    assert all(retired_run_fields.isdisjoint(row) for row in run_rows)
+    assert "source_key" not in store.list_events(1)[0]
 
 
 def test_update_conversation_rejects_retired_pull_fields(tmp_path: Path) -> None:
