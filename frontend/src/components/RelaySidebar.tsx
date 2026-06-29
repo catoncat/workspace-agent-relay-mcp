@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ClipboardCopy,
   Folder,
+  FolderPlus,
   MessageSquarePlus,
   Pencil,
   Pin,
@@ -78,6 +79,9 @@ type Props = {
   onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
   onOpenSettings?: () => void
   onManageWorkspaces?: () => void
+  onAddWorkspace?: () => void | Promise<unknown>
+  addingWorkspace?: boolean
+  onOpenWorkspaceSwitcher?: () => void
   loading?: boolean
   workingConversationIds?: ReadonlySet<number>
 }
@@ -96,6 +100,9 @@ export function RelaySidebar({
   onPin,
   onOpenSettings,
   onManageWorkspaces,
+  onAddWorkspace,
+  addingWorkspace = false,
+  onOpenWorkspaceSwitcher,
   loading = false,
   workingConversationIds,
 }: Props) {
@@ -131,6 +138,9 @@ export function RelaySidebar({
           currentWorkspace={currentWorkspace}
           onWorkspaceChange={onWorkspaceChange}
           onManageWorkspaces={onManageWorkspaces ?? onOpenSettings}
+          onAddWorkspace={onAddWorkspace}
+          addingWorkspace={addingWorkspace}
+          onOpenWorkspaceSwitcher={onOpenWorkspaceSwitcher}
         />
 
         {onCreate ? (
@@ -222,23 +232,30 @@ function WorkspaceSelector({
   currentWorkspace,
   onWorkspaceChange,
   onManageWorkspaces,
+  onAddWorkspace,
+  addingWorkspace = false,
+  onOpenWorkspaceSwitcher,
 }: {
   workspaces: Workspace[]
   currentWorkspace: Workspace | null
   onWorkspaceChange?: (id: number | null) => void | Promise<unknown>
   onManageWorkspaces?: () => void
+  onAddWorkspace?: () => void | Promise<unknown>
+  addingWorkspace?: boolean
+  onOpenWorkspaceSwitcher?: () => void
 }) {
   const label = currentWorkspace?.name ?? '无目录'
   const description = currentWorkspace?.working_directory ?? '不注入 working_directory'
 
   return (
-    <div className="mb-1 px-0.5">
+    <div className="mb-1 flex items-center gap-1 px-0.5">
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
-            'flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
+            'flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
             'hover:bg-sidebar-accent hover:text-sidebar-foreground',
           )}
+          title="Switch directory"
         >
           <Folder className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">
@@ -273,6 +290,19 @@ function WorkspaceSelector({
           {onManageWorkspaces ? (
             <>
               <DropdownMenuSeparator />
+              {onOpenWorkspaceSwitcher ? (
+                <DropdownMenuItem onClick={onOpenWorkspaceSwitcher}>
+                  <Folder />
+                  <span className="min-w-0 flex-1">Quick switch directory</span>
+                  <span className="text-xs text-muted-foreground">⌘K</span>
+                </DropdownMenuItem>
+              ) : null}
+              {onAddWorkspace ? (
+                <DropdownMenuItem onClick={() => void onAddWorkspace()}>
+                  <FolderPlus />
+                  Add directory...
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onClick={onManageWorkspaces}>
                 <Settings />
                 Manage workspaces...
@@ -281,6 +311,20 @@ function WorkspaceSelector({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      {onAddWorkspace ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={addingWorkspace}
+          title={addingWorkspace ? 'Adding directory...' : 'Add directory'}
+          className={sidebarHeaderIconClass}
+          onClick={() => void onAddWorkspace()}
+        >
+          <FolderPlus className="size-3.5" />
+          <span className="sr-only">Add directory</span>
+        </Button>
+      ) : null}
     </div>
   )
 }

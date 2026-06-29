@@ -11,6 +11,7 @@ import {
   deleteConversation,
   deleteWorkspace,
   getRunDetail,
+  pickWorkspaceDirectory,
   renameAgent,
   renameConversation,
   setConversationPinned,
@@ -329,6 +330,15 @@ export function useCreateWorkspace() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function usePickWorkspaceDirectory() {
+  return useMutation({
+    mutationFn: pickWorkspaceDirectory,
     onError: (err) => {
       toast.error(toError(err).message)
     },

@@ -30,6 +30,24 @@ export type Workspace = {
   last_used_at?: string | null
 }
 
+export type WorkspaceDirectoryPickResult = {
+  working_directory: string | null
+  name: string | null
+}
+
+export type WorkspaceDirectoryEntry = {
+  name: string
+  path: string
+}
+
+export type WorkspaceDirectoryBrowseResult = {
+  path: string
+  parent: string | null
+  home: string | null
+  entries: WorkspaceDirectoryEntry[]
+  truncated: boolean
+}
+
 export type Conversation = {
   id: number
   agent_id: number

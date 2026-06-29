@@ -279,6 +279,54 @@ def test_api_workspace_crud_and_delete_moves_conversations_to_no_directory(tmp_p
     assert missing_delete.status_code == 404
 
 
+def test_api_pick_workspace_directory_returns_selected_path(tmp_path: Path, monkeypatch: Any) -> None:
+    from workspace_agent_relay_mcp.api.routes import workspaces as workspace_routes_module
+
+    picked_dir = tmp_path / "picked-repo"
+    picked_dir.mkdir()
+    monkeypatch.setattr(workspace_routes_module, "pick_directory", lambda: str(picked_dir))
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.post("/api/workspaces/pick-directory")
+
+    assert response.status_code == 200
+    assert response.json() == {"working_directory": str(picked_dir), "name": "picked-repo"}
+
+
+def test_api_browse_workspace_directories_lists_host_directories(tmp_path: Path) -> None:
+    browse_root = tmp_path / "host"
+    browse_root.mkdir()
+    (browse_root / "beta").mkdir()
+    (browse_root / "alpha").mkdir()
+    (browse_root / "file.txt").write_text("not a directory", encoding="utf-8")
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.get("/api/workspaces/browse-directories", params={"path": str(browse_root)})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] == str(browse_root.resolve())
+    assert body["parent"] == str(tmp_path.resolve())
+    assert body["home"]
+    assert body["truncated"] is False
+    assert body["entries"] == [
+        {"name": "alpha", "path": str((browse_root / "alpha").resolve())},
+        {"name": "beta", "path": str((browse_root / "beta").resolve())},
+    ]
+
+
+def test_api_browse_workspace_directories_rejects_non_absolute_path(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.get("/api/workspaces/browse-directories", params={"path": "relative"})
+
+    assert response.status_code == 400
+    assert "absolute" in response.json()["error"]
+
+
 def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 

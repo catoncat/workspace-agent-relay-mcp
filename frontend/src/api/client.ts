@@ -7,6 +7,8 @@ import type {
   RunEventPayload,
   TokenRef,
   Workspace,
+  WorkspaceDirectoryBrowseResult,
+  WorkspaceDirectoryPickResult,
 } from './types'
 
 // This dashboard is a local/admin surface. localStorage keeps setup simple, but it is not
@@ -167,6 +169,18 @@ export async function createWorkspace(body: {
   working_directory?: string | null
 }): Promise<Workspace> {
   return api('/api/workspaces', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function browseWorkspaceDirectories(
+  path?: string | null,
+): Promise<WorkspaceDirectoryBrowseResult> {
+  const trimmed = path?.trim()
+  const query = trimmed ? `?${new URLSearchParams({ path: trimmed })}` : ''
+  return api(`/api/workspaces/browse-directories${query}`)
+}
+
+export async function pickWorkspaceDirectory(): Promise<WorkspaceDirectoryPickResult> {
+  return api('/api/workspaces/pick-directory', { method: 'POST', body: '{}' })
 }
 
 export async function updateWorkspace(

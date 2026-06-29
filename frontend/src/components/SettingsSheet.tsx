@@ -24,7 +24,6 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   useCreateAgent,
-  useCreateWorkspace,
   useDeleteAgent,
   useDeleteWorkspace,
   useRenameAgent,
@@ -220,7 +219,6 @@ function WorkspacesSection({
           />
         ))}
       </ul>
-      <AddWorkspaceSection />
     </section>
   )
 }
@@ -394,83 +392,6 @@ function WorkspaceRow({ workspace, active }: { workspace: Workspace; active: boo
         </DialogContent>
       </Dialog>
     </li>
-  )
-}
-
-function AddWorkspaceSection() {
-  const createWorkspaceMutation = useCreateWorkspace()
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [workingDirectory, setWorkingDirectory] = useState('')
-
-  const canSubmit =
-    !createWorkspaceMutation.isPending &&
-    name.trim().length > 0 &&
-    workingDirectory.trim().length > 0
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!canSubmit) return
-    createWorkspaceMutation.mutate(
-      {
-        name: name.trim(),
-        working_directory: workingDirectory.trim(),
-      },
-      {
-        onSuccess: () => {
-          toast.success('Workspace added')
-          setName('')
-          setWorkingDirectory('')
-          setOpen(false)
-        },
-      },
-    )
-  }
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger
-        className={cn(
-          'flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-2.5 text-sm font-medium transition-colors',
-          'hover:bg-muted/50 data-panel-open:bg-muted/30',
-        )}
-      >
-        <Plus className="size-4 text-muted-foreground" />
-        <span className="flex-1 text-left">Add workspace</span>
-        <ChevronDown className="size-4 text-muted-foreground transition-transform data-panel-open:rotate-180" />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pt-3">
-        <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border bg-muted/20 p-3">
-          <div className="space-y-2">
-            <label htmlFor="workspace-name" className="text-sm font-medium">
-              Name
-            </label>
-            <Input
-              id="workspace-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Relay MCP"
-              autoComplete="off"
-            />
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="workspace-directory" className="text-sm font-medium">
-              Working directory
-            </label>
-            <Input
-              id="workspace-directory"
-              value={workingDirectory}
-              onChange={(e) => setWorkingDirectory(e.target.value)}
-              placeholder="/Users/me/work/repo"
-              autoComplete="off"
-            />
-          </div>
-          <Button type="submit" disabled={!canSubmit} className="w-full">
-            {createWorkspaceMutation.isPending ? 'Adding...' : 'Add workspace'}
-          </Button>
-        </form>
-      </CollapsibleContent>
-    </Collapsible>
   )
 }
 

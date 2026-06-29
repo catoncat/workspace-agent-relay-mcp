@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
+import { toast } from 'sonner'
+import { AddWorkspaceDialog, type AddWorkspaceInput } from '@/components/AddWorkspaceDialog'
 import { RelaySidebar, type CreateConversationInput } from '@/components/RelaySidebar'
 import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
+import { WorkspaceCommandMenu } from '@/components/WorkspaceCommandMenu'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import type { Agent, Conversation, RelaySettings, Run, Workspace } from '@/api/types'
 import { ThreadComposer, resolveComposerMode } from '@/features/relay/components/ThreadComposer'
@@ -21,6 +24,7 @@ import {
   useBootstrap,
   useCreateConversation,
   useCreateRun,
+  useCreateWorkspace,
   useDeleteConversation,
   useDismissRun,
   usePinConversation,
@@ -55,6 +59,8 @@ export function RelayPage() {
   const selectedRunId = parseRouteId(params.runId)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false)
+  const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false)
   const [queuedMessagesByConversation, setQueuedMessagesByConversation] = useState<QueuedMessageBuckets>({})
   const [flushQueuedConversationId, setFlushQueuedConversationId] = useState<number | null>(null)
   const queuedMessagesByConversationRef = useRef<QueuedMessageBuckets>(queuedMessagesByConversation)
@@ -104,7 +110,9 @@ export function RelayPage() {
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
   const pinConversationMutation = usePinConversation()
+  const createWorkspaceMutation = useCreateWorkspace()
   const updateSettingsMutation = useUpdateSettings()
+  const addingWorkspace = createWorkspaceMutation.isPending
   const recentUrl = useMemo(
     () => runDetails.map((detail) => detail.run.conversation_url).find(Boolean) ?? null,
     [runDetails],
@@ -130,6 +138,17 @@ export function RelayPage() {
   useEffect(() => {
     queuedMessagesByConversationRef.current = queuedMessagesByConversation
   }, [queuedMessagesByConversation])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
+      event.preventDefault()
+      setWorkspaceSwitcherOpen(true)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   useEffect(() => {
     if (flushQueuedConversationId === null) return
@@ -346,6 +365,37 @@ export function RelayPage() {
     [conversations, navigate, updateSettingsMutation],
   )
 
+  const handleCreateWorkspaceFromDirectory = useCallback(async (input: AddWorkspaceInput) => {
+    const directory = input.workingDirectory.trim()
+    if (!directory) return
+
+    const existing = workspaces.find((workspace) => workspace.working_directory === directory)
+    if (existing) {
+      await handleWorkspaceChange(existing.id)
+      toast.success(`Switched to ${existing.name}`)
+      return
+    }
+
+    const workspace = await createWorkspaceMutation.mutateAsync({
+      name: (input.name?.trim() || workspaceNameFromPath(directory)).trim(),
+      working_directory: directory,
+    })
+    await handleWorkspaceChange(workspace.id)
+    toast.success(`Directory added: ${workspace.name}`)
+  }, [createWorkspaceMutation, handleWorkspaceChange, workspaces])
+
+  const handleAddWorkspace = useCallback(() => {
+    setAddWorkspaceOpen(true)
+  }, [])
+
+  const handleSubmitWorkspace = useCallback(async (input: AddWorkspaceInput) => {
+    try {
+      await handleCreateWorkspaceFromDirectory(input)
+    } catch {
+      // mutation hooks already surface errors to the user
+    }
+  }, [handleCreateWorkspaceFromDirectory])
+
   const handleDeleteConversation = useCallback(
     async (id: number) => {
       await deleteConversationMutation.mutateAsync(id)
@@ -379,6 +429,9 @@ export function RelayPage() {
         onPin={handlePinConversation}
         onOpenSettings={() => setSettingsOpen(true)}
         onManageWorkspaces={() => setSettingsOpen(true)}
+        onAddWorkspace={handleAddWorkspace}
+        addingWorkspace={addingWorkspace}
+        onOpenWorkspaceSwitcher={() => setWorkspaceSwitcherOpen(true)}
         loading={bootstrapQuery.isLoading || bootstrapQuery.isFetching}
         workingConversationIds={workingConversationIds}
       />
@@ -412,6 +465,24 @@ export function RelayPage() {
         />
       </SidebarInset>
 
+      <WorkspaceCommandMenu
+        open={workspaceSwitcherOpen}
+        onOpenChange={setWorkspaceSwitcherOpen}
+        workspaces={workspaces}
+        currentWorkspaceId={currentWorkspaceId}
+        onSelectWorkspace={handleWorkspaceChange}
+        onAddWorkspace={handleAddWorkspace}
+        addingWorkspace={addingWorkspace}
+        switchingWorkspace={updateSettingsMutation.isPending}
+      />
+
+      <AddWorkspaceDialog
+        open={addWorkspaceOpen}
+        onOpenChange={setAddWorkspaceOpen}
+        pending={addingWorkspace || updateSettingsMutation.isPending}
+        onSubmit={handleSubmitWorkspace}
+      />
+
       <SettingsSheet
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
@@ -423,6 +494,11 @@ export function RelayPage() {
       />
     </SidebarProvider>
   )
+}
+
+function workspaceNameFromPath(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] ?? path
 }
 
 function parseRouteId(value: string | undefined): number | null {
