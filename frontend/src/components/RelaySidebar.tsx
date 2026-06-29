@@ -351,6 +351,13 @@ function ConversationRow({
     setIsRenaming(false)
   }, [item.name])
 
+  const startRename = useCallback(() => {
+    setTimeout(() => {
+      setDraftName(item.name)
+      setIsRenaming(true)
+    }, 0)
+  }, [item.name])
+
   const handleCopy = useCallback(
     async (value: string, label: string) => {
       try {
@@ -449,7 +456,7 @@ function ConversationRow({
                 {isPinned ? <PinOff /> : <Pin />}
                 <span>{isPinned ? 'Unpin' : 'Pin'}</span>
               </ContextMenuItem>
-              <ContextMenuItem disabled={!onRename} onClick={() => setIsRenaming(true)}>
+              <ContextMenuItem disabled={!onRename} onClick={startRename}>
                 <Pencil />
                 <span>Rename</span>
               </ContextMenuItem>
