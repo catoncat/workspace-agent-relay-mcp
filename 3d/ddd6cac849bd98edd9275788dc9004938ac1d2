@@ -1,0 +1,29 @@
+frontend/src/pages/RelayPage.tsx
+  s_072cce7bc0e67c::t_1f3fa1783bc938 10,244
+  s_072cce7bc0e67c::t_6dd6a843bb1bb6 24-28,71,99-102,185-198,232,234-243,245-247,257-259,261,264-274,349,352,359,370,372,495-500
+  s_072cce7bc0e67c::t_f1a5b98656ef5b 23
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_072cce7bc0e67c::t_d2974e555bba60 141-146,291-295
+frontend/src/index.css
+  s_072cce7bc0e67c::t_635be6bbea734b 233-244
+frontend/src/components/ThreadView.tsx
+  s_072cce7bc0e67c::t_9fea23f190dad9 16,131,135-140,143,153,182-184,191-196,198-202
+  s_072cce7bc0e67c::t_0d638daaeacae4 197
+  s_072cce7bc0e67c::t_827db8799a95fa 203-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "3dddd6cac849bd98edd9275788dc9004938ac1d2",
+  "prompts": {},
+  "sessions": {
+    "s_072cce7bc0e67c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1351-45ed-75d1-a08f-b1f482b2973c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
