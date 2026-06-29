@@ -1293,6 +1293,67 @@ def test_run_stream_returns_snapshot_for_terminal_run(tmp_path: Path) -> None:
     assert payload["events"][-1]["title"] == "Done"
 
 
+def test_run_stream_emits_initial_snapshot_for_active_run(tmp_path: Path, monkeypatch: Any) -> None:
+    import json
+
+    client, _ = _client(tmp_path)
+
+    with client:
+        from workspace_agent_relay_mcp import server
+
+        agent = server.store.upsert_agent(
+            name="default",
+            trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+            token_ref="env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+        )
+        conversation = server.store.create_conversation(
+            agent_id=agent["id"],
+            name="Sherlog",
+            conversation_key="research:sherlog",
+        )
+        run = server.store.create_run(
+            agent_id=agent["id"],
+            conversation_id=conversation["id"],
+            conversation_key="research:sherlog",
+            input_markdown="Research sherlog",
+            idempotency_key="idem_stream_active",
+            request_id="run_stream_active",
+        )
+        original_subscribe = server.event_bus.subscribe
+
+        def subscribe_and_finish(subscribed_run_id: int):
+            assert subscribed_run_id == run["id"]
+            queue = original_subscribe(subscribed_run_id)
+            result = server.store.record_result(
+                request_id="run_stream_active",
+                conversation_key="research:sherlog",
+                status="done",
+                title="Done",
+                markdown="Finished",
+            )
+            assert result["success"] is True
+            queue.put_nowait(
+                {
+                    "run": server.store.get_run(run["id"]),
+                    "events": server.store.list_events(run["id"]),
+                    "artifacts": server.store.list_artifacts(run["id"]),
+                    "plan": server.store.get_plan(run["id"]),
+                }
+            )
+            return queue
+
+        monkeypatch.setattr(server.event_bus, "subscribe", subscribe_and_finish)
+        response = client.get(f"/api/runs/{run['id']}/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    data_lines = [line for line in response.text.splitlines() if line.startswith("data: ")]
+    payloads = [json.loads(line[6:]) for line in data_lines]
+    assert [payload["run"]["status"] for payload in payloads] == ["draft", "done"]
+    assert payloads[0]["events"] == []
+    assert payloads[1]["events"][-1]["title"] == "Done"
+
+
 def test_api_dismiss_run_marks_stuck_run_done(tmp_path: Path) -> None:
     client, _ = _client(tmp_path, auth_token="local-secret")
 
