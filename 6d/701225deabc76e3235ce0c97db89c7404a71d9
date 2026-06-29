@@ -1,0 +1,21 @@
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_c24730d5c5e508::t_118606b81d1fc7 3
+tests/test_web_api.py
+  s_c24730d5c5e508::t_93481bf9593224 1296-1356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "6d701225deabc76e3235ce0c97db89c7404a71d9",
+  "prompts": {},
+  "sessions": {
+    "s_c24730d5c5e508": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f13bd-b703-7af1-919b-ec5b0bfeb7dd",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
