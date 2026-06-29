@@ -5,7 +5,6 @@ import {
   createRouter,
 } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { RelayPage } from '@/pages/RelayPage'
 import {
   bootstrapOptions,
@@ -24,12 +23,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
   // the shell (the user can then enter a token in Settings).
   loader: ({ context }) =>
     context.queryClient.ensureQueryData(bootstrapOptions).catch(() => undefined),
-  component: () => (
-    <>
-      <Outlet />
-      {import.meta.env.DEV ? <TanStackRouterDevtools position="bottom-right" /> : null}
-    </>
-  ),
+  component: () => <Outlet />,
 })
 
 const indexRoute = createRoute({
