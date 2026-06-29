@@ -1,0 +1,19 @@
+frontend/src/router.tsx
+  s_f3fcfeade8c403::t_13be1112c2fb15 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "bef9bfecf80d23f6572141f79c6b529d28abacf9",
+  "prompts": {},
+  "sessions": {
+    "s_f3fcfeade8c403": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "14558afb-0f82-471f-8424-eb7441ff5895",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
