@@ -1,4 +1,7 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+import threading
+import time
 from typing import Any
 
 from starlette.testclient import TestClient
@@ -41,6 +44,25 @@ class RaisingTriggerClient:
         raise RuntimeError("upstream failed with agent-token")
 
 
+class BlockingTriggerClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def trigger(self, **kwargs: Any) -> TriggerResult:
+        self.calls.append(kwargs)
+        self.started.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("test trigger was not released")
+        return TriggerResult(
+            http_status=202,
+            x_request_id="api_req_blocking",
+            conversation_url="https://chatgpt.com/c/blocking",
+            response_body={"conversation_url": "https://chatgpt.com/c/blocking"},
+        )
+
+
 def _client(
     tmp_path: Path,
     *,
@@ -62,6 +84,27 @@ def _client(
     active_trigger_client = trigger_client or FakeTriggerClient()
     app.state.trigger_client = active_trigger_client
     return TestClient(app), active_trigger_client
+
+
+def _wait_for_run_status(client: TestClient, run_id: int, status: str, *, timeout: float = 2.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_detail: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        last_detail = client.get(f"/api/runs/{run_id}").json()
+        if last_detail["run"]["status"] == status:
+            return last_detail
+        time.sleep(0.02)
+    assert last_detail is not None
+    raise AssertionError(f"run {run_id} did not reach {status!r}; last status={last_detail['run']['status']!r}")
+
+
+def _wait_for_call_count(trigger_client: Any, count: int, *, timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if len(trigger_client.calls) >= count:
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"expected {count} trigger calls, got {len(trigger_client.calls)}")
 
 
 def _seed_conversation(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -457,10 +500,16 @@ def test_api_send_run_triggers_agent_and_records_metadata(tmp_path: Path) -> Non
             f"/api/conversations/{conversation['id']}/runs",
             json={"input_markdown": "Research sherlog"},
         )
+        assert run_response.status_code == 200
+        initial_run = run_response.json()
+        assert initial_run["status"] == "sent"
+        assert initial_run["trigger_status"] == "draft"
+        assert initial_run["trigger_http_status"] is None
+        _wait_for_call_count(trigger_client, 1)
+        detail = _wait_for_run_status(client, initial_run["id"], "accepted")
         runs_response = client.get(f"/api/conversations/{conversation['id']}/runs")
 
-    assert run_response.status_code == 200
-    run = run_response.json()
+    run = detail["run"]
     assert run["status"] == "accepted"
     assert run["trigger_http_status"] == 202
     assert run["trigger_x_request_id"] == "api_req_123"
@@ -477,6 +526,40 @@ def test_api_send_run_triggers_agent_and_records_metadata(tmp_path: Path) -> Non
     assert f"request_id: {run['request_id']}" in call["input_text"]
     assert "conversation_key: research:sherlog" in call["input_text"]
     assert call["input_text"].endswith("Research sherlog")
+
+
+def test_api_create_run_returns_before_trigger_response(tmp_path: Path) -> None:
+    trigger_client = BlockingTriggerClient()
+    client, _ = _client(tmp_path, trigger_client=trigger_client)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                lambda: client.post(
+                    f"/api/conversations/{conversation['id']}/runs",
+                    json={"input_markdown": "Start slow trigger"},
+                )
+            )
+            try:
+                response = future.result(timeout=1)
+            except TimeoutError as exc:
+                raise AssertionError("create run response waited for trigger HTTP result") from exc
+            finally:
+                trigger_client.release.set()
+
+        assert response.status_code == 200
+        run = response.json()
+        assert run["status"] == "sent"
+        assert run["trigger_status"] == "draft"
+        assert run["trigger_http_status"] is None
+
+        _wait_for_call_count(trigger_client, 1)
+        accepted_detail = _wait_for_run_status(client, run["id"], "accepted")
+
+    assert accepted_detail["run"]["trigger_http_status"] == 202
+    assert accepted_detail["run"]["trigger_x_request_id"] == "api_req_blocking"
+    assert accepted_detail["run"]["conversation_url"] == "https://chatgpt.com/c/blocking"
 
 
 def test_api_follow_up_reuses_conversation_key_but_generates_new_message_ids(tmp_path: Path) -> None:
@@ -521,6 +604,7 @@ def test_api_steer_route_appends_to_active_run(tmp_path: Path) -> None:
             f"/api/conversations/{conversation['id']}/runs",
             json={"input_markdown": "First message"},
         ).json()
+        run = _wait_for_run_status(client, run["id"], "accepted")["run"]
         assert run["status"] == "accepted"
 
         steer_response = client.post(
@@ -535,6 +619,7 @@ def test_api_steer_route_appends_to_active_run(tmp_path: Path) -> None:
 
         # A second trigger was dispatched with a fresh idempotency key, same
         # conversation_key, same request_id in the input, and steer wording.
+        _wait_for_call_count(trigger_client, 2)
         assert len(trigger_client.calls) == 2
         steer_call = trigger_client.calls[1]
         assert steer_call["conversation_key"] == "research:sherlog"
@@ -694,13 +779,17 @@ def test_api_steer_route_answers_ask_user_on_same_run(tmp_path: Path) -> None:
         )
         assert steer_response.status_code == 200
         steered = steer_response.json()
-        # Same turn / same run row; question state left (trigger 202 -> accepted).
+        # Same turn / same run row; question state left immediately; the trigger
+        # result advances it to accepted in the background.
         assert steered["id"] == run_id
         assert steered["request_id"] == "run_1"
-        assert steered["status"] == "accepted"
+        assert steered["status"] == "sent"
 
         # One trigger dispatched (the run was created at the store layer, not via
         # the API), framed as the answer — not the generic guidance label.
+        _wait_for_call_count(trigger_client, 1)
+        accepted = _wait_for_run_status(client, run_id, "accepted")
+        assert accepted["run"]["status"] == "accepted"
         assert len(trigger_client.calls) == 1
         steer_call = trigger_client.calls[0]
         assert steer_call["conversation_key"] == "research:sherlog"
@@ -891,24 +980,26 @@ def test_api_marks_run_failed_when_trigger_client_raises(tmp_path: Path) -> None
             f"/api/conversations/{conversation['id']}/runs",
             json={"input_markdown": "Research sherlog"},
         )
+        body = response.json()
+        failed_detail = _wait_for_run_status(client, body["id"], "trigger_failed")
         runs_response = client.get(f"/api/conversations/{conversation['id']}/runs")
 
-    assert response.status_code == 502
-    body = response.json()
-    assert body["success"] is False
-    assert body["error"] == "trigger request failed"
+    assert response.status_code == 200
+    assert body["status"] == "sent"
+    assert body["trigger_status"] == "draft"
+    failed_run = failed_detail["run"]
     # The real exception type+message is surfaced for diagnosis (redacted).
-    assert "RuntimeError" in body["detail"]
-    assert "upstream failed" in body["detail"]
+    assert "RuntimeError" in failed_run["trigger_error"]
+    assert "upstream failed" in failed_run["trigger_error"]
     # Trigger failure is non-terminal (trigger_failed), because the ChatGPT
     # trigger API is async and may still have dispatched the agent even when we
     # got no 202. A live agent's callbacks must still be accepted.
-    assert body["run"]["status"] == "trigger_failed"
-    assert body["run"]["trigger_http_status"] == 0
-    assert body["run"]["trigger_error"] is not None
-    assert "RuntimeError" in body["run"]["trigger_error"]
-    assert "agent-token" not in str(body)
+    assert failed_run["status"] == "trigger_failed"
+    assert failed_run["trigger_http_status"] == 0
+    assert failed_run["trigger_error"] is not None
+    assert "agent-token" not in str(failed_run)
     assert runs_response.json()[0]["status"] == "trigger_failed"
+    _wait_for_call_count(trigger_client, 1)
     assert trigger_client.calls[0]["conversation_key"] == "research:sherlog"
 
 

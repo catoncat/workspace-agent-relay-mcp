@@ -35,6 +35,70 @@ def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
 
 
 def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
+    async def dispatch_trigger_result(
+        *,
+        trigger_client: Any,
+        trigger_url: str,
+        access_token: str,
+        conversation_key: str,
+        input_text: str,
+        idempotency_key: str,
+        request_id: str,
+        action: str,
+    ) -> None:
+        try:
+            trigger_result = await run_in_threadpool(
+                trigger_client.trigger,
+                trigger_url=trigger_url,
+                access_token=access_token,
+                conversation_key=conversation_key,
+                input_text=input_text,
+                idempotency_key=idempotency_key,
+            )
+        except Exception as exc:
+            # trigger() normally catches HTTPError/URLError/TimeoutError/OSError
+            # itself and returns a TriggerResult. Reaching here means something
+            # unexpected blew up (e.g. opener misconfiguration). Preserve the
+            # real exception type+message so the failure is diagnosable instead
+            # of the old opaque "trigger request failed", but redact the access
+            # token in case it leaked into the exception text.
+            trigger_error = redact_secret(f"{type(exc).__name__}: {exc}", access_token)
+            logger.exception("%s trigger dispatch raised unexpectedly for request_id=%s", action, request_id)
+            store.update_run_trigger_result(
+                request_id=request_id,
+                trigger_http_status=0,
+                trigger_x_request_id=None,
+                conversation_url=None,
+                trigger_error=trigger_error,
+            )
+            return
+        store.update_run_trigger_result(
+            request_id=request_id,
+            trigger_http_status=trigger_result.http_status,
+            trigger_x_request_id=trigger_result.x_request_id,
+            conversation_url=trigger_result.conversation_url,
+            trigger_error=trigger_result.error,
+        )
+
+    def schedule_trigger_dispatch(request: Request, coro: Any) -> None:
+        task = asyncio.create_task(coro)
+        tasks = getattr(request.app.state, "trigger_dispatch_tasks", None)
+        if tasks is None:
+            tasks = set()
+            request.app.state.trigger_dispatch_tasks = tasks
+        tasks.add(task)
+
+        def cleanup(completed: asyncio.Task) -> None:
+            tasks.discard(completed)
+            try:
+                completed.result()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception("trigger dispatch task crashed")
+
+        task.add_done_callback(cleanup)
+
     async def list_runs(request: Request) -> JSONResponse:
         try:
             conversation = store.get_conversation(int(request.path_params["conversation_id"]))
@@ -125,41 +189,19 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             working_directory=run.get("working_directory_snapshot"),
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
-        try:
-            trigger_result = await run_in_threadpool(
-                trigger_client.trigger,
+        run = store.mark_run_trigger_sent(request_id)
+        schedule_trigger_dispatch(
+            request,
+            dispatch_trigger_result(
+                trigger_client=trigger_client,
                 trigger_url=trigger_url,
                 access_token=access_token,
                 conversation_key=conversation_key,
                 input_text=trigger_input,
                 idempotency_key=idempotency_key,
-            )
-        except Exception as exc:
-            # trigger() normally catches HTTPError/URLError/TimeoutError/OSError
-            # itself and returns a TriggerResult. Reaching here means something
-            # unexpected blew up (e.g. opener misconfiguration). Preserve the
-            # real exception type+message so the failure is diagnosable instead
-            # of the old opaque "trigger request failed", but redact the access
-            # token in case it leaked into the exception text.
-            trigger_error = redact_secret(f"{type(exc).__name__}: {exc}", access_token)
-            logger.exception("trigger dispatch raised unexpectedly for request_id=%s", request_id)
-            run = store.update_run_trigger_result(
                 request_id=request_id,
-                trigger_http_status=0,
-                trigger_x_request_id=None,
-                conversation_url=None,
-                trigger_error=trigger_error,
-            )
-            return JSONResponse(
-                {"success": False, "error": "trigger request failed", "detail": trigger_error, "run": run},
-                status_code=502,
-            )
-        run = store.update_run_trigger_result(
-            request_id=request_id,
-            trigger_http_status=trigger_result.http_status,
-            trigger_x_request_id=trigger_result.x_request_id,
-            conversation_url=trigger_result.conversation_url,
-            trigger_error=trigger_result.error,
+                action="create",
+            ),
         )
         return JSONResponse(run)
 
@@ -233,35 +275,18 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             working_directory=run.get("working_directory_snapshot"),
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
-        try:
-            trigger_result = await run_in_threadpool(
-                trigger_client.trigger,
+        schedule_trigger_dispatch(
+            request,
+            dispatch_trigger_result(
+                trigger_client=trigger_client,
                 trigger_url=trigger_url,
                 access_token=access_token,
                 conversation_key=conversation_key,
                 input_text=trigger_input,
                 idempotency_key=idempotency_key,
-            )
-        except Exception as exc:
-            trigger_error = redact_secret(f"{type(exc).__name__}: {exc}", access_token)
-            logger.exception("steer trigger dispatch raised unexpectedly for request_id=%s", request_id)
-            run = store.update_run_trigger_result(
                 request_id=request_id,
-                trigger_http_status=0,
-                trigger_x_request_id=None,
-                conversation_url=None,
-                trigger_error=trigger_error,
-            )
-            return JSONResponse(
-                {"success": False, "error": "trigger request failed", "detail": trigger_error, "run": run},
-                status_code=502,
-            )
-        run = store.update_run_trigger_result(
-            request_id=request_id,
-            trigger_http_status=trigger_result.http_status,
-            trigger_x_request_id=trigger_result.x_request_id,
-            conversation_url=trigger_result.conversation_url,
-            trigger_error=trigger_result.error,
+                action="steer",
+            ),
         )
         return JSONResponse(run)
 

@@ -874,6 +874,26 @@ class RelayStore:
         self._notify_run(int(payload["id"]))
         return payload
 
+    def mark_run_trigger_sent(self, request_id: str) -> dict[str, Any]:
+        """Mark a newly-created run as dispatched to the trigger API.
+
+        The actual trigger HTTP result is recorded later by
+        update_run_trigger_result(). Keeping this as a separate transition lets
+        the dashboard stop showing the local "triggering" submit state without
+        pretending ChatGPT has already accepted the trigger.
+        """
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            run = self._get_run_by_request_id_conn(conn, request_id)
+            status = "sent" if run["status"] == "draft" else run["status"]
+            conn.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE request_id = ?",
+                (status, now, request_id),
+            )
+        result = self.get_run_by_request_id(request_id)
+        self._notify_run(int(result["id"]))
+        return result
+
     def steer_run(
         self,
         *,
