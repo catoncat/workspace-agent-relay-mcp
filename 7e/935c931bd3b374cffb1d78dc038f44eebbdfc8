@@ -1,0 +1,19 @@
+frontend/tests/threadViewCopy.test.mjs
+  s_072cce7bc0e67c::t_72f1df941ad1d3 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "7e935c931bd3b374cffb1d78dc038f44eebbdfc8",
+  "prompts": {},
+  "sessions": {
+    "s_072cce7bc0e67c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1351-45ed-75d1-a08f-b1f482b2973c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
