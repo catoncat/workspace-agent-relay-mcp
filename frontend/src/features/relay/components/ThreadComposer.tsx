@@ -143,7 +143,7 @@ export function ThreadComposer({
     <footer className="shrink-0 p-3">
       <div className="mx-auto max-w-3xl">
         {hasQueuedMessages ? (
-          <div className="relative z-0 mx-10 mb-[-10px] rounded-t-3xl border border-input bg-background px-4 pt-2 pb-5 text-sm shadow-xs">
+          <div className="relative z-0 mx-2 mb-[-10px] rounded-t-2xl border border-input bg-background px-3 pt-2 pb-5 text-sm shadow-xs sm:mx-10 sm:rounded-t-3xl sm:px-4">
             <div className="flex flex-col gap-1">
               {queuedMessages.map((message) => (
                 <QueuedMessageRow
@@ -257,28 +257,34 @@ function QueuedMessageRow({
 
   if (editing) {
     return (
-      <div className="flex items-start gap-2 py-1">
+      <div className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2 gap-y-2 py-1 sm:flex sm:items-start sm:gap-2">
         <CornerDownRightIcon className="mt-2 size-4 shrink-0 text-muted-foreground" />
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleEditKeyDown}
           rows={Math.min(4, Math.max(1, draft.split('\n').length))}
-          className="min-h-8 flex-1 resize-none rounded-xl border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+          className="min-h-24 w-full min-w-0 resize-none rounded-xl border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 sm:min-h-8 sm:flex-1"
           autoFocus
         />
-        <div className="flex shrink-0 items-center gap-1 pt-0.5">
+        <div className="col-start-2 flex min-h-10 shrink-0 items-center justify-end gap-1 sm:col-start-auto sm:min-h-0 sm:justify-start sm:pt-0.5">
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            className="rounded-full"
+            className="h-10 rounded-full px-4 sm:h-7 sm:px-2.5"
             disabled={!draft.trim()}
             onClick={saveEdit}
           >
             保存
           </Button>
-          <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={cancelEdit}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-10 rounded-full px-4 sm:h-7 sm:px-2.5"
+            onClick={cancelEdit}
+          >
             取消
           </Button>
         </div>
