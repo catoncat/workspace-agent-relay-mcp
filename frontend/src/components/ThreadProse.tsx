@@ -15,7 +15,7 @@ import { Streamdown, type Components, type CustomRendererProps, type ExtraProps 
 const streamdownPlugins = { cjk, code: codePlugin, math, mermaid }
 
 const threadProseClass = cn(
-  'thread-prose text-sm leading-relaxed text-foreground/90 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
+  'thread-prose min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground/90 [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:break-words [&_a]:[overflow-wrap:anywhere] [&_p]:min-w-0 [&_p]:max-w-full [&_p]:break-words [&_p]:[overflow-wrap:anywhere]',
 )
 
 type ThreadProseProps = {
@@ -63,7 +63,7 @@ function ThreadMarkdownCode({ className, children, ...props }: MarkdownCodeProps
     return (
       <code
         className={cn(
-          'rounded bg-muted/50 px-1 py-0.5 font-mono text-[0.85em] text-foreground/90',
+          'break-all whitespace-normal rounded bg-muted/50 px-1 py-0.5 font-mono text-[0.85em] text-foreground/90',
           className,
         )}
         {...props}
@@ -82,7 +82,7 @@ function ThreadUl(props: HTMLAttributes<HTMLElement> & ExtraProps) {
   const { className, children, ...rest } = props
   return (
     <ul
-      className={cn('my-2 list-none space-y-1.5 pl-0', className)}
+      className={cn('my-2 min-w-0 max-w-full list-none space-y-1.5 pl-0', className)}
       data-streamdown="unordered-list"
       {...rest}
     >
@@ -95,7 +95,7 @@ function ThreadOl(props: HTMLAttributes<HTMLElement> & ExtraProps) {
   const { className, children, ...rest } = props
   return (
     <ol
-      className={cn('my-2 list-none space-y-1.5 pl-0 [counter-reset:thread-ol]', className)}
+      className={cn('my-2 min-w-0 max-w-full list-none space-y-1.5 pl-0 [counter-reset:thread-ol]', className)}
       data-streamdown="ordered-list"
       {...rest}
     >
@@ -109,7 +109,7 @@ function ThreadLi(props: HTMLAttributes<HTMLElement> & ExtraProps) {
   return (
     <li
       className={cn(
-        'flex gap-2.5 py-0.5 leading-relaxed',
+        'flex min-w-0 max-w-full gap-2.5 py-0.5 leading-relaxed',
         '[ol_&]:before:mr-0 [ol_&]:before:min-w-[1.1rem] [ol_&]:before:shrink-0 [ol_&]:before:text-right [ol_&]:before:text-muted-foreground/70 [ol_&]:before:content-[counter(thread-ol)\".\"] [ol_&]:before:[counter-increment:thread-ol]',
         className,
       )}
@@ -120,7 +120,7 @@ function ThreadLi(props: HTMLAttributes<HTMLElement> & ExtraProps) {
         aria-hidden
         className="mt-[0.55em] size-1 shrink-0 rounded-full bg-muted-foreground/45 [ol_&]:hidden"
       />
-      <span className="min-w-0 flex-1 [&>p:first-child]:inline [&>p:only-child]:m-0 [&_code]:break-all [&_code]:whitespace-normal">
+      <span className="min-w-0 max-w-full flex-1 break-words [overflow-wrap:anywhere] [&>p:first-child]:inline [&>p:only-child]:m-0 [&_a]:break-words [&_a]:[overflow-wrap:anywhere] [&_code]:break-all [&_code]:whitespace-normal">
         {children}
       </span>
     </li>
@@ -136,12 +136,12 @@ function CompactCode({ code }: CustomRendererProps) {
   }
 
   return (
-    <div className="group/code relative my-2">
+    <div className="group/code relative my-2 min-w-0 max-w-full">
       <CopyButton
         text={trimmed}
         className="absolute right-1.5 top-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
       />
-      <pre className="max-h-96 overflow-x-auto overflow-y-auto rounded-md bg-muted/40 p-3 text-xs leading-relaxed">
+      <pre className="max-h-96 max-w-full overflow-x-auto overflow-y-auto rounded-md bg-muted/40 p-3 text-xs leading-relaxed">
         <code className="font-mono text-foreground/85">{trimmed}</code>
       </pre>
     </div>
@@ -150,7 +150,7 @@ function CompactCode({ code }: CustomRendererProps) {
 
 function CopyableRow({ text }: { text: string }) {
   return (
-    <div className="group/code my-1 flex items-center gap-2 rounded-md bg-muted/40 px-3 py-1.5">
+    <div className="group/code my-1 flex min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-md bg-muted/40 px-3 py-1.5">
       <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs text-foreground/85">
         {text}
       </code>

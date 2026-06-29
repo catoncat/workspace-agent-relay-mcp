@@ -551,21 +551,21 @@ function InfrastructureTraceBatch({ events }: { events: RunEvent[] }) {
   const label = events.length === 1 ? '1 setup tool hidden' : `${events.length} setup tools hidden`
 
   return (
-    <div className="space-y-1">
+    <div className="min-w-0 max-w-full space-y-1 overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground/80 transition-colors hover:text-foreground"
+        className="flex min-w-0 max-w-full items-center gap-1.5 text-xs text-muted-foreground/80 transition-colors hover:text-foreground"
       >
         {expanded ? (
           <ChevronUpIcon className="size-3.5 shrink-0" />
         ) : (
           <ChevronDownIcon className="size-3.5 shrink-0" />
         )}
-        <span>{label}</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{label}</span>
       </button>
       {expanded ? (
-        <ul className="my-1 list-none space-y-1 pl-0 text-sm text-muted-foreground">
+        <ul className="my-1 min-w-0 max-w-full list-none space-y-1 overflow-hidden pl-0 text-sm text-muted-foreground">
           {events.map((event, index) => (
             <ToolTraceListItem key={`infra-trace-${event.id ?? index}`} event={event} />
           ))}
@@ -613,16 +613,16 @@ function ToolTraceBatch({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="flex min-w-0 max-w-full items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronDownIcon className="size-3.5 shrink-0" />
-        <span>{events.length} tool calls</span>
+        <span className="min-w-0 truncate">{events.length} tool calls</span>
       </button>
     )
   }
 
   return (
-    <ul className="my-1 list-none space-y-1 pl-0 text-sm text-muted-foreground">
+    <ul className="my-1 min-w-0 max-w-full list-none space-y-1 overflow-hidden pl-0 text-sm text-muted-foreground">
       {events.map((event, index) => (
         <ToolTraceListItem key={`trace-${event.id ?? index}`} event={event} />
       ))}
@@ -637,7 +637,7 @@ function ToolTraceListItem({ event }: { event: RunEvent }) {
   const label = formatToolCallLabel(fields)
 
   return (
-    <li className={cn('flex gap-2.5 py-0.5', !fields.ok && 'text-destructive')}>
+    <li className={cn('flex min-w-0 max-w-full gap-2.5 py-0.5', !fields.ok && 'text-destructive')}>
       <span
         aria-hidden
         className={cn(
@@ -645,13 +645,14 @@ function ToolTraceListItem({ event }: { event: RunEvent }) {
           !fields.ok && 'bg-destructive/60',
         )}
       />
-      <span className="min-w-0 flex-1">
+      <span className="min-w-0 max-w-full flex-1 overflow-hidden">
         <button
           type="button"
+          title={label}
           disabled={!hasDetails}
           onClick={() => setShowDetails((value) => !value)}
           className={cn(
-            'text-left transition-colors',
+            'block min-w-0 max-w-full overflow-hidden whitespace-normal break-words text-left transition-colors [overflow-wrap:anywhere]',
             hasDetails && 'cursor-pointer hover:text-foreground',
             !hasDetails && 'cursor-default',
           )}
@@ -660,7 +661,7 @@ function ToolTraceListItem({ event }: { event: RunEvent }) {
           {!fields.ok ? ' · failed' : null}
         </button>
         {showDetails && hasDetails ? (
-          <div className="mt-1 space-y-1.5 text-xs text-muted-foreground">
+          <div className="mt-1 min-w-0 space-y-1.5 text-xs text-muted-foreground">
             {fields.argsSummary ? (
               <SummaryList title="Args" entries={fields.argsSummary} />
             ) : null}
@@ -695,11 +696,11 @@ function SummaryList({
   return (
     <div>
       <p className="mb-1 text-[11px] text-muted-foreground/80">{title}</p>
-      <dl className="flex flex-col gap-0.5 text-[11px]">
+      <dl className="flex min-w-0 flex-col gap-0.5 text-[11px]">
         {keys.map((key) => (
-          <div key={key} className="flex gap-2">
+          <div key={key} className="flex min-w-0 gap-2">
             <dt className="shrink-0 text-muted-foreground/70">{key}</dt>
-            <dd className="min-w-0 break-all text-foreground/80">{formatJsonValue(entries[key])}</dd>
+            <dd className="min-w-0 flex-1 break-all text-foreground/80">{formatJsonValue(entries[key])}</dd>
           </div>
         ))}
       </dl>
