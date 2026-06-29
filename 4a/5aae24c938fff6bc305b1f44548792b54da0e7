@@ -1,0 +1,55 @@
+tests/test_trigger_payload.py
+  s_4b817b06356300::t_290f793b4ef84d 117,119,124-125
+tests/test_tool_trace.py
+  s_4b817b06356300::t_290f793b4ef84d 386,390,396,398,401,403,406-407
+  s_4b817b06356300::t_19069e5a66bd5a 385
+tests/test_web_api.py
+  s_4b817b06356300::t_290f793b4ef84d 161,166,170-173,175-178,181,186-187,189-190,193,205,207-208
+frontend/src/index.css
+  s_4b817b06356300::t_5c567488b713a1 313
+docs/agent-instructions.md
+  s_4b817b06356300::t_86d702c02f87b8 82,101
+frontend/src/features/relay/components/ThreadHeader.tsx
+  s_4b817b06356300::t_871c589db7d233 4-5
+tests/test_relay_store.py
+  s_4b817b06356300::t_290f793b4ef84d 1227,1229-1234,1236-1240,1243,1252-1255,1258,1265,1274-1275,1277-1279,1282-1284
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_4b817b06356300::t_43e7662ccf9dd1 47
+frontend/src/features/relay/hooks.ts
+  s_4b817b06356300::t_8dff710340d5f2 1,19
+AGENTS.md
+  s_4b817b06356300::t_0bbb061ad11f4b 11,21,28,51,66,82,84-85
+src/workspace_agent_relay_mcp/api/routes/conversations.py
+  s_4b817b06356300::t_8c7879f935aade 44,50
+frontend/src/api/client.ts
+  s_4b817b06356300::t_8bf42fdb774af2 1
+README.md
+  s_4b817b06356300::t_b80c21d25d4fc4 32-33
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_4b817b06356300::t_f19c2b541836b8 13,31
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_4b817b06356300::t_b291099ac1fd62 1102-1104
+  s_4b817b06356300::t_240ba55e972a9c 486
+  s_4b817b06356300::t_b639e0b325592a 138
+  s_4b817b06356300::t_8542c55e5d1b34 581,584
+  s_4b817b06356300::t_21a429daabb204 437-438
+  s_4b817b06356300::t_237e21b3b8b7f1 1096,1099-1101
+src/workspace_agent_relay_mcp/trigger.py
+  s_4b817b06356300::t_1cbb4e94fb9f83 7,51,54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "4a5aae24c938fff6bc305b1f44548792b54da0e7",
+  "prompts": {},
+  "sessions": {
+    "s_4b817b06356300": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f113b-d5b0-7462-bff9-68cab2ae2f23",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
