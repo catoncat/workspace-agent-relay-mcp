@@ -10,10 +10,12 @@ import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
 import {
   appendQueuedMessage,
   editQueuedMessage,
+  getQueuedMessagesForConversation,
   mergeQueuedMessages,
   removeQueuedMessage,
   takeQueuedMessage,
-  type QueuedComposerMessage,
+  updateQueuedMessagesForConversation,
+  type QueuedMessageBuckets,
 } from '@/features/relay/queueModel'
 import {
   useBootstrap,
@@ -53,9 +55,9 @@ export function RelayPage() {
   const selectedRunId = parseRouteId(params.runId)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [queuedMessages, setQueuedMessages] = useState<QueuedComposerMessage[]>([])
-  const [flushQueuedWhenIdle, setFlushQueuedWhenIdle] = useState(false)
-  const queuedMessagesRef = useRef<QueuedComposerMessage[]>(queuedMessages)
+  const [queuedMessagesByConversation, setQueuedMessagesByConversation] = useState<QueuedMessageBuckets>({})
+  const [flushQueuedConversationId, setFlushQueuedConversationId] = useState<number | null>(null)
+  const queuedMessagesByConversationRef = useRef<QueuedMessageBuckets>(queuedMessagesByConversation)
 
   const bootstrapQuery = useBootstrap()
   const agents = bootstrapQuery.data?.agents ?? EMPTY_AGENTS
@@ -76,6 +78,11 @@ export function RelayPage() {
     [selectedConversationId, visibleConversations],
   )
   const activeConversationId = selectedConversation?.id ?? null
+  const queuedMessages = useMemo(
+    () => getQueuedMessagesForConversation(queuedMessagesByConversation, activeConversationId),
+    [activeConversationId, queuedMessagesByConversation],
+  )
+  const queueFlushPending = flushQueuedConversationId === activeConversationId
 
   const runsQuery = useRuns(activeConversationId)
   const runs = runsQuery.data ?? EMPTY_RUNS
@@ -120,14 +127,15 @@ export function RelayPage() {
   const agentWorking = isConversationWorking(steerTargetStatus)
 
   useEffect(() => {
-    queuedMessagesRef.current = queuedMessages
-  }, [queuedMessages])
+    queuedMessagesByConversationRef.current = queuedMessagesByConversation
+  }, [queuedMessagesByConversation])
 
   useEffect(() => {
-    if (queuedMessages.length === 0 && flushQueuedWhenIdle) {
-      setFlushQueuedWhenIdle(false)
+    if (flushQueuedConversationId === null) return
+    if (getQueuedMessagesForConversation(queuedMessagesByConversation, flushQueuedConversationId).length === 0) {
+      setFlushQueuedConversationId(null)
     }
-  }, [flushQueuedWhenIdle, queuedMessages.length])
+  }, [flushQueuedConversationId, queuedMessagesByConversation])
 
   const conversationIds = useMemo(() => visibleConversations.map((c) => c.id), [visibleConversations])
   const workingConversationIds = useWorkingConversationIds(
@@ -165,7 +173,8 @@ export function RelayPage() {
   const handleSend = useCallback(
     async (text: string, intent: SendIntent = 'queue') => {
       const trimmed = text.trim()
-      if (!trimmed || !activeConversationId) return
+      const conversationId = activeConversationId
+      if (!trimmed || !conversationId) return
       // Cmd/Ctrl+Enter is explicit guidance: reuse the current active run's
       // request_id. Normal Enter while the agent is busy only updates the local
       // FIFO queue; it is not dispatched until the queue is closed/flushed.
@@ -175,10 +184,14 @@ export function RelayPage() {
           ? null
           : await createRunMutation.mutateAsync(trimmed)
       if (detail === null) {
-        setQueuedMessages((current) => appendQueuedMessage(current, trimmed, nanoid))
+        setQueuedMessagesByConversation((current) =>
+          updateQueuedMessagesForConversation(current, conversationId, (queue) =>
+            appendQueuedMessage(queue, trimmed, nanoid),
+          ),
+        )
         return
       }
-      navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(activeConversationId), runId: String(detail.run.id) } })
+      navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(conversationId), runId: String(detail.run.id) } })
     },
     [activeConversationId, agentWorking, createRunMutation, navigate, steerMutation, steerTargetRun],
   )
@@ -189,58 +202,88 @@ export function RelayPage() {
   }, [dismissRunMutation, steerTargetRun?.id])
 
   const handleDeleteQueuedMessage = useCallback((id: string) => {
-    setQueuedMessages((current) => removeQueuedMessage(current, id))
-  }, [])
+    if (!activeConversationId) return
+    setQueuedMessagesByConversation((current) =>
+      updateQueuedMessagesForConversation(current, activeConversationId, (queue) =>
+        removeQueuedMessage(queue, id),
+      ),
+    )
+  }, [activeConversationId])
 
   const handleEditQueuedMessage = useCallback((id: string, text: string) => {
-    setQueuedMessages((current) => editQueuedMessage(current, id, text))
-  }, [])
+    if (!activeConversationId) return
+    setQueuedMessagesByConversation((current) =>
+      updateQueuedMessagesForConversation(current, activeConversationId, (queue) =>
+        editQueuedMessage(queue, id, text),
+      ),
+    )
+  }, [activeConversationId])
 
   const handleSteerQueuedMessage = useCallback(
     async (id: string) => {
-      const result = takeQueuedMessage(queuedMessagesRef.current, id)
+      const conversationId = activeConversationId
+      if (!conversationId) return
+      const result = takeQueuedMessage(
+        getQueuedMessagesForConversation(queuedMessagesByConversationRef.current, conversationId),
+        id,
+      )
       if (!result.message) return
-      setQueuedMessages(result.queue)
+      setQueuedMessagesByConversation((current) =>
+        updateQueuedMessagesForConversation(current, conversationId, () => result.queue),
+      )
       try {
         await handleSend(result.message.text, 'steer')
       } catch {
-        setQueuedMessages((current) => [result.message!, ...current])
+        setQueuedMessagesByConversation((current) =>
+          updateQueuedMessagesForConversation(current, conversationId, (queue) => [result.message!, ...queue]),
+        )
       }
     },
-    [handleSend],
+    [activeConversationId, handleSend],
   )
 
   const handleCloseQueue = useCallback(() => {
-    if (queuedMessagesRef.current.length === 0) return
-    setFlushQueuedWhenIdle(true)
-  }, [])
+    const conversationId = activeConversationId
+    if (!conversationId) return
+    if (getQueuedMessagesForConversation(queuedMessagesByConversationRef.current, conversationId).length === 0) return
+    setFlushQueuedConversationId(conversationId)
+  }, [activeConversationId])
 
   useEffect(() => {
-    if (!flushQueuedWhenIdle) return
-    if (agentWorking || sending || queuedMessages.length === 0 || !activeConversationId) return
+    if (flushQueuedConversationId === null) return
+    if (flushQueuedConversationId !== activeConversationId) return
+    if (agentWorking || sending || queuedMessages.length === 0) return
 
+    const conversationId = flushQueuedConversationId
     const messagesToFlush = queuedMessages
     const merged = mergeQueuedMessages(messagesToFlush)
-    setQueuedMessages([])
-    setFlushQueuedWhenIdle(false)
+    setQueuedMessagesByConversation((current) =>
+      updateQueuedMessagesForConversation(current, conversationId, () => []),
+    )
+    setFlushQueuedConversationId(null)
     if (!merged) return
 
     void createRunMutation.mutateAsync(merged)
       .then((detail) => {
         navigate({
           to: '/c/$conversationId/r/$runId',
-          params: { conversationId: String(activeConversationId), runId: String(detail.run.id) },
+          params: { conversationId: String(conversationId), runId: String(detail.run.id) },
         })
       })
       .catch(() => {
-        setQueuedMessages((current) => [...messagesToFlush, ...current])
-        setFlushQueuedWhenIdle(true)
+        setQueuedMessagesByConversation((current) =>
+          updateQueuedMessagesForConversation(current, conversationId, (queue) => [
+            ...messagesToFlush,
+            ...queue,
+          ]),
+        )
+        setFlushQueuedConversationId(conversationId)
       })
   }, [
     agentWorking,
     activeConversationId,
     createRunMutation,
-    flushQueuedWhenIdle,
+    flushQueuedConversationId,
     navigate,
     queuedMessages,
     sending,
@@ -337,7 +380,7 @@ export function RelayPage() {
           mode={composerMode}
           canSteer={Boolean(steerTargetRun)}
           queuedMessages={queuedMessages}
-          queueFlushPending={flushQueuedWhenIdle}
+          queueFlushPending={queueFlushPending}
           onDismiss={handleDismiss}
           onSend={handleSend}
           onQueuedMessageDelete={handleDeleteQueuedMessage}

@@ -3,6 +3,31 @@ export type QueuedComposerMessage = {
   text: string
 }
 
+export type QueuedMessageBuckets = Record<string, QueuedComposerMessage[]>
+
+export function getQueuedMessagesForConversation(
+  buckets: QueuedMessageBuckets,
+  conversationId: number | null | undefined,
+): QueuedComposerMessage[] {
+  if (conversationId == null) return []
+  return buckets[String(conversationId)] ?? []
+}
+
+export function updateQueuedMessagesForConversation(
+  buckets: QueuedMessageBuckets,
+  conversationId: number,
+  update: (queue: QueuedComposerMessage[]) => QueuedComposerMessage[],
+): QueuedMessageBuckets {
+  const key = String(conversationId)
+  const nextQueue = update(buckets[key] ?? [])
+  if (nextQueue.length === 0) {
+    const nextBuckets = { ...buckets }
+    delete nextBuckets[key]
+    return nextBuckets
+  }
+  return { ...buckets, [key]: nextQueue }
+}
+
 export function appendQueuedMessage(
   queue: QueuedComposerMessage[],
   text: string,
