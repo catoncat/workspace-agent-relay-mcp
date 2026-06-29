@@ -1,0 +1,25 @@
+src/workspace_agent_relay_mcp/server.py
+  s_4b817b06356300::t_dd5814fe4ead5b 64
+tests/test_trigger_payload.py
+  s_4b817b06356300::t_bf95fd05c12da4 81-82,117-118
+src/workspace_agent_relay_mcp/trigger.py
+  s_4b817b06356300::t_1bdca466576eef 108-109
+docs/agent-instructions.md
+  s_4b817b06356300::t_d5f10daf310a84 220-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "e38e491c0d307899cf086b20151cb22e0fb42441",
+  "prompts": {},
+  "sessions": {
+    "s_4b817b06356300": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f113b-d5b0-7462-bff9-68cab2ae2f23",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
