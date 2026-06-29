@@ -1,0 +1,21 @@
+frontend/src/features/relay/optimisticMessageModel.ts
+  s_072cce7bc0e67c::t_3b95a490103c6e 1-44
+frontend/tests/optimisticMessageModel.test.mjs
+  s_072cce7bc0e67c::t_2f4149118478d5 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "84751bae85335abeae207f524a71fd1bf461a770",
+  "prompts": {},
+  "sessions": {
+    "s_072cce7bc0e67c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1351-45ed-75d1-a08f-b1f482b2973c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
