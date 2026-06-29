@@ -1,0 +1,57 @@
+tests/test_relay_store.py
+  s_4b817b06356300::t_16e8c2be834132 787
+  s_4b817b06356300::t_55766f67879609 813-819,857-860,865-866,869,874,880,882-889,905-906
+frontend/src/features/relay/sendIntent.ts
+  s_4b817b06356300::t_62c3b1c6142ded 1
+frontend/src/pages/RelayPage.tsx
+  s_4b817b06356300::t_f80979a951e926 133
+  s_4b817b06356300::t_ce1a1e7dd0a692 24-25,82-95,97,103,128,131-132,134,138,142-144,214
+tests/test_web_api.py
+  s_4b817b06356300::t_12ea6f084f8de5 546
+  s_4b817b06356300::t_9ee76444db0682 370-371,377-378
+  s_4b817b06356300::t_b037a94a8b176a 428-456
+  s_4b817b06356300::t_4bb27bb350cefc 457-458
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_4b817b06356300::t_17e7a1c1388e06 2-7,10,13-23,32,34,41,46-47,60-61,65-73,75-79,83,91,114-120,143-214,218,222
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_4b817b06356300::t_ad00d5595fa8a9 105-107,163-168,188,190-201,203
+frontend/src/components/ThreadView.tsx
+  s_4b817b06356300::t_2d977079daae02 16,130,187,454,719,733
+  s_4b817b06356300::t_77cb79b3b0c97d 193
+  s_4b817b06356300::t_e0c2863e9b5ee7 816,905
+AGENTS.md
+  s_4b817b06356300::t_b555848c8edf6e 86-87
+frontend/src/api/client.ts
+  s_4b817b06356300::t_6b67359ab4ba3c 214
+  s_4b817b06356300::t_1fc99cb97cbfc2 223,228
+docs/agent-instructions.md
+  s_4b817b06356300::t_3523676c793706 118-127
+src/workspace_agent_relay_mcp/server.py
+  s_4b817b06356300::t_bc13e8d8757045 65
+src/workspace_agent_relay_mcp/trigger.py
+  s_4b817b06356300::t_f8a10f942aa9cd 72,81,85,94,101
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_4b817b06356300::t_760cc81e907590 22-24
+tests/test_trigger_payload.py
+  s_4b817b06356300::t_b8f095bc890156 84,94,113
+frontend/src/features/relay/hooks.ts
+  s_4b817b06356300::t_4f8e85ff50e97d 204,208
+README.md
+  s_4b817b06356300::t_e8a1e3891944a4 163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "e6be48832d1c5528618d05ff62a6a29c48b4ad22",
+  "prompts": {},
+  "sessions": {
+    "s_4b817b06356300": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f113b-d5b0-7462-bff9-68cab2ae2f23",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
