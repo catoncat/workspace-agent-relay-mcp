@@ -1,0 +1,32 @@
+scripts/hermes_poller_cdp.py
+  s_9ac40e568cf465::t_2154291516f62f 311
+  s_9ac40e568cf465::t_0084eae153ddf3 74
+  s_9ac40e568cf465::t_0cc04f5781cd9b 367
+  s_9ac40e568cf465::t_b58f4c7f3934d0 243-250,254-259,262,269-270,273,275,277-287,319,323-361
+  s_9ac40e568cf465::t_b0bd4af2721c1b 91-92
+  s_9ac40e568cf465::t_2ea6c44aacc4ea 108-112
+scripts/hermes_fetch.py
+  s_9ac40e568cf465::t_a8f5e747ce8d88 45-51,61-72,74,78-82
+scripts/dev-tunnel.sh
+  s_9ac40e568cf465::t_6ebd2c5144595e 325
+  s_9ac40e568cf465::t_7cf247afc35134 338
+  s_9ac40e568cf465::t_45c21c0aee86b4 196-271,276-286
+  s_9ac40e568cf465::t_5cf42429030fde 295,299-303
+  s_9ac40e568cf465::t_f8ea7fd57f0be0 64-66,70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "f7d52c6de01c17d53153c2ffd5640b1d75c8f447",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
