@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { SendIntent } from '@/features/relay/sendIntent'
 import type { QueuedComposerMessage } from '@/features/relay/queueModel'
+import type { RunStatus } from '@/api/types'
 import { isComposerBusy, isUserReplyStatus } from '@/lib/runStatus'
 import { cn } from '@/lib/utils'
 import {
@@ -344,7 +345,7 @@ function QueuedMessageRow({
 export type { ComposerMode }
 
 export function resolveComposerMode(
-  latestRunStatus: string | undefined,
+  latestRunStatus: RunStatus | undefined,
   sending: boolean,
 ): ComposerMode {
   if (sending) return 'sending'

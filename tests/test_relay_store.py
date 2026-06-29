@@ -1226,6 +1226,111 @@ def test_steer_run_on_needs_user_resumes_turn(tmp_path: Path) -> None:
     assert progress["success"] is True
 
 
+def test_late_progress_does_not_clear_needs_user_until_operator_answer(tmp_path: Path) -> None:
+    """After ask_user, incidental late progress must not make the UI look
+    unpaused; only an operator answer/steer resumes the turn."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.create_conversation(agent_id=store.list_agents()[0]["id"], name="Sherlog", conversation_key="research:sherlog")
+    _make_active_run(store, request_id="run_1")
+    store.ask_user(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        question="Which branch should I target?",
+    )
+
+    progress = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        message="late progress after question",
+    )
+
+    assert progress["success"] is True
+    assert progress["run_status"] == "needs_user"
+    assert store.get_run_by_request_id("run_1")["status"] == "needs_user"
+
+    store.steer_run(
+        run_id=store.get_run_by_request_id("run_1")["id"],
+        user_input="Target main.",
+    )
+    resumed = store.record_progress(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        message="progress after answer",
+    )
+    assert resumed["success"] is True
+    assert resumed["run_status"] == "waiting"
+    assert store.get_run_by_request_id("run_1")["status"] == "waiting"
+
+
+def test_trigger_failed_callbacks_clear_stale_failure_display(tmp_path: Path) -> None:
+    """Callbacks from an agent that actually started after a trigger failure
+    should move the run out of the stale trigger_failed display state."""
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conversation = store.create_conversation(
+        agent_id=agent["id"],
+        name="Sherlog",
+        conversation_key="research:sherlog",
+    )
+
+    plan_run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="plan after trigger failure",
+        idempotency_key="run_plan",
+        request_id="run_plan",
+    )
+    store.update_run_trigger_result(
+        request_id="run_plan",
+        trigger_http_status=0,
+        trigger_x_request_id=None,
+        conversation_url=None,
+        trigger_error="TimeoutError: no 202",
+    )
+    plan = store.record_plan(
+        request_id="run_plan",
+        conversation_key="research:sherlog",
+        steps=[{"id": "s1", "title": "Recover"}],
+    )
+    assert plan["success"] is True
+    assert plan["run_status"] == "accepted"
+    assert store.get_run(plan_run["id"])["status"] == "accepted"
+
+    trace_run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="research:sherlog",
+        input_markdown="trace after trigger failure",
+        idempotency_key="run_trace",
+        request_id="run_trace",
+    )
+    store.update_run_trigger_result(
+        request_id="run_trace",
+        trigger_http_status=0,
+        trigger_x_request_id=None,
+        conversation_url=None,
+        trigger_error="TimeoutError: no 202",
+    )
+    trace = store.record_tool_trace(
+        request_id="run_trace",
+        conversation_key="research:sherlog",
+        tool="read_file",
+        title="read_file → AGENTS.md",
+    )
+    assert trace["success"] is True
+    assert store.get_run(trace_run["id"])["status"] == "waiting"
+
+
 def test_create_run_rejects_mismatched_conversation_id_and_key(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import logging
 import sqlite3
 from typing import Any
 
-from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -16,13 +13,10 @@ from ...trigger import (
     TriggerClient,
     build_trigger_input,
     generate_request_id,
-    redact_secret,
 )
 from ..deps import json_body
 from ..errors import json_error
 from ..validation import resolve_agent_token, validate_trigger_url
-
-logger = logging.getLogger("workspace_agent_relay_mcp.trigger")
 
 
 def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
@@ -35,7 +29,8 @@ def _run_detail(store: Any, run_id: int) -> dict[str, Any]:
 
 
 def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
-    async def dispatch_trigger_result(
+    def schedule_trigger_dispatch(
+        request: Request,
         *,
         trigger_client: Any,
         trigger_url: str,
@@ -46,58 +41,19 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         request_id: str,
         action: str,
     ) -> None:
-        try:
-            trigger_result = await run_in_threadpool(
-                trigger_client.trigger,
+        dispatcher = request.app.state.trigger_dispatcher
+        dispatcher.schedule(
+            dispatcher.dispatch_trigger_result(
+                trigger_client=trigger_client,
                 trigger_url=trigger_url,
                 access_token=access_token,
                 conversation_key=conversation_key,
                 input_text=input_text,
                 idempotency_key=idempotency_key,
-            )
-        except Exception as exc:
-            # trigger() normally catches HTTPError/URLError/TimeoutError/OSError
-            # itself and returns a TriggerResult. Reaching here means something
-            # unexpected blew up (e.g. opener misconfiguration). Preserve the
-            # real exception type+message so the failure is diagnosable instead
-            # of the old opaque "trigger request failed", but redact the access
-            # token in case it leaked into the exception text.
-            trigger_error = redact_secret(f"{type(exc).__name__}: {exc}", access_token)
-            logger.exception("%s trigger dispatch raised unexpectedly for request_id=%s", action, request_id)
-            store.update_run_trigger_result(
                 request_id=request_id,
-                trigger_http_status=0,
-                trigger_x_request_id=None,
-                conversation_url=None,
-                trigger_error=trigger_error,
+                action=action,
             )
-            return
-        store.update_run_trigger_result(
-            request_id=request_id,
-            trigger_http_status=trigger_result.http_status,
-            trigger_x_request_id=trigger_result.x_request_id,
-            conversation_url=trigger_result.conversation_url,
-            trigger_error=trigger_result.error,
         )
-
-    def schedule_trigger_dispatch(request: Request, coro: Any) -> None:
-        task = asyncio.create_task(coro)
-        tasks = getattr(request.app.state, "trigger_dispatch_tasks", None)
-        if tasks is None:
-            tasks = set()
-            request.app.state.trigger_dispatch_tasks = tasks
-        tasks.add(task)
-
-        def cleanup(completed: asyncio.Task) -> None:
-            tasks.discard(completed)
-            try:
-                completed.result()
-            except asyncio.CancelledError:
-                return
-            except Exception:
-                logger.exception("trigger dispatch task crashed")
-
-        task.add_done_callback(cleanup)
 
     async def list_runs(request: Request) -> JSONResponse:
         try:
@@ -164,6 +120,8 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         request_id = generate_request_id()
         idempotency_key = generate_request_id("idem")
         input_markdown = str(payload.get("input_markdown") or "")
+        if not input_markdown.strip():
+            return json_error("input_markdown must not be empty", status_code=400)
         conversation_key = str(conversation["conversation_key"])
         # Continuation = this conversation already has prior runs, so the agent
         # has seen the full protocol before. A new run no longer supersedes active
@@ -192,16 +150,14 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         run = store.mark_run_trigger_sent(request_id)
         schedule_trigger_dispatch(
             request,
-            dispatch_trigger_result(
-                trigger_client=trigger_client,
-                trigger_url=trigger_url,
-                access_token=access_token,
-                conversation_key=conversation_key,
-                input_text=trigger_input,
-                idempotency_key=idempotency_key,
-                request_id=request_id,
-                action="create",
-            ),
+            trigger_client=trigger_client,
+            trigger_url=trigger_url,
+            access_token=access_token,
+            conversation_key=conversation_key,
+            input_text=trigger_input,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            action="create",
         )
         return JSONResponse(run)
 
@@ -277,16 +233,14 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         schedule_trigger_dispatch(
             request,
-            dispatch_trigger_result(
-                trigger_client=trigger_client,
-                trigger_url=trigger_url,
-                access_token=access_token,
-                conversation_key=conversation_key,
-                input_text=trigger_input,
-                idempotency_key=idempotency_key,
-                request_id=request_id,
-                action="steer",
-            ),
+            trigger_client=trigger_client,
+            trigger_url=trigger_url,
+            access_token=access_token,
+            conversation_key=conversation_key,
+            input_text=trigger_input,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            action="steer",
         )
         return JSONResponse(run)
 

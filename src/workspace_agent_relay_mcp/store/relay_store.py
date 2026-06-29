@@ -9,21 +9,24 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
+from ..run_lifecycle import (
+    TERMINAL_STATUSES,
+    TRIGGER_MUTABLE_RUN_STATUSES,
+    USER_REPLY_STATUSES,
+    VALID_RESULT_STATUSES,
+    after_operator_steer,
+    after_plan,
+    after_progress,
+    after_tool_trace,
+    after_trigger_result,
+    after_trigger_sent,
+    after_user_question,
+)
+
 if TYPE_CHECKING:
     from .bus import RunEventBus
 
 
-TERMINAL_STATUSES = {"done", "blocked", "failed", "superseded"}
-# Active runs paused on a human decision (set by ask_user). Steering such a run
-# is the operator's ANSWER — it resumes the SAME turn rather than starting a new
-# one, so the route labels the steer trigger accordingly and steer_run transitions
-# the run out of the question state.
-USER_REPLY_STATUSES = {"needs_user", "question", "ask_user"}
-# Agent-settable result statuses. `superseded` is system-only, so record_result
-# must reject it. New dashboard sends no longer mark active runs as superseded;
-# superseded is retained for historical rows and explicit replacement flows.
-VALID_RESULT_STATUSES = {"done", "blocked", "failed"}
-TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
 MAX_STEP_TITLE_LEN = 200
@@ -885,7 +888,7 @@ class RelayStore:
         now = _now()
         with self._lock, self._connect(immediate=True) as conn:
             run = self._get_run_by_request_id_conn(conn, request_id)
-            status = "sent" if run["status"] == "draft" else run["status"]
+            status = after_trigger_sent(str(run["status"]))
             conn.execute(
                 "UPDATE runs SET status = ?, updated_at = ? WHERE request_id = ?",
                 (status, now, request_id),
@@ -925,7 +928,7 @@ class RelayStore:
             # it to "accepted" (agent resuming) on a 202. Other active states
             # (running, progress, waiting, accepted) are left untouched — the agent
             # is mid-work there and the steer is added guidance, not a resume.
-            next_status = "sent" if run["status"] in USER_REPLY_STATUSES else run["status"]
+            next_status = after_operator_steer(str(run["status"]))
             conn.execute(
                 """
                 UPDATE runs
@@ -1025,6 +1028,9 @@ class RelayStore:
                 markdown=None,
                 payload={"steps": normalized},
             )
+            next_status = after_plan(str(run["status"]))
+            if next_status != run["status"]:
+                conn.execute("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (next_status, now, run_id))
         plan = self.get_plan(run_id)
         self._notify_run(run_id)
         return {"success": True, "plan": plan, "run_status": self.get_run(run_id)["status"]}
@@ -1046,11 +1052,10 @@ class RelayStore:
         # record_result write back and advance the run, instead of being rejected
         # with run_closed. If no callback ever arrives, the run stays trigger_failed
         # (harvest-to-failed can be added later).
-        run_status_on_trigger = "accepted" if trigger_status == "accepted" else "trigger_failed"
         now = _now()
         with self._lock, self._connect(immediate=True) as conn:
             run = self._get_run_by_request_id_conn(conn, request_id)
-            status = run_status_on_trigger if run["status"] in TRIGGER_MUTABLE_RUN_STATUSES else run["status"]
+            status = after_trigger_result(str(run["status"]), trigger_status=trigger_status)
             conn.execute(
                 """
                 UPDATE runs
@@ -1182,10 +1187,11 @@ class RelayStore:
                 markdown=message,
                 payload=progress_payload,
             )
-            conn.execute("UPDATE runs SET status = 'waiting', updated_at = ? WHERE id = ?", (_now(), run_id))
+            next_status = after_progress(str(run["status"]))
+            conn.execute("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (next_status, _now(), run_id))
         plan = self.get_plan(run_id)
         self._notify_run(run_id)
-        return {"success": True, "event_id": event["id"], "plan": plan, "run_status": "waiting"}
+        return {"success": True, "event_id": event["id"], "plan": plan, "run_status": next_status}
 
     def record_tool_trace(
         self,
@@ -1230,6 +1236,9 @@ class RelayStore:
                 markdown=markdown,
                 payload=payload,
             )
+            next_status = after_tool_trace(str(run["status"]))
+            if next_status != run["status"]:
+                conn.execute("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (next_status, _now(), run_id))
         self._notify_run(run_id)
         return {"success": True, "event_id": event["id"]}
 
@@ -1279,7 +1288,10 @@ class RelayStore:
                 markdown=question,
                 payload={"choices": choices or [], "context": context or ""},
             )
-            conn.execute("UPDATE runs SET status = 'needs_user', updated_at = ? WHERE id = ?", (_now(), run["id"]))
+            conn.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE id = ?",
+                (after_user_question(str(run["status"])), _now(), run["id"]),
+            )
         self._notify_run(int(run["id"]))
         return {"success": True, "event_id": event["id"], "question_id": event["id"]}
 

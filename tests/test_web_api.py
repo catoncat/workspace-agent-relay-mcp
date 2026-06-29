@@ -576,6 +576,48 @@ def test_api_send_run_triggers_agent_and_records_metadata(tmp_path: Path) -> Non
     assert call["input_text"].endswith("Research sherlog")
 
 
+def test_api_create_run_rejects_blank_input_markdown(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": " \n\t "},
+        )
+        runs_response = client.get(f"/api/conversations/{conversation['id']}/runs")
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "input_markdown must not be empty"}
+    assert runs_response.json() == []
+    assert trigger_client.calls == []
+
+
+def test_api_trigger_dispatcher_cleans_completed_tasks(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        run_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Research sherlog"},
+        )
+        run = run_response.json()
+        _wait_for_call_count(trigger_client, 1)
+        _wait_for_run_status(client, run["id"], "accepted")
+
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            dispatcher = client.app.state.trigger_dispatcher
+            if dispatcher.active_count == 0:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("completed trigger dispatch task was not cleaned up")
+
+    assert run_response.status_code == 200
+
+
 def test_api_create_run_returns_before_trigger_response(tmp_path: Path) -> None:
     trigger_client = BlockingTriggerClient()
     client, _ = _client(tmp_path, trigger_client=trigger_client)

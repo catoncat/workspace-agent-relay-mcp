@@ -381,6 +381,36 @@ def test_internal_tool_trace_rejects_missing_required_fields(tmp_path: Path) -> 
     assert malformed.json() == {"success": False, "error": "malformed JSON body"}
 
 
+def test_internal_tool_trace_rejects_invalid_optional_payload_types(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    _seed_active_run(store)
+    headers = {"Authorization": "Bearer local-secret"}
+
+    invalid_cases = [
+        ({"args_summary": "not an object"}, "args_summary must be an object or null"),
+        ({"result_summary": ["not", "an", "object"]}, "result_summary must be an object or null"),
+        ({"started_at": 123}, "started_at must be a string or null"),
+        ({"duration_ms": -1}, "duration_ms must be non-negative"),
+        ({"error": {"message": "boom"}}, "error must be a string or null"),
+    ]
+
+    with client:
+        responses = [
+            client.post(
+                "/internal/tool-trace",
+                json=_trace_body(**payload),
+                headers=headers,
+            )
+            for payload, _ in invalid_cases
+        ]
+
+    assert [response.status_code for response in responses] == [400, 400, 400, 400, 400]
+    assert [response.json()["error"] for response in responses] == [
+        expected for _, expected in invalid_cases
+    ]
+    assert store.list_events(store.get_run_by_request_id("run_1")["id"]) == []
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Retired polling endpoints

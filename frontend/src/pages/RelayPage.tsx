@@ -7,14 +7,18 @@ import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
 import { WorkspaceCommandMenu } from '@/components/WorkspaceCommandMenu'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
-import type { Agent, Conversation, RelaySettings, Run, RunDetail, Workspace } from '@/api/types'
+import type { Agent, Conversation, RelaySettings, Run, Workspace } from '@/api/types'
 import { ThreadComposer, resolveComposerMode } from '@/features/relay/components/ThreadComposer'
 import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
+import {
+  planComposerSend,
+  planQueueFlush,
+  restoreFailedFlush,
+} from '@/features/relay/composerController'
 import {
   appendQueuedMessage,
   editQueuedMessage,
   getQueuedMessagesForConversation,
-  mergeQueuedMessages,
   removeQueuedMessage,
   takeQueuedMessage,
   updateQueuedMessagesForConversation,
@@ -223,43 +227,49 @@ export function RelayPage() {
 
   const handleSend = useCallback(
     async (text: string, intent: SendIntent = 'queue') => {
-      const trimmed = text.trim()
       const conversationId = activeConversationId
-      if (!trimmed || !conversationId) return
-      // Cmd/Ctrl+Enter is explicit guidance: reuse the current active run's
-      // request_id. Normal Enter while the agent is busy only updates the local
-      // FIFO queue; it is not dispatched until the queue is closed/flushed.
-      const steerRun = intent === 'steer' ? steerTargetRun : null
-      const localDispatchPending = dispatchingConversationIdsRef.current.has(conversationId)
-      if (!steerRun && (agentWorking || sending || localDispatchPending)) {
+      const plan = planComposerSend({
+        text,
+        intent,
+        conversationId,
+        agentWorking,
+        sending,
+        localDispatchPending: conversationId
+          ? dispatchingConversationIdsRef.current.has(conversationId)
+          : false,
+        steerTargetRunId: steerTargetRun?.id,
+      })
+
+      if (plan.action === 'ignore') return
+      if (plan.action === 'queue') {
         setQueuedMessagesByConversation((current) =>
-          updateQueuedMessagesForConversation(current, conversationId, (queue) =>
-            appendQueuedMessage(queue, trimmed, nanoid),
+          updateQueuedMessagesForConversation(current, plan.conversationId, (queue) =>
+            appendQueuedMessage(queue, plan.text, nanoid),
           ),
         )
         return
       }
 
-      const optimisticMessageId = appendOptimisticMessage(conversationId, trimmed)
-      let detail: RunDetail
+      const optimisticMessageId = appendOptimisticMessage(plan.conversationId, plan.text)
+      let detail: Awaited<ReturnType<typeof createRunMutation.mutateAsync>>
       try {
-        detail = steerRun
-          ? await steerMutation.mutateAsync({ input: trimmed, runId: steerRun.id })
+        detail = plan.action === 'steer'
+          ? await steerMutation.mutateAsync({ input: plan.text, runId: plan.runId })
           : await (async () => {
-              dispatchingConversationIdsRef.current.add(conversationId)
+              dispatchingConversationIdsRef.current.add(plan.conversationId)
               try {
-                return await createRunMutation.mutateAsync(trimmed)
+                return await createRunMutation.mutateAsync(plan.text)
               } catch (error) {
-                dispatchingConversationIdsRef.current.delete(conversationId)
+                dispatchingConversationIdsRef.current.delete(plan.conversationId)
                 throw error
               }
             })()
       } catch (error) {
-        clearOptimisticMessage(conversationId, optimisticMessageId)
+        clearOptimisticMessage(plan.conversationId, optimisticMessageId)
         throw error
       }
-      clearOptimisticMessage(conversationId, optimisticMessageId)
-      navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(conversationId), runId: String(detail.run.id) } })
+      clearOptimisticMessage(plan.conversationId, optimisticMessageId)
+      navigate({ to: '/c/$conversationId/r/$runId', params: { conversationId: String(plan.conversationId), runId: String(detail.run.id) } })
     },
     [
       activeConversationId,
@@ -330,24 +340,30 @@ export function RelayPage() {
   useEffect(() => {
     if (flushQueuedConversationId === null) return
     if (flushQueuedConversationId !== activeConversationId) return
-    if (
-      agentWorking ||
-      sending ||
-      dispatchingConversationIdsRef.current.has(flushQueuedConversationId) ||
-      queuedMessages.length === 0
-    ) return
+    const plan = planQueueFlush({
+      flushConversationId: flushQueuedConversationId,
+      activeConversationId,
+      agentWorking,
+      sending,
+      localDispatchPending: dispatchingConversationIdsRef.current.has(flushQueuedConversationId),
+      queuedMessages,
+    })
 
-    const conversationId = flushQueuedConversationId
-    const messagesToFlush = queuedMessages
-    const merged = mergeQueuedMessages(messagesToFlush)
+    if (plan.action === 'wait') return
+    if (plan.action === 'ignore') {
+      setFlushQueuedConversationId(null)
+      return
+    }
+
+    const conversationId = plan.conversationId
+    const messagesToFlush = plan.messages
     setQueuedMessagesByConversation((current) =>
       updateQueuedMessagesForConversation(current, conversationId, () => []),
     )
     setFlushQueuedConversationId(null)
-    if (!merged) return
 
-    const optimisticMessageId = appendOptimisticMessage(conversationId, merged)
-    void createRunMutation.mutateAsync(merged)
+    const optimisticMessageId = appendOptimisticMessage(conversationId, plan.text)
+    void createRunMutation.mutateAsync(plan.text)
       .then((detail) => {
         clearOptimisticMessage(conversationId, optimisticMessageId)
         navigate({
@@ -359,8 +375,7 @@ export function RelayPage() {
         clearOptimisticMessage(conversationId, optimisticMessageId)
         setQueuedMessagesByConversation((current) =>
           updateQueuedMessagesForConversation(current, conversationId, (queue) => [
-            ...messagesToFlush,
-            ...queue,
+            ...restoreFailedFlush(messagesToFlush, queue),
           ]),
         )
         setFlushQueuedConversationId(conversationId)

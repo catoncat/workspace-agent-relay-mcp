@@ -21,7 +21,7 @@ import {
   updateSettings,
   updateWorkspace,
 } from '@/api/client'
-import type { Agent, Conversation, RelaySettings, Run, RunDetail, Workspace } from '@/api/types'
+import type { Agent, Conversation, RelaySettings, Run, RunDetail, RunStatus, Workspace } from '@/api/types'
 import {
   bootstrapOptions,
   runDetailOptions,
@@ -73,7 +73,7 @@ export function useRuns(conversationId: number | null) {
 export function useWorkingConversationIds(
   conversationIds: number[],
   selectedConversationId: number | null,
-  selectedLatestStatus: string | undefined,
+  selectedLatestStatus: RunStatus | undefined,
   sendingRun: boolean,
 ): ReadonlySet<number> {
   const runListQueries = useQueries({

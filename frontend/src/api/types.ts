@@ -57,10 +57,34 @@ export type Conversation = {
   pinned_at?: string | null
 }
 
+export const RUN_STATUS_VALUES = [
+  'draft',
+  'sent',
+  'pending',
+  'running',
+  'accepted',
+  'waiting',
+  'progress',
+  'needs_user',
+  'question',
+  'ask_user',
+  'trigger_failed',
+  'done',
+  'blocked',
+  'failed',
+  'superseded',
+] as const
+
+export type RunStatus = (typeof RUN_STATUS_VALUES)[number]
+
+export const TRIGGER_STATUS_VALUES = ['draft', 'accepted', 'failed'] as const
+
+export type TriggerStatus = (typeof TRIGGER_STATUS_VALUES)[number]
+
 export type Run = {
   id: number
   request_id: string
-  status: string
+  status: RunStatus
   conversation_key: string
   workspace_id?: number | null
   working_directory_snapshot?: string | null
@@ -68,14 +92,15 @@ export type Run = {
   superseded_by_run_id?: number | null
   supersede_reason?: string | null
   input_markdown: string
-  trigger_status?: string
-  trigger_http_status?: number
-  trigger_x_request_id?: string
-  trigger_error?: string | null
-  conversation_url?: string
-  idempotency_key?: string
-  created_at?: string
-  completed_at?: string
+  trigger_status: TriggerStatus
+  trigger_http_status: number | null
+  trigger_x_request_id: string | null
+  trigger_error: string | null
+  conversation_url: string | null
+  idempotency_key: string
+  created_at: string
+  updated_at: string
+  completed_at: string | null
 }
 
 export type JsonValue =
@@ -95,7 +120,7 @@ export type ToolTraceFields = {
   title: string
   argsSummary: Record<string, JsonValue> | null
   resultSummary: Record<string, JsonValue> | null
-  startedAt: string
+  startedAt: string | null
   durationMs: number | null
   ok: boolean
   error: string | null

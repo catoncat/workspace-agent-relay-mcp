@@ -244,29 +244,12 @@ export async function createRun(
     return { run: body as Run, triggerFailed: false }
   }
 
-  if (
-    response.status === 502 &&
-    body &&
-    typeof body === 'object' &&
-    'run' in body &&
-    body.run &&
-    typeof body.run === 'object' &&
-    'id' in body.run
-  ) {
-    const payload = body as { error?: string; run: Run }
-    return {
-      run: payload.run,
-      triggerFailed: true,
-      warning: payload.error?.trim() || 'Trigger request failed',
-    }
-  }
-
   throw new Error(formatApiError(text))
 }
 
 // Guide the active run in this conversation (steer): same run,
 // same request_id (no credential rotation). The backend returns the updated
-// run on success / 502 (trigger failed but run updated). On 409 there is no
+// run on success. On 409 there is no
 // active run to steer (race: it went terminal between SSE status and send),
 // so fall back to creating a new turn. The response shape matches createRun
 // so callers can treat both uniformly.
@@ -294,23 +277,6 @@ export async function steerConversation(
 
   if (response.ok && body && typeof body === 'object' && 'id' in body) {
     return { run: body as Run, triggerFailed: false }
-  }
-
-  if (
-    response.status === 502 &&
-    body &&
-    typeof body === 'object' &&
-    'run' in body &&
-    body.run &&
-    typeof body.run === 'object' &&
-    'id' in body.run
-  ) {
-    const payload = body as { error?: string; run: Run }
-    return {
-      run: payload.run,
-      triggerFailed: true,
-      warning: payload.error?.trim() || 'Trigger request failed',
-    }
   }
 
   throw new Error(formatApiError(text))

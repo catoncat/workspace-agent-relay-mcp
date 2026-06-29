@@ -19,6 +19,7 @@ from .http_compat import build_http_compat_app
 from .oauth import OAuthManager
 from .store.bus import RunEventBus
 from .trigger import TriggerClient
+from .trigger_dispatch import TriggerDispatcher
 
 
 def build_app(
@@ -72,10 +73,15 @@ def build_app(
 
     routes.append(Mount("/", app=mcp_app))
 
+    trigger_dispatcher = TriggerDispatcher(store)
+
     @asynccontextmanager
     async def lifespan(_: Starlette):
         async with mcp_app.router.lifespan_context(mcp_app):
-            yield
+            try:
+                yield
+            finally:
+                await trigger_dispatcher.drain()
 
     app = Starlette(
         routes=routes,
@@ -98,5 +104,6 @@ def build_app(
         lifespan=lifespan,
     )
     app.state.trigger_client = TriggerClient()
+    app.state.trigger_dispatcher = trigger_dispatcher
     app.state.event_bus = event_bus
     return app

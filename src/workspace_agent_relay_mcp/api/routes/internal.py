@@ -24,6 +24,13 @@ def _require_str(payload: dict[str, Any], field: str) -> str | None:
     return None
 
 
+def _validate_object_or_null(payload: dict[str, Any], field: str) -> JSONResponse | None:
+    value = payload.get(field)
+    if value is not None and (not isinstance(value, dict) or isinstance(value, list)):
+        return json_error(f"{field} must be an object or null", status_code=400)
+    return None
+
+
 def internal_routes(store: Any) -> list[tuple]:
     async def post_tool_trace(request: Request) -> JSONResponse:
         try:
@@ -41,9 +48,24 @@ def internal_routes(store: Any) -> list[tuple]:
                 status_code=400,
             )
 
+        for field in ("args_summary", "result_summary"):
+            error = _validate_object_or_null(payload, field)
+            if error is not None:
+                return error
+
+        started_at = payload.get("started_at")
+        if started_at is not None and not isinstance(started_at, str):
+            return json_error("started_at must be a string or null", status_code=400)
+
+        error_value = payload.get("error")
+        if error_value is not None and not isinstance(error_value, str):
+            return json_error("error must be a string or null", status_code=400)
+
         duration_ms = payload.get("duration_ms")
-        if duration_ms is not None and not isinstance(duration_ms, (int, float)):
+        if duration_ms is not None and (isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float))):
             return json_error("duration_ms must be a number", status_code=400)
+        if duration_ms is not None and duration_ms < 0:
+            return json_error("duration_ms must be non-negative", status_code=400)
 
         ok_value = payload.get("ok")
         if ok_value is not None and not isinstance(ok_value, bool):
@@ -56,10 +78,10 @@ def internal_routes(store: Any) -> list[tuple]:
             title=title,
             args_summary=payload.get("args_summary"),
             result_summary=payload.get("result_summary"),
-            started_at=payload.get("started_at"),
+            started_at=started_at,
             duration_ms=duration_ms,
             ok=True if ok_value is None else ok_value,
-            error=payload.get("error"),
+            error=error_value,
         )
         if not result.get("success"):
             error = result.get("error") or {}
