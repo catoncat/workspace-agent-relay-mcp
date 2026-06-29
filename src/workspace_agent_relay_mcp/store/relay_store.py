@@ -28,15 +28,20 @@ VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
 MAX_STEP_TITLE_LEN = 200
 AGENT_PUBLIC_COLUMNS = "id, name, trigger_url, trigger_id, token_ref, created_at, updated_at"
+WORKSPACE_PUBLIC_COLUMNS = "id, name, working_directory, created_at, updated_at, last_used_at"
 CONVERSATION_PUBLIC_COLUMNS = (
-    "id, agent_id, name, conversation_key, created_at, updated_at, archived_at, pinned_at"
+    "id, agent_id, workspace_id, name, conversation_key, created_at, updated_at, archived_at, pinned_at"
 )
 RUN_PUBLIC_COLUMNS = (
     "id, request_id, agent_id, conversation_id, conversation_key, "
+    "workspace_id, working_directory_snapshot, "
     "parent_run_id, superseded_by_run_id, supersede_reason, trigger_error, "
     "idempotency_key, input_markdown, trigger_status, trigger_http_status, "
     "trigger_x_request_id, conversation_url, status, created_at, updated_at, completed_at"
 )
+APP_SETTING_CURRENT_AGENT_ID = "current_agent_id"
+APP_SETTING_CURRENT_WORKSPACE_ID = "current_workspace_id"
+_UNSET = object()
 
 
 def _now() -> str:
@@ -56,6 +61,25 @@ def _json_dumps(value: Any) -> str:
 def _extract_trigger_id(trigger_url: str) -> str:
     match = re.search(r"/workspace_agents/([^/]+)/trigger$", trigger_url)
     return match.group(1) if match else ""
+
+
+def _normalize_working_directory(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        raise ValueError("working_directory must be an absolute path")
+    return str(path)
+
+
+def _normalize_workspace_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise ValueError("name must not be empty")
+    return name
 
 
 def _normalize_plan_steps(steps: Any) -> list[dict[str, Any]]:
@@ -194,6 +218,18 @@ class RelayStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS workspaces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    working_directory TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_used_at TEXT
+                );
                 CREATE TABLE IF NOT EXISTS conversations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -260,6 +296,8 @@ class RelayStore:
                 "parent_run_id": "INTEGER",
                 "superseded_by_run_id": "INTEGER",
                 "supersede_reason": "TEXT",
+                "workspace_id": "INTEGER",
+                "working_directory_snapshot": "TEXT",
             }
             for column, column_type in run_migrations.items():
                 if column not in cols:
@@ -282,6 +320,8 @@ class RelayStore:
                         agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
                         conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                         conversation_key TEXT NOT NULL,
+                        workspace_id INTEGER,
+                        working_directory_snapshot TEXT,
                         parent_run_id INTEGER,
                         superseded_by_run_id INTEGER,
                         supersede_reason TEXT,
@@ -299,6 +339,7 @@ class RelayStore:
                     );
                     INSERT INTO runs_new (
                         id, request_id, agent_id, conversation_id, conversation_key,
+                        workspace_id, working_directory_snapshot,
                         parent_run_id, superseded_by_run_id, supersede_reason, trigger_error,
                         idempotency_key, input_markdown, trigger_status, trigger_http_status,
                         trigger_x_request_id, conversation_url, status, created_at, updated_at,
@@ -306,6 +347,7 @@ class RelayStore:
                     )
                     SELECT
                         id, request_id, agent_id, conversation_id, conversation_key,
+                        workspace_id, working_directory_snapshot,
                         parent_run_id, superseded_by_run_id, supersede_reason, trigger_error,
                         idempotency_key, input_markdown, trigger_status, trigger_http_status,
                         trigger_x_request_id, conversation_url, status, created_at, updated_at,
@@ -320,6 +362,7 @@ class RelayStore:
             conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
             conv_migrations = {
                 "pinned_at": "TEXT",
+                "workspace_id": "INTEGER",
             }
             for column, column_type in conv_migrations.items():
                 if column not in conv_cols:
@@ -333,6 +376,109 @@ class RelayStore:
                 );
                 """
             )
+
+    def _setting_value_conn(self, conn: sqlite3.Connection, key: str) -> Any:
+        row = conn.execute("SELECT value_json FROM app_settings WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(str(row["value_json"]))
+        except json.JSONDecodeError:
+            return None
+
+    def _set_setting_conn(self, conn: sqlite3.Connection, key: str, value: Any) -> None:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value_json)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+            """,
+            (key, _json_dumps(value)),
+        )
+
+    def _agent_exists_conn(self, conn: sqlite3.Connection, agent_id: int) -> bool:
+        return conn.execute("SELECT 1 FROM agents WHERE id = ?", (agent_id,)).fetchone() is not None
+
+    def _workspace_exists_conn(self, conn: sqlite3.Connection, workspace_id: int) -> bool:
+        return conn.execute("SELECT 1 FROM workspaces WHERE id = ?", (workspace_id,)).fetchone() is not None
+
+    def _first_agent_id_conn(self, conn: sqlite3.Connection) -> int | None:
+        row = conn.execute("SELECT id FROM agents ORDER BY name, id LIMIT 1").fetchone()
+        return int(row["id"]) if row is not None else None
+
+    def _get_settings_conn(self, conn: sqlite3.Connection) -> dict[str, Any]:
+        raw_agent_id = self._setting_value_conn(conn, APP_SETTING_CURRENT_AGENT_ID)
+        current_agent_id: int | None = None
+        if raw_agent_id is not None:
+            try:
+                candidate = int(raw_agent_id)
+            except (TypeError, ValueError):
+                candidate = 0
+            if candidate and self._agent_exists_conn(conn, candidate):
+                current_agent_id = candidate
+        if current_agent_id is None:
+            current_agent_id = self._first_agent_id_conn(conn)
+
+        raw_workspace_id = self._setting_value_conn(conn, APP_SETTING_CURRENT_WORKSPACE_ID)
+        current_workspace_id: int | None = None
+        if raw_workspace_id is not None:
+            try:
+                candidate = int(raw_workspace_id)
+            except (TypeError, ValueError):
+                candidate = 0
+            if candidate and self._workspace_exists_conn(conn, candidate):
+                current_workspace_id = candidate
+
+        return {
+            "current_agent_id": current_agent_id,
+            "current_workspace_id": current_workspace_id,
+        }
+
+    def get_settings(self) -> dict[str, Any]:
+        with self._lock, self._connect() as conn:
+            return self._get_settings_conn(conn)
+
+    def update_settings(
+        self,
+        *,
+        current_agent_id: Any = _UNSET,
+        current_workspace_id: Any = _UNSET,
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            if current_agent_id is not _UNSET:
+                if current_agent_id is None:
+                    self._set_setting_conn(conn, APP_SETTING_CURRENT_AGENT_ID, None)
+                else:
+                    agent_id = int(current_agent_id)
+                    if not self._agent_exists_conn(conn, agent_id):
+                        raise KeyError(f"Agent not found: {agent_id}")
+                    self._set_setting_conn(conn, APP_SETTING_CURRENT_AGENT_ID, agent_id)
+            if current_workspace_id is not _UNSET:
+                if current_workspace_id is None:
+                    self._set_setting_conn(conn, APP_SETTING_CURRENT_WORKSPACE_ID, None)
+                else:
+                    workspace_id = int(current_workspace_id)
+                    if not self._workspace_exists_conn(conn, workspace_id):
+                        raise KeyError(f"Workspace not found: {workspace_id}")
+                    self._set_setting_conn(conn, APP_SETTING_CURRENT_WORKSPACE_ID, workspace_id)
+                    conn.execute(
+                        "UPDATE workspaces SET last_used_at = ? WHERE id = ?",
+                        (now, workspace_id),
+                    )
+            return self._get_settings_conn(conn)
+
+    def resolve_default_agent_id(self) -> int:
+        settings = self.get_settings()
+        agent_id = settings.get("current_agent_id")
+        if agent_id is None:
+            raise ValueError("No Workspace Agent backend is configured.")
+        return int(agent_id)
+
+    def resolve_default_workspace_id(self) -> int | None:
+        settings = self.get_settings()
+        workspace_id = settings.get("current_workspace_id")
+        return int(workspace_id) if workspace_id is not None else None
 
     def get_agent(self, agent_id: int) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
@@ -440,15 +586,109 @@ class RelayStore:
             rows = conn.execute(f"SELECT {AGENT_PUBLIC_COLUMNS} FROM agents ORDER BY name").fetchall()
         return [_row_to_dict(row) or {} for row in rows]
 
-    def create_conversation(self, *, agent_id: int, name: str, conversation_key: str) -> dict[str, Any]:
-        now = _now()
+    def get_workspace(self, workspace_id: int) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
-            conn.execute(
+            row = conn.execute(
+                f"SELECT {WORKSPACE_PUBLIC_COLUMNS} FROM workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Workspace not found: {workspace_id}")
+        return _row_to_dict(row) or {}
+
+    def list_workspaces(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {WORKSPACE_PUBLIC_COLUMNS}
+                FROM workspaces
+                ORDER BY COALESCE(last_used_at, updated_at) DESC, name COLLATE NOCASE ASC, id ASC
                 """
-                INSERT INTO conversations (agent_id, name, conversation_key, created_at, updated_at)
+            ).fetchall()
+        return [_row_to_dict(row) or {} for row in rows]
+
+    def create_workspace(self, *, name: str, working_directory: Any = None) -> dict[str, Any]:
+        normalized_name = _normalize_workspace_name(name)
+        normalized_directory = _normalize_working_directory(working_directory)
+        now = _now()
+        with self._lock, self._connect(immediate=True) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO workspaces (name, working_directory, created_at, updated_at, last_used_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (agent_id, name, conversation_key, now, now),
+                (normalized_name, normalized_directory, now, now, now),
+            )
+            row = conn.execute(
+                f"SELECT {WORKSPACE_PUBLIC_COLUMNS} FROM workspaces WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("Workspace not found after create")
+        return _row_to_dict(row) or {}
+
+    def update_workspace(
+        self,
+        workspace_id: int,
+        *,
+        name: Any = _UNSET,
+        working_directory: Any = _UNSET,
+    ) -> dict[str, Any]:
+        if name is _UNSET and working_directory is _UNSET:
+            raise ValueError("no fields to update")
+        now = _now()
+        sets = ["updated_at = ?"]
+        params: list[Any] = [now]
+        if name is not _UNSET:
+            sets.append("name = ?")
+            params.append(_normalize_workspace_name(name))
+        if working_directory is not _UNSET:
+            sets.append("working_directory = ?")
+            params.append(_normalize_working_directory(working_directory))
+        params.append(workspace_id)
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT id FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Workspace not found: {workspace_id}")
+            conn.execute(f"UPDATE workspaces SET {', '.join(sets)} WHERE id = ?", params)
+            row = conn.execute(
+                f"SELECT {WORKSPACE_PUBLIC_COLUMNS} FROM workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+        return _row_to_dict(row) or {}
+
+    def delete_workspace(self, workspace_id: int) -> None:
+        with self._lock, self._connect(immediate=True) as conn:
+            row = conn.execute("SELECT id FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Workspace not found: {workspace_id}")
+            settings = self._get_settings_conn(conn)
+            conn.execute(
+                "UPDATE conversations SET workspace_id = NULL, updated_at = ? WHERE workspace_id = ?",
+                (_now(), workspace_id),
+            )
+            conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+            if settings.get("current_workspace_id") == workspace_id:
+                self._set_setting_conn(conn, APP_SETTING_CURRENT_WORKSPACE_ID, None)
+
+    def create_conversation(
+        self,
+        *,
+        agent_id: int,
+        name: str,
+        conversation_key: str,
+        workspace_id: int | None = None,
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connect() as conn:
+            if workspace_id is not None and not self._workspace_exists_conn(conn, int(workspace_id)):
+                raise KeyError(f"Workspace not found: {workspace_id}")
+            conn.execute(
+                """
+                INSERT INTO conversations (agent_id, workspace_id, name, conversation_key, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (agent_id, workspace_id, name, conversation_key, now, now),
             )
             row = conn.execute(
                 f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE conversation_key = ?",
@@ -459,8 +699,8 @@ class RelayStore:
     def list_conversations(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
-                """
-                SELECT id, agent_id, name, conversation_key, created_at, updated_at, archived_at, pinned_at
+                f"""
+                SELECT {CONVERSATION_PUBLIC_COLUMNS}
                 FROM conversations
                 WHERE archived_at IS NULL
                 ORDER BY (pinned_at IS NULL) ASC, pinned_at DESC, updated_at DESC
@@ -548,7 +788,11 @@ class RelayStore:
             row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
             if row is None:
                 raise KeyError(f"Agent not found: {agent_id}")
+            settings = self._get_settings_conn(conn)
             conn.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
+            if settings.get("current_agent_id") == agent_id:
+                next_agent_id = self._first_agent_id_conn(conn)
+                self._set_setting_conn(conn, APP_SETTING_CURRENT_AGENT_ID, next_agent_id)
 
     def delete_conversation(self, conversation_id: int) -> None:
         now = _now()
@@ -592,20 +836,32 @@ class RelayStore:
             ).fetchall()
             active_run_ids = [int(row["id"]) for row in existing_rows if row["status"] not in TERMINAL_STATUSES]
             parent_run_id = active_run_ids[-1] if active_run_ids else None
+            workspace_id = conversation["workspace_id"]
+            working_directory_snapshot = None
+            if workspace_id is not None:
+                workspace = conn.execute(
+                    "SELECT working_directory FROM workspaces WHERE id = ?",
+                    (workspace_id,),
+                ).fetchone()
+                if workspace is not None:
+                    working_directory_snapshot = workspace["working_directory"]
             conn.execute(
                 """
                 INSERT INTO runs (
                     request_id, agent_id, conversation_id, conversation_key,
+                    workspace_id, working_directory_snapshot,
                     idempotency_key, input_markdown, parent_run_id,
                     status, trigger_status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
                 """,
                 (
                     request_id,
                     agent_id,
                     conversation_id,
                     conversation_key,
+                    workspace_id,
+                    working_directory_snapshot,
                     idempotency_key,
                     input_markdown,
                     parent_run_id,

@@ -9,6 +9,7 @@
 - 定位为学习 / 原型项目，非产品。
 - 与兄弟仓 [`notion-local-ops-mcp`](https://github.com/catoncat/notion-local-ops-mcp) 协作：该仓提供 agent 的执行工具，本仓接收其工具调用 trace。本仓为接收端。
 - **单 relay 平面**：Workspace Agent 通过本仓 MCP 回写 plan/progress/question/result；`notion-local-ops-mcp` 通过 `/internal/tool-trace` 镜像本地工具调用。已移除 Hermes polling / pull mode 产品路径。
+- dashboard 主组织是 Workspace（`working_directory`）或内置 `无目录`；Agent 只作为 Settings 中的 execution backend / 当前工作 Agent，不再作为左侧主概念。
 - 上级目录 `~/poke/AGENTS.md` 的总则同样适用：学习仓、证据优先、不擅自修改上游、默认中文输出。
 
 ## 2. 变更边界
@@ -77,12 +78,13 @@ cd frontend && pnpm run build          # 前端，TS 与构建均须零错误
 - **progress event**：`event_type="progress"`；payload 中 `trace: true` 表示由 notion-local-ops 自动镜像的工具调用，否则为 agent 主动写入的 narration。前端 `ThreadView` 依此标志分流渲染。
 - **trace payload**：`{trace, tool, title, args_summary, result_summary, started_at, duration_ms, ok, error}`。`/internal/tool-trace` 使用 shared bearer（`WORKSPACE_AGENT_RELAY_AUTH_TOKEN`，非 dashboard OAuth）鉴权，对已关闭的 run 返回 409。
 - **MCP 鉴权**：已移除 per-run `callback_token`；`/mcp` 靠 OAuth/bearer + `request_id` 路由 + `conversation_key` 校验。
-- **agent token**：Dashboard 创建/更新 agent 时通过 `access_token` 写入 relay SQLite（`token_ref=local:<id>`），值不回前端。Legacy 仍支持 `env:<VAR_NAME>`（白名单见 `api/validation.py`）。`resolve_agent_token(config, store, token_ref)` 在 trigger 时解析；env token 仍从启动快照 `RelayConfig.agent_tokens` 读取。
+- **execution backend token**：Dashboard 创建/更新 backend 时通过 `access_token` 写入 relay SQLite（`token_ref=local:<id>`），值不回前端。Legacy 仍支持 `env:<VAR_NAME>`（白名单见 `api/validation.py`）。`resolve_agent_token(config, store, token_ref)` 在 trigger 时解析；env token 仍从启动快照 `RelayConfig.agent_tokens` 读取。
 
 ### 5.2 读取与运行口径
 
 - dashboard 与 SSE 只读取本仓 callback/local tool trace 事件（`list_events`）。
-- trigger 输入固定使用 `request_id` + `conversation_key` + `relay_mcp: workspace-agent-relay-mcp`；不存在 pull mode 分支。
+- trigger 输入固定使用 `request_id` + `conversation_key` + `relay_mcp: workspace-agent-relay-mcp`；当 run 有目录快照时额外包含 `working_directory: /absolute/path`。不存在 pull mode 分支。
+- conversation 归属 Workspace；`workspace_id = NULL` 表示内置 `无目录`。创建 run 时复制 workspace 的 `working_directory` 到 `runs.working_directory_snapshot`，后续 workspace 编辑/删除不改旧 run 快照。
 - dashboard composer 默认 **排队/新请求**：创建新的 `request_id`，不把旧 active run 标为 `superseded`。
 - **引导**（steer）必须由 UI 显式触发或 `Cmd+Enter` 触发：复用目标 run 的 `request_id`，只改变当前 run 的计划/方向，不单独收盘。
 

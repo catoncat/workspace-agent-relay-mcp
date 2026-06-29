@@ -106,19 +106,23 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         # runs; it is a distinct request_id that ChatGPT can queue behind current
         # work without closing the current relay run locally.
         is_continuation = len(store.list_runs_for_conversation(int(conversation["id"]))) > 0
+        try:
+            run = store.create_run(
+                agent_id=int(agent["id"]),
+                conversation_id=int(conversation["id"]),
+                conversation_key=conversation_key,
+                input_markdown=input_markdown,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+            )
+        except (KeyError, ValueError, sqlite3.IntegrityError) as exc:
+            return json_error(str(exc), status_code=400)
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,
             user_input=input_markdown,
             is_continuation=is_continuation,
-        )
-        store.create_run(
-            agent_id=int(agent["id"]),
-            conversation_id=int(conversation["id"]),
-            conversation_key=conversation_key,
-            input_markdown=input_markdown,
-            idempotency_key=idempotency_key,
-            request_id=request_id,
+            working_directory=run.get("working_directory_snapshot"),
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         try:
@@ -226,6 +230,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             user_input=input_markdown,
             mode="steer",
             answer=is_answer,
+            working_directory=run.get("working_directory_snapshot"),
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         try:

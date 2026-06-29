@@ -5,9 +5,11 @@ import {
   createAgent,
   createConversation,
   createRun,
+  createWorkspace,
   dismissRun,
   deleteAgent,
   deleteConversation,
+  deleteWorkspace,
   getRunDetail,
   renameAgent,
   renameConversation,
@@ -15,8 +17,10 @@ import {
   steerConversation,
   streamRun,
   updateAgent,
+  updateSettings,
+  updateWorkspace,
 } from '@/api/client'
-import type { Agent, Conversation, Run, RunDetail } from '@/api/types'
+import type { Agent, Conversation, RelaySettings, Run, RunDetail, Workspace } from '@/api/types'
 import {
   bootstrapOptions,
   runDetailOptions,
@@ -28,19 +32,26 @@ import { isConversationWorking, latestRunStatusFromRuns } from '@/lib/runStatus'
 
 export type BootstrapData = {
   agents: Agent[]
+  settings: RelaySettings
+  workspaces: Workspace[]
   conversations: Conversation[]
 }
 
 export type CreateConversationInput = {
-  agentId: number
   name: string
   key: string
+  workspaceId?: number | null
 }
 
 export type CreateAgentInput = {
   name: string
   trigger_url: string
   access_token: string
+}
+
+export type CreateWorkspaceInput = {
+  name: string
+  working_directory: string | null
 }
 
 export function useBootstrap() {
@@ -292,14 +303,83 @@ export function useDeleteAgent() {
   })
 }
 
+export function useUpdateSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { current_agent_id?: number | null; current_workspace_id?: number | null }) =>
+      updateSettings(input),
+    onSuccess: (settings) => {
+      queryClient.setQueryData<BootstrapData>(relayQueryKeys.bootstrap, (current) =>
+        current ? { ...current, settings } : current,
+      )
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useCreateWorkspace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: CreateWorkspaceInput) => createWorkspace(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useUpdateWorkspace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...body
+    }: {
+      id: number
+      name?: string
+      working_directory?: string | null
+    }) => updateWorkspace(id, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
+export function useDeleteWorkspace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: number) => deleteWorkspace(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
+    },
+    onError: (err) => {
+      toast.error(toError(err).message)
+    },
+  })
+}
+
 export function useCreateConversation() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ agentId, name, key }: CreateConversationInput) => {
-      if (!agentId) throw new Error('Select an agent before creating a conversation.')
-      return createConversation({ agent_id: agentId, name, conversation_key: key })
-    },
+    mutationFn: async ({ name, key, workspaceId }: CreateConversationInput) =>
+      createConversation({
+        name,
+        conversation_key: key,
+        ...(workspaceId === undefined ? {} : { workspace_id: workspaceId }),
+      }),
     onSuccess: (conversation) => {
       queryClient.setQueryData<BootstrapData>(relayQueryKeys.bootstrap, (current) => {
         if (!current) return current

@@ -47,12 +47,16 @@ def _trigger_header(
     *,
     request_id: str,
     conversation_key: str,
+    working_directory: str | None = None,
 ) -> list[str]:
-    return [
+    lines = [
         f"request_id: {request_id}",
         f"conversation_key: {conversation_key}",
         "relay_mcp: workspace-agent-relay-mcp",
     ]
+    if working_directory and working_directory.strip():
+        lines.append(f"working_directory: {working_directory.strip()}")
+    return lines
 
 
 def build_trigger_input(
@@ -63,11 +67,19 @@ def build_trigger_input(
     is_continuation: bool = False,
     mode: str = "initial",
     answer: bool = False,
+    working_directory: str | None = None,
 ) -> str:
     header = _trigger_header(
         request_id=request_id,
         conversation_key=conversation_key,
+        working_directory=working_directory,
     )
+    cwd_instruction = []
+    if working_directory and working_directory.strip():
+        cwd_instruction = [
+            "Use the working_directory header above as the default cwd for this request. Verify it before filesystem/git operations; do not guess a different repository. If you must leave that directory, explain why in progress/result.",
+            "",
+        ]
     if mode == "steer":
         # Mid-turn follow-up: the operator is guiding THIS turn. We can
         # only send triggers, so this is another trigger to the same conversation,
@@ -103,6 +115,7 @@ def build_trigger_input(
             [
                 *header,
                 "",
+                *cwd_instruction,
                 lead,
                 resume,
                 "If this follow-up asks you to provide or resend the final answer and you have delivered it, call workspace-agent-relay-mcp.record_result(status=done) exactly once to close the turn.",
@@ -122,6 +135,7 @@ def build_trigger_input(
             [
                 *header,
                 "",
+                *cwd_instruction,
                 "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the request_id above. Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as plan steps. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
                 "",
                 "User task:",
@@ -132,6 +146,7 @@ def build_trigger_input(
         [
             *header,
             "",
+            *cwd_instruction,
             "Completion contract:",
             "The local operator CANNOT see your ChatGPT-side plan, tool calls, or reasoning. This relay is their only view of your work.",
             "This trigger starts ONE turn (one request_id scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",

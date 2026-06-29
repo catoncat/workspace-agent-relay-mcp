@@ -8,6 +8,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { SendIntent } from '@/features/relay/sendIntent'
+import type { QueuedComposerMessage } from '@/features/relay/queueModel'
 import { isComposerBusy, isUserReplyStatus } from '@/lib/runStatus'
 import { cn } from '@/lib/utils'
 import {
@@ -30,8 +31,14 @@ type Props = {
   dismissing?: boolean
   mode?: ComposerMode
   canSteer?: boolean
+  queuedMessages?: QueuedComposerMessage[]
+  queueFlushPending?: boolean
   onDismiss?: () => void | Promise<void>
   onSend: (text: string, intent: SendIntent) => void | Promise<void>
+  onQueuedMessageDelete?: (id: string) => void
+  onQueuedMessageEdit?: (id: string, text: string) => void
+  onQueuedMessageSteer?: (id: string) => void | Promise<void>
+  onCloseQueue?: () => void
 }
 
 export function ThreadComposer({
@@ -39,11 +46,16 @@ export function ThreadComposer({
   dismissing = false,
   mode = 'idle',
   canSteer = false,
+  queuedMessages = [],
+  queueFlushPending = false,
   onDismiss,
   onSend,
+  onQueuedMessageDelete,
+  onQueuedMessageEdit,
+  onQueuedMessageSteer,
+  onCloseQueue,
 }: Props) {
   const [text, setText] = useState('')
-  const [intent, setIntent] = useState<SendIntent>('queue')
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const isSending = mode === 'sending'
   const isAgentWorking = mode === 'waiting'
@@ -57,30 +69,22 @@ export function ThreadComposer({
       : null
 
   const isReplying = mode === 'replying'
-  const showModeBar = canSteer && !disabled
-  const effectiveIntent = showModeBar ? intent : 'queue'
+  const hasQueuedMessages = queuedMessages.length > 0
   const placeholder =
     mode === 'sending'
       ? 'Sending…'
-      : showModeBar && effectiveIntent === 'steer'
-        ? '要求后续变更'
-        : showModeBar
-          ? '提交新请求，排队执行…'
-          : isReplying
-            ? 'Answer the agent…'
-            : isAgentWorking
-              ? 'Send a queued request…'
-              : 'Send a task to the Workspace Agent…'
-
-  useEffect(() => {
-    if (!showModeBar && intent !== 'queue') setIntent('queue')
-  }, [intent, showModeBar])
+      : isReplying
+        ? '回答 Agent…'
+        : isAgentWorking
+          ? '要求后续变更'
+          : '发送任务给 Workspace Agent…'
 
   const submit = async (intentOverride?: SendIntent) => {
     const trimmed = text.trim()
     if (!trimmed || disabled || isSending) return
     setText('')
-    await onSend(trimmed, intentOverride ?? effectiveIntent)
+    const intent = intentOverride ?? (isReplying && canSteer ? 'steer' : 'queue')
+    await onSend(trimmed, intent)
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -111,13 +115,11 @@ export function ThreadComposer({
           ? isAgentWorking && !hasText && !isSending
             ? 'Mark turn finished'
             : 'Agent working'
-          : effectiveIntent === 'steer'
-            ? 'Send as guidance'
-            : isReplying
-              ? 'Queue as new request'
-              : isAgentWorking
-                ? 'Queue new request'
-                : 'Send'
+          : isReplying
+            ? 'Answer agent'
+            : isAgentWorking
+              ? 'Queue message'
+              : 'Send'
       }
       className={cn(
         'mb-0.5 size-8 shrink-0 rounded-full',
@@ -140,82 +142,33 @@ export function ThreadComposer({
   return (
     <footer className="shrink-0 p-3">
       <div className="mx-auto max-w-3xl">
-        {showModeBar ? (
-          <div className="mx-10 -mb-px flex h-12 items-center justify-between rounded-t-3xl border border-input bg-background px-4 text-sm text-muted-foreground shadow-xs">
-            <button
-              type="button"
-              className="flex min-w-0 items-center gap-2 rounded-full px-1.5 py-1 text-left transition-colors hover:text-foreground"
-              onClick={() => setIntent((value) => (value === 'steer' ? 'queue' : 'steer'))}
-              title={effectiveIntent === 'steer' ? '当前发送方式：引导当前任务' : '当前发送方式：排队为新请求'}
-            >
-              {effectiveIntent === 'steer' ? (
-                <CornerDownRightIcon className="size-4 shrink-0" />
-              ) : (
-                <ListPlusIcon className="size-4 shrink-0" />
-              )}
-              <span className="truncate text-base font-medium text-foreground">
-                {effectiveIntent === 'steer' ? '引导' : '排队'}
-              </span>
-            </button>
-
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                variant={effectiveIntent === 'steer' ? 'secondary' : 'ghost'}
-                size="sm"
-                className="h-8 rounded-full px-3 text-sm"
-                onClick={() => setIntent((value) => (value === 'steer' ? 'queue' : 'steer'))}
-                title="切换引导模式；Cmd+Enter 可直接按引导发送"
-              >
-                <CornerDownRightIcon className="size-4" />
-                引导
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-full text-muted-foreground"
-                disabled={!hasText}
-                onClick={() => {
-                  setText('')
-                  textareaRef.current?.focus()
-                }}
-                title="清空消息"
-              >
-                <Trash2Icon className="size-4" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                  title="发送选项"
-                >
-                  <MoreHorizontalIcon className="size-4" />
-                  <span className="sr-only">发送选项</span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuItem onClick={() => textareaRef.current?.focus()}>
-                    <Edit3Icon />
-                    编辑消息
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setIntent(effectiveIntent === 'steer' ? 'queue' : 'steer')}
-                  >
-                    {effectiveIntent === 'steer' ? (
-                      <ListPlusIcon />
-                    ) : (
-                      <CornerDownRightIcon />
-                    )}
-                    {effectiveIntent === 'steer' ? '启用队列模式' : '启用引导模式'}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+        {hasQueuedMessages ? (
+          <div className="relative z-0 mx-10 mb-[-10px] rounded-t-3xl border border-input bg-background px-4 pt-2 pb-5 text-sm shadow-xs">
+            <div className="flex flex-col gap-1">
+              {queuedMessages.map((message) => (
+                <QueuedMessageRow
+                  key={message.id}
+                  message={message}
+                  canSteer={canSteer && !disabled && !isSending}
+                  queueFlushPending={queueFlushPending}
+                  onDelete={() => onQueuedMessageDelete?.(message.id)}
+                  onEdit={(nextText) => onQueuedMessageEdit?.(message.id, nextText)}
+                  onSteer={() => void onQueuedMessageSteer?.(message.id)}
+                  onCloseQueue={onCloseQueue}
+                />
+              ))}
             </div>
+            {queueFlushPending ? (
+              <div className="mt-1 px-7 text-xs text-muted-foreground">
+                当前回复结束后会按上方顺序合并成一条消息发送。
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div
           className={cn(
-            'flex items-end gap-2 border border-input bg-background px-3 py-2 shadow-xs transition-[border-radius,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
-            showModeBar ? 'rounded-b-3xl rounded-t-none' : isMultiline ? 'rounded-2xl' : 'rounded-full',
+            'relative z-10 flex items-end gap-2 border border-input bg-background px-3 py-2 shadow-xs transition-[border-radius,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
+            isMultiline ? 'rounded-2xl' : 'rounded-full',
           )}
         >
           <Textarea
@@ -250,6 +203,137 @@ export function ThreadComposer({
         {statusText ? <div className="mt-1.5 px-1 text-xs text-muted-foreground">{statusText}</div> : null}
       </div>
     </footer>
+  )
+}
+
+function QueuedMessageRow({
+  message,
+  canSteer,
+  queueFlushPending,
+  onDelete,
+  onEdit,
+  onSteer,
+  onCloseQueue,
+}: {
+  message: QueuedComposerMessage
+  canSteer: boolean
+  queueFlushPending: boolean
+  onDelete?: () => void
+  onEdit?: (text: string) => void
+  onSteer?: () => void
+  onCloseQueue?: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(message.text)
+
+  useEffect(() => {
+    if (!editing) setDraft(message.text)
+  }, [editing, message.text])
+
+  const saveEdit = () => {
+    const trimmed = draft.trim()
+    if (!trimmed) return
+    onEdit?.(trimmed)
+    setEditing(false)
+  }
+
+  const cancelEdit = () => {
+    setDraft(message.text)
+    setEditing(false)
+  }
+
+  const handleEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      cancelEdit()
+      return
+    }
+    if (event.key !== 'Enter') return
+    if (event.nativeEvent.isComposing) return
+    if (event.shiftKey) return
+    event.preventDefault()
+    saveEdit()
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-start gap-2 py-1">
+        <CornerDownRightIcon className="mt-2 size-4 shrink-0 text-muted-foreground" />
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleEditKeyDown}
+          rows={Math.min(4, Math.max(1, draft.split('\n').length))}
+          className="min-h-8 flex-1 resize-none rounded-xl border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+          autoFocus
+        />
+        <div className="flex shrink-0 items-center gap-1 pt-0.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="rounded-full"
+            disabled={!draft.trim()}
+            onClick={saveEdit}
+          >
+            保存
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className="rounded-full" onClick={cancelEdit}>
+            取消
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-9 items-center gap-2">
+      <CornerDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1 truncate text-base text-foreground">{message.text}</div>
+      <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 rounded-full px-2.5 text-sm text-muted-foreground"
+          disabled={!canSteer}
+          onClick={onSteer}
+          title="立即作为引导发送给当前任务"
+        >
+          <CornerDownRightIcon className="size-4" />
+          引导
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-full text-muted-foreground"
+          onClick={onDelete}
+          title="取消这条排队消息"
+        >
+          <Trash2Icon className="size-4" />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            title="排队消息选项"
+          >
+            <MoreHorizontalIcon className="size-4" />
+            <span className="sr-only">排队消息选项</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={() => setEditing(true)}>
+              <Edit3Icon />
+              编辑消息
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onCloseQueue} disabled={queueFlushPending}>
+              <ListPlusIcon />
+              {queueFlushPending ? '已关闭排队' : '关闭排队'}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
   )
 }
 

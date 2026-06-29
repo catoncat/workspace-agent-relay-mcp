@@ -12,6 +12,8 @@ from .api.routes.agents import agent_routes
 from .api.routes.conversations import conversation_routes
 from .api.routes.internal import internal_routes
 from .api.routes.runs import run_routes
+from .api.routes.settings import settings_routes
+from .api.routes.workspaces import workspace_routes
 from .api.static import SPAFallbackMiddleware, frontend_dist, serve_index
 from .http_compat import build_http_compat_app
 from .oauth import OAuthManager
@@ -56,6 +58,10 @@ def build_app(
         routes.append(Mount("/assets", app=StaticFiles(directory=assets_dir), name="assets"))
 
     for path, handler, methods in agent_routes(store, config):
+        routes.append(Route(path, endpoint=handler, methods=methods))
+    for path, handler, methods in settings_routes(store):
+        routes.append(Route(path, endpoint=handler, methods=methods))
+    for path, handler, methods in workspace_routes(store):
         routes.append(Route(path, endpoint=handler, methods=methods))
     for path, handler, methods in conversation_routes(store):
         routes.append(Route(path, endpoint=handler, methods=methods))

@@ -16,9 +16,24 @@ export type TokenRef = {
   is_default: boolean
 }
 
+export type RelaySettings = {
+  current_agent_id: number | null
+  current_workspace_id: number | null
+}
+
+export type Workspace = {
+  id: number
+  name: string
+  working_directory: string | null
+  created_at?: string
+  updated_at?: string
+  last_used_at?: string | null
+}
+
 export type Conversation = {
   id: number
   agent_id: number
+  workspace_id?: number | null
   name: string
   conversation_key: string
   pinned_at?: string | null
@@ -29,6 +44,8 @@ export type Run = {
   request_id: string
   status: string
   conversation_key: string
+  workspace_id?: number | null
+  working_directory_snapshot?: string | null
   parent_run_id?: number | null
   superseded_by_run_id?: number | null
   supersede_reason?: string | null

@@ -96,6 +96,20 @@ The agent MUST NOT merge, skip, weaken, or substitute required Relay calls such 
 - The agent MUST NOT assume container paths such as `/workspace`, `/mnt/data`, or `/home/oai` exist on the connected machine.
 - The agent MUST reuse confirmed absolute local paths rather than re-guessing them.
 
+## Working Directory From Relay
+
+If the relay trigger includes a `working_directory: /absolute/path` header, the agent MUST treat that path as the default cwd for the current `request_id`.
+
+The agent MUST verify the `working_directory` before filesystem, shell, repository, or git operations.
+
+The agent MUST NOT guess a different repository or ask the user to restate the cwd when `working_directory` is present.
+
+The agent SHOULD run local commands from `working_directory` when the task is repository or file related.
+
+The agent MAY leave `working_directory` only when the task clearly requires another path. In that case, the agent MUST explain the reason through `<YOUR_RELAY_MCP>.record_progress` or `<YOUR_RELAY_MCP>.record_result`.
+
+If `working_directory` is absent, the agent MUST use confirmed local context or ask only when the correct directory cannot be inferred safely.
+
 ## Relay Mode
 
 Relay mode is active if and only if the input includes all of the following fields:
@@ -103,6 +117,8 @@ Relay mode is active if and only if the input includes all of the following fiel
 - `request_id`
 - `conversation_key`
 - `relay_mcp: <YOUR_RELAY_MCP>`
+
+The trigger MAY also include `working_directory`, which is the dashboard's directory snapshot for this run.
 
 If all three fields are present, the agent MUST enter relay mode.
 

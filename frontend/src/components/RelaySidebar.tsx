@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ClipboardCopy, MessageSquarePlus, Pencil, Pin, PinOff, Settings, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ClipboardCopy,
+  Folder,
+  MessageSquarePlus,
+  Pencil,
+  Pin,
+  PinOff,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 import { toast } from 'sonner'
-import type { Agent, Conversation } from '@/api/types'
+import type { Conversation, Workspace } from '@/api/types'
 import { ThemeMenu, sidebarHeaderIconClass } from '@/components/ThemeMenu'
 import { WorkingIndicator } from '@/components/WorkingIndicator'
 import { Button } from '@/components/ui/button'
@@ -13,6 +23,13 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -38,22 +55,21 @@ import { cn } from '@/lib/utils'
 const threadButtonClass =
   'h-7 w-full rounded-md text-[13px] font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground data-active:bg-sidebar-accent data-active:font-normal data-active:text-sidebar-foreground'
 
-const threadIndentClass = 'pl-8 pr-2'
 const threadIndentSingleClass = 'pl-7 pr-2'
-const threadStatusSlotClass = 'left-2'
 const threadStatusSlotSingleClass = 'left-1.5'
-const agentLabelClass = 'pl-2.5 pr-2 pb-0.5 text-[11px] font-normal text-muted-foreground/80'
 
 export type CreateConversationInput = {
-  agentId: number
   name: string
   key: string
+  workspaceId?: number | null
 }
 
 type Props = {
-  agents: Agent[]
+  workspaces: Workspace[]
+  currentWorkspaceId: number | null
   conversations: Conversation[]
   selectedId: number | null
+  onWorkspaceChange?: (id: number | null) => void | Promise<unknown>
   onSelect: (id: number) => void
   onCreate?: (input: CreateConversationInput) => void | Promise<unknown>
   creating?: boolean
@@ -61,14 +77,17 @@ type Props = {
   onDelete?: (id: number) => void | Promise<unknown>
   onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
   onOpenSettings?: () => void
+  onManageWorkspaces?: () => void
   loading?: boolean
   workingConversationIds?: ReadonlySet<number>
 }
 
 export function RelaySidebar({
-  agents,
+  workspaces,
+  currentWorkspaceId,
   conversations,
   selectedId,
+  onWorkspaceChange,
   onSelect,
   onCreate,
   creating = false,
@@ -76,11 +95,15 @@ export function RelaySidebar({
   onDelete,
   onPin,
   onOpenSettings,
+  onManageWorkspaces,
   loading = false,
   workingConversationIds,
 }: Props) {
   const [isComposing, setIsComposing] = useState(false)
-  const grouped = useMemo(() => groupConversations(agents, conversations), [agents, conversations])
+  const currentWorkspace = useMemo(
+    () => workspaces.find((workspace) => workspace.id === currentWorkspaceId) ?? null,
+    [currentWorkspaceId, workspaces],
+  )
 
   const handleStartCreate = useCallback(() => {
     if (!onCreate) return
@@ -103,6 +126,13 @@ export function RelaySidebar({
   return (
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
       <SidebarContent className="gap-0 px-2 pb-2 pt-2">
+        <WorkspaceSelector
+          workspaces={workspaces}
+          currentWorkspace={currentWorkspace}
+          onWorkspaceChange={onWorkspaceChange}
+          onManageWorkspaces={onManageWorkspaces ?? onOpenSettings}
+        />
+
         {onCreate ? (
           <div className="mb-1 px-0.5">
             <Button
@@ -124,8 +154,7 @@ export function RelaySidebar({
           <SidebarGroupContent className="px-0">
             {isComposing && onCreate ? (
               <InlineCreateRow
-                agents={agents}
-                grouped={Boolean(grouped)}
+                workspaceId={currentWorkspaceId}
                 pending={creating}
                 onCancel={handleCancelCreate}
                 onSubmit={handleSubmitCreate}
@@ -136,28 +165,6 @@ export function RelaySidebar({
               <p className="px-2 py-4 text-center text-xs text-muted-foreground">
                 {loading ? 'Loading…' : 'No threads yet'}
               </p>
-            ) : grouped ? (
-              grouped.map((group, groupIndex) => (
-                <div key={group.agent.id} className={cn('mb-1 last:mb-0', groupIndex > 0 && 'pt-1.5')}>
-                  <p className={agentLabelClass}>{group.agent.name}</p>
-                  <SidebarMenu className="gap-0.5">
-                    {group.items.map((item) => (
-                      <ConversationRow
-                        key={item.id}
-                        item={item}
-                        isActive={item.id === selectedId}
-                        isWorking={workingConversationIds?.has(item.id) ?? false}
-                        indentClass={threadIndentClass}
-                        statusSlotClass={threadStatusSlotClass}
-                        onSelect={onSelect}
-                        onRename={onRename}
-                        onDelete={onDelete}
-                        onPin={onPin}
-                      />
-                    ))}
-                  </SidebarMenu>
-                </div>
-              ))
             ) : conversations.length > 0 ? (
               <SidebarMenu className="gap-0.5">
                 {conversations.map((item) => (
@@ -204,57 +211,99 @@ export function RelaySidebar({
 }
 
 type InlineCreateProps = {
-  agents: Agent[]
-  grouped?: boolean
+  workspaceId: number | null
   pending?: boolean
   onCancel: () => void
   onSubmit: (input: CreateConversationInput) => void | Promise<unknown>
 }
 
-function InlineCreateRow({ agents, grouped = false, pending = false, onCancel, onSubmit }: InlineCreateProps) {
-  const [name, setName] = useState('')
-  const [agentId, setAgentId] = useState<number | null>(agents[0]?.id ?? null)
-  const showAgentPicker = agents.length > 1
-
-  useEffect(() => {
-    setAgentId(agents[0]?.id ?? null)
-    setName('')
-  }, [agents])
-
-  const commit = useCallback(async () => {
-    const resolvedAgentId = agentId ?? agents[0]?.id
-    if (!resolvedAgentId || pending) return
-    const trimmed = name.trim() || defaultConversationName()
-    await onSubmit({
-      agentId: resolvedAgentId,
-      name: trimmed,
-      key: buildConversationKey(trimmed),
-    })
-  }, [agentId, agents, name, onSubmit, pending])
+function WorkspaceSelector({
+  workspaces,
+  currentWorkspace,
+  onWorkspaceChange,
+  onManageWorkspaces,
+}: {
+  workspaces: Workspace[]
+  currentWorkspace: Workspace | null
+  onWorkspaceChange?: (id: number | null) => void | Promise<unknown>
+  onManageWorkspaces?: () => void
+}) {
+  const label = currentWorkspace?.name ?? '无目录'
+  const description = currentWorkspace?.working_directory ?? '不注入 working_directory'
 
   return (
-    <div className={cn('mb-1.5 space-y-2 py-1', grouped ? 'pl-3 pr-0.5' : 'px-0.5')}>
-      {showAgentPicker ? (
-        <div className="inline-flex max-w-full flex-wrap gap-0.5 rounded-md bg-muted/60 p-0.5">
-          {agents.map((agent) => (
-            <button
-              key={agent.id}
-              type="button"
-              disabled={pending}
-              onClick={() => setAgentId(agent.id)}
-              onMouseDown={(event) => event.preventDefault()}
-              className={cn(
-                'rounded px-2 py-0.5 text-[11px] transition-colors',
-                agentId === agent.id
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
+    <div className="mb-1 px-0.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            'flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
+            'hover:bg-sidebar-accent hover:text-sidebar-foreground',
+          )}
+        >
+          <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium">{label}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">{description}</span>
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-72">
+          <DropdownMenuItem onClick={() => void onWorkspaceChange?.(null)}>
+            <Folder />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">无目录</span>
+              <span className="block truncate text-xs text-muted-foreground">不附带工作目录</span>
+            </span>
+          </DropdownMenuItem>
+          {workspaces.length > 0 ? <DropdownMenuSeparator /> : null}
+          {workspaces.map((workspace) => (
+            <DropdownMenuItem
+              key={workspace.id}
+              onClick={() => void onWorkspaceChange?.(workspace.id)}
             >
-              {agent.name}
-            </button>
+              <Folder />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{workspace.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {workspace.working_directory || 'No directory'}
+                </span>
+              </span>
+            </DropdownMenuItem>
           ))}
-        </div>
-      ) : null}
+          {onManageWorkspaces ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onManageWorkspaces}>
+                <Settings />
+                Manage workspaces...
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+function InlineCreateRow({ workspaceId, pending = false, onCancel, onSubmit }: InlineCreateProps) {
+  const [name, setName] = useState('')
+
+  useEffect(() => {
+    setName('')
+  }, [workspaceId])
+
+  const commit = useCallback(async () => {
+    if (pending) return
+    const trimmed = name.trim() || defaultConversationName()
+    await onSubmit({
+      name: trimmed,
+      key: buildConversationKey(trimmed),
+      workspaceId,
+    })
+  }, [name, onSubmit, pending, workspaceId])
+
+  return (
+    <div className="mb-1.5 space-y-2 px-0.5 py-1">
       <Input
         autoFocus
         value={name}
@@ -279,21 +328,6 @@ function InlineCreateRow({ agents, grouped = false, pending = false, onCancel, o
       />
     </div>
   )
-}
-
-function groupConversations(
-  agents: Agent[],
-  conversations: Conversation[],
-): Array<{ agent: Agent; items: Conversation[] }> | null {
-  if (agents.length <= 1) return null
-  const buckets = new Map(agents.map((agent) => [agent.id, [] as Conversation[]]))
-  for (const conversation of conversations) {
-    const bucket = buckets.get(conversation.agent_id)
-    if (bucket) bucket.push(conversation)
-  }
-  return agents
-    .map((agent) => ({ agent, items: buckets.get(agent.id) ?? [] }))
-    .filter((group) => group.items.length > 0)
 }
 
 type RowProps = {

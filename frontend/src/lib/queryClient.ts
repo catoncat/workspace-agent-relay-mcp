@@ -1,10 +1,12 @@
 import { QueryClient, keepPreviousData, queryOptions } from '@tanstack/react-query'
 import {
   ensureDefaultAgent,
-  ensureDefaultConversation,
+  getSettings,
   getRunDetail,
+  listConversations,
   listRuns,
   listTokenRefs,
+  listWorkspaces,
 } from '@/api/client'
 import type { BootstrapData } from '@/features/relay/hooks'
 import { relayQueryKeys } from '@/features/relay/queryKeys'
@@ -22,10 +24,13 @@ export const queryClient = new QueryClient({
 export const bootstrapOptions = queryOptions({
   queryKey: relayQueryKeys.bootstrap,
   queryFn: async (): Promise<BootstrapData> => {
-    const agents = await ensureDefaultAgent()
-    const firstAgent = agents[0]
-    const conversations = firstAgent ? await ensureDefaultConversation(firstAgent.id) : []
-    return { agents, conversations }
+    const [agents, settings, workspaces, conversations] = await Promise.all([
+      ensureDefaultAgent(),
+      getSettings(),
+      listWorkspaces(),
+      listConversations(),
+    ])
+    return { agents, settings, workspaces, conversations }
   },
   staleTime: 5 * 60 * 1000,
   retry: 1,

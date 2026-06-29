@@ -28,6 +28,7 @@ you (browser)     your machine                         ChatGPT
 
 - **This repo** — reporting MCP (`record_plan`, `record_progress`, `record_result`, …) + dashboard + SSE.
 - **[notion-local-ops-mcp](https://github.com/catoncat/notion-local-ops-mcp)** (optional) — execution tools; `bind_relay_run` mirrors tool calls here.
+- **Dashboard IA** — conversations are organized by Workspace (`working_directory`) or the built-in `无目录` space. Workspace Agent entries are execution backends selected in Settings, not the primary sidebar object.
 
 The active code path is intentionally relay-only: MCP callback events plus local tool traces. Older cloud-side readback experiments have been removed from the working tree; use Git history if you need to study them.
 
@@ -74,9 +75,9 @@ Run `cd frontend && pnpm run build` only before CI or when you want the single-p
 
 Without these four steps the dashboard stays empty.
 
-### 1. Register the agent in the relay dashboard
+### 1. Register an execution backend in the relay dashboard
 
-**Settings → Add agent** (or use `.env` for a single default agent):
+**Settings → Add backend** (or use `.env` for a single default backend):
 
 | Field | Where to get it |
 | --- | --- |
@@ -84,9 +85,18 @@ Without these four steps the dashboard stays empty.
 | Trigger URL | ChatGPT → Workspace Agent → `https://api.chatgpt.com/v1/workspace_agents/agtch_…/trigger` |
 | Access token | Same settings page (`at-…`) — stored on the relay, never shown again in the browser |
 
-For multiple ChatGPT accounts, add one agent row per account. Pick the agent when creating a thread in the sidebar.
+For multiple ChatGPT accounts, add one backend row per account. Pick the **Current backend** in Settings; new threads use that backend automatically.
 
-### 2. Connect MCP: relay (required)
+### 2. Configure workspaces
+
+Use the sidebar workspace selector or **Settings → Workspaces**:
+
+- `无目录` is built in and sends no cwd.
+- A workspace has a name and an absolute `working_directory`.
+- New threads inherit the current workspace.
+- Every run stores a `working_directory` snapshot and injects it into the Workspace Agent trigger, so later workspace path edits do not rewrite old runs.
+
+### 3. Connect MCP: relay (required)
 
 In the Workspace Agent → **MCP connectors**:
 
@@ -97,11 +107,11 @@ In the Workspace Agent → **MCP connectors**:
 
 Confirm tools: `record_plan`, `record_progress`, `record_result`, `ask_user`, `get_run_context`, `server_info`.
 
-### 3. Connect MCP: local ops (recommended)
+### 4. Connect MCP: local ops (recommended)
 
 Add [notion-local-ops-mcp](https://github.com/catoncat/notion-local-ops-mcp) as a second connector so **Tool calls** stream in the dashboard. See its README for URL/auth.
 
-### 4. Paste Agent Instructions (easy to miss)
+### 5. Paste Agent Instructions (easy to miss)
 
 Open **[`docs/agent-instructions.md`](docs/agent-instructions.md)**:
 
@@ -117,9 +127,9 @@ record_plan  →  bind_relay_run  →  batch record_progress  →  record_result
 
 Without this paste, the agent may work only inside ChatGPT and the operator sees nothing on the relay.
 
-### 5. Smoke test
+### 6. Smoke test
 
-Send a short task from the dashboard (e.g. create and read a file under `/tmp`). You should see plan → tool traces (if local-ops connected) → result.
+Select a workspace, then send a short task from the dashboard (e.g. inspect the current directory or create/read a file under `/tmp`). You should see plan → tool traces (if local-ops connected) → result, and the trigger should include `working_directory` for non-`无目录` workspaces.
 
 ## MCP tools (relay)
 
@@ -161,6 +171,7 @@ tests/
 - Workspace Agent access tokens — stored in relay DB or `.env`; rotate if leaked.
 - MCP tool writes route by `request_id` + `conversation_key` and are rejected once a run is terminal (`done`/`blocked`/`failed`/`superseded`).
 - Dashboard sends default to queue/new request: Enter creates a fresh `request_id` and does not close the current active run. Explicit steer/guidance reuses the selected active run's `request_id`.
+- Workspace paths are plain absolute local paths. They are copied into each run as `working_directory_snapshot`; old runs are not rewritten when a workspace is edited or deleted.
 
 ## Status
 

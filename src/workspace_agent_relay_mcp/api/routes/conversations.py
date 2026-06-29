@@ -20,12 +20,19 @@ def conversation_routes(store: Any) -> list[tuple]:
             payload = await json_body(request)
         except ValueError as exc:
             return json_error(str(exc), status_code=400)
-        missing = missing_fields(payload, ("agent_id", "name", "conversation_key"))
+        missing = missing_fields(payload, ("name", "conversation_key"))
         if missing:
             return json_error(f"missing required field(s): {', '.join(missing)}")
         try:
+            agent_id = int(payload["agent_id"]) if payload.get("agent_id") is not None else store.resolve_default_agent_id()
+            workspace_id = (
+                int(payload["workspace_id"])
+                if payload.get("workspace_id") is not None
+                else store.resolve_default_workspace_id()
+            )
             conversation = store.create_conversation(
-                agent_id=int(payload["agent_id"]),
+                agent_id=agent_id,
+                workspace_id=workspace_id,
                 name=str(payload["name"]),
                 conversation_key=str(payload["conversation_key"]),
             )

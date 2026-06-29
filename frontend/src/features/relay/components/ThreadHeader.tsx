@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   selectedConversation: Conversation | null
-  selectedAgentName?: string
   loading: boolean
   recentUrl: string | null
   runCount: number
@@ -24,7 +23,6 @@ type Props = {
 
 export function ThreadHeader({
   selectedConversation,
-  selectedAgentName,
   loading,
   recentUrl,
   runCount,
@@ -33,7 +31,6 @@ export function ThreadHeader({
   const conversationKey = selectedConversation?.conversation_key
 
   const subtitleParts = [
-    selectedAgentName,
     runCount > 0 ? `${runCount} ${runCount === 1 ? 'turn' : 'turns'}` : null,
   ].filter(Boolean)
 

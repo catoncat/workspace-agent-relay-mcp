@@ -111,6 +111,131 @@ def test_api_can_create_agent_and_conversation(tmp_path: Path) -> None:
     assert conversation_response.json()["conversation_key"] == "research:sherlog"
 
 
+def test_api_settings_default_agent_and_workspace_conversation(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    workspace_dir.mkdir()
+
+    with client:
+        first_agent = client.post(
+            "/api/agents",
+            json={
+                "name": "first",
+                "trigger_url": "https://api.chatgpt.com/v1/workspace_agents/agtch_first/trigger",
+                "token_ref": "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+            },
+        ).json()
+        second_agent = client.post(
+            "/api/agents",
+            json={
+                "name": "second",
+                "trigger_url": "https://api.chatgpt.com/v1/workspace_agents/agtch_second/trigger",
+                "token_ref": "env:WORKSPACE_AGENT_RELAY_AGENT_TOKEN",
+            },
+        ).json()
+        initial_settings = client.get("/api/settings")
+        workspace_response = client.post(
+            "/api/workspaces",
+            json={"name": "Relay repo", "working_directory": str(workspace_dir)},
+        )
+        workspace = workspace_response.json()
+        settings_response = client.patch(
+            "/api/settings",
+            json={"current_agent_id": second_agent["id"], "current_workspace_id": workspace["id"]},
+        )
+        conversation_response = client.post(
+            "/api/conversations",
+            json={"name": "Repo thread", "conversation_key": "repo:thread"},
+        )
+        run_response = client.post(
+            f"/api/conversations/{conversation_response.json()['id']}/runs",
+            json={"input_markdown": "Use the repo cwd"},
+        )
+
+    assert initial_settings.status_code == 200
+    assert initial_settings.json()["current_agent_id"] == first_agent["id"]
+    assert initial_settings.json()["current_workspace_id"] is None
+    assert workspace_response.status_code == 200
+    assert settings_response.status_code == 200
+    assert settings_response.json() == {
+        "current_agent_id": second_agent["id"],
+        "current_workspace_id": workspace["id"],
+    }
+    assert conversation_response.status_code == 200
+    conversation = conversation_response.json()
+    assert conversation["agent_id"] == second_agent["id"]
+    assert conversation["workspace_id"] == workspace["id"]
+    assert run_response.status_code == 200
+    run = run_response.json()
+    assert run["workspace_id"] == workspace["id"]
+    assert run["working_directory_snapshot"] == str(workspace_dir)
+    assert "working_directory: " + str(workspace_dir) in trigger_client.calls[0]["input_text"]
+
+
+def test_api_create_conversation_requires_available_agent(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.post(
+            "/api/conversations",
+            json={"name": "No backend", "conversation_key": "no:backend"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+    assert "agent" in response.json()["error"].lower()
+
+
+def test_api_workspace_crud_and_delete_moves_conversations_to_no_directory(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    updated_dir = tmp_path / "repo-updated"
+    workspace_dir.mkdir()
+    updated_dir.mkdir()
+
+    with client:
+        _, _ = _seed_conversation(client)
+        workspace_response = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(workspace_dir)},
+        )
+        workspace = workspace_response.json()
+        update_response = client.patch(
+            f"/api/workspaces/{workspace['id']}",
+            json={"name": "Repo updated", "working_directory": str(updated_dir)},
+        )
+        settings_response = client.patch(
+            "/api/settings",
+            json={"current_workspace_id": workspace["id"]},
+        )
+        conversation_response = client.post(
+            "/api/conversations",
+            json={"name": "Workspace thread", "conversation_key": "workspace:thread"},
+        )
+        list_response = client.get("/api/workspaces")
+        delete_response = client.delete(f"/api/workspaces/{workspace['id']}")
+        conversations_after_delete = client.get("/api/conversations").json()
+        moved_conversation = next(
+            item for item in conversations_after_delete if item["conversation_key"] == "workspace:thread"
+        )
+        settings_after_delete = client.get("/api/settings")
+        missing_delete = client.delete(f"/api/workspaces/{workspace['id']}")
+
+    assert workspace_response.status_code == 200
+    assert update_response.status_code == 200
+    assert update_response.json()["name"] == "Repo updated"
+    assert update_response.json()["working_directory"] == str(updated_dir)
+    assert settings_response.status_code == 200
+    assert conversation_response.status_code == 200
+    assert conversation_response.json()["workspace_id"] == workspace["id"]
+    assert len(list_response.json()) == 1
+    assert delete_response.status_code == 200
+    assert delete_response.json()["success"] is True
+    assert moved_conversation["workspace_id"] is None
+    assert settings_after_delete.json()["current_workspace_id"] is None
+    assert missing_delete.status_code == 404
+
+
 def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
@@ -423,6 +548,44 @@ def test_api_steer_route_appends_to_active_run(tmp_path: Path) -> None:
         user_messages = [e for e in detail["events"] if e["event_type"] == "user_message"]
         assert len(user_messages) == 1
         assert user_messages[0]["markdown"] == "You didn't push."
+
+
+def test_api_steer_uses_run_working_directory_snapshot(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+    first_dir = tmp_path / "repo"
+    second_dir = tmp_path / "repo-moved"
+    first_dir.mkdir()
+    second_dir.mkdir()
+
+    with client:
+        _seed_conversation(client)
+        workspace = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(first_dir)},
+        ).json()
+        client.patch("/api/settings", json={"current_workspace_id": workspace["id"]})
+        conversation = client.post(
+            "/api/conversations",
+            json={"name": "Repo thread", "conversation_key": "repo:snapshot"},
+        ).json()
+        run = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Start in repo"},
+        ).json()
+        client.patch(
+            f"/api/workspaces/{workspace['id']}",
+            json={"working_directory": str(second_dir)},
+        )
+        steer_response = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={"input_markdown": "Keep going"},
+        )
+
+    assert steer_response.status_code == 200
+    assert run["working_directory_snapshot"] == str(first_dir)
+    assert "working_directory: " + str(first_dir) in trigger_client.calls[0]["input_text"]
+    assert "working_directory: " + str(first_dir) in trigger_client.calls[1]["input_text"]
+    assert "working_directory: " + str(second_dir) not in trigger_client.calls[1]["input_text"]
 
 
 def test_api_steer_route_can_target_selected_active_run(tmp_path: Path) -> None:

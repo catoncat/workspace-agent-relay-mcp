@@ -148,6 +148,150 @@ def test_delete_agent_cascades_conversations(tmp_path: Path) -> None:
     assert store.list_conversations() == []
 
 
+def test_app_settings_current_agent_falls_back_and_delete_updates(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    first = store.create_agent(
+        name="first",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_first/trigger",
+        access_token="at-first",
+    )
+    second = store.create_agent(
+        name="second",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_second/trigger",
+        access_token="at-second",
+    )
+
+    assert store.get_settings()["current_agent_id"] == first["id"]
+
+    updated = store.update_settings(current_agent_id=second["id"])
+    assert updated["current_agent_id"] == second["id"]
+
+    store.delete_agent(second["id"])
+    assert store.get_settings()["current_agent_id"] == first["id"]
+
+    store.delete_agent(first["id"])
+    assert store.get_settings()["current_agent_id"] is None
+
+
+def test_workspace_crud_and_run_working_directory_snapshot(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    workspace_dir = tmp_path / "repo"
+    workspace_dir.mkdir()
+    next_dir = tmp_path / "repo-renamed"
+    next_dir.mkdir()
+
+    workspace = store.create_workspace(name="Relay", working_directory=str(workspace_dir))
+    assert workspace["name"] == "Relay"
+    assert workspace["working_directory"] == str(workspace_dir)
+    assert store.list_workspaces()[0]["id"] == workspace["id"]
+
+    store.update_settings(current_workspace_id=workspace["id"])
+    conversation = store.create_conversation(
+        agent_id=agent["id"],
+        workspace_id=store.get_settings()["current_workspace_id"],
+        name="Relay thread",
+        conversation_key="repo:relay",
+    )
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key="repo:relay",
+        input_markdown="hello",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+
+    assert conversation["workspace_id"] == workspace["id"]
+    assert run["workspace_id"] == workspace["id"]
+    assert run["working_directory_snapshot"] == str(workspace_dir)
+
+    updated = store.update_workspace(
+        workspace["id"],
+        name="Relay renamed",
+        working_directory=str(next_dir),
+    )
+    assert updated["name"] == "Relay renamed"
+    assert updated["working_directory"] == str(next_dir)
+    assert store.get_run(run["id"])["working_directory_snapshot"] == str(workspace_dir)
+
+    store.delete_workspace(workspace["id"])
+
+    assert store.get_settings()["current_workspace_id"] is None
+    assert store.get_conversation(conversation["id"])["workspace_id"] is None
+    assert store.get_run(run["id"])["workspace_id"] == workspace["id"]
+    assert store.get_run(run["id"])["working_directory_snapshot"] == str(workspace_dir)
+
+
+def test_legacy_database_migration_sets_workspace_fields_to_null(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE agents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                trigger_url TEXT NOT NULL,
+                trigger_id TEXT NOT NULL,
+                token_ref TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                conversation_key TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                pinned_at TEXT
+            );
+            CREATE TABLE runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL UNIQUE,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                conversation_key TEXT NOT NULL,
+                parent_run_id INTEGER,
+                superseded_by_run_id INTEGER,
+                supersede_reason TEXT,
+                trigger_error TEXT,
+                idempotency_key TEXT NOT NULL,
+                input_markdown TEXT NOT NULL,
+                trigger_status TEXT NOT NULL DEFAULT 'draft',
+                trigger_http_status INTEGER,
+                trigger_x_request_id TEXT,
+                conversation_url TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            INSERT INTO agents (id, name, trigger_url, trigger_id, token_ref, created_at, updated_at)
+            VALUES (1, 'default', 'https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger', 'agtch_test', 'env:TOKEN', 'now', 'now');
+            INSERT INTO conversations (id, agent_id, name, conversation_key, created_at, updated_at)
+            VALUES (1, 1, 'Legacy', 'legacy:key', 'now', 'now');
+            INSERT INTO runs (
+                id, request_id, agent_id, conversation_id, conversation_key,
+                idempotency_key, input_markdown, created_at, updated_at
+            )
+            VALUES (1, 'run_1', 1, 1, 'legacy:key', 'idem_1', 'hello', 'now', 'now');
+            """
+        )
+
+    store = RelayStore(db_path)
+
+    assert store.get_conversation(1)["workspace_id"] is None
+    run = store.get_run(1)
+    assert run["workspace_id"] is None
+    assert run["working_directory_snapshot"] is None
+
+
 def test_create_run_stores_input_markdown_verbatim(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     agent = store.upsert_agent(name="default", trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger", token_ref="env:TOKEN")

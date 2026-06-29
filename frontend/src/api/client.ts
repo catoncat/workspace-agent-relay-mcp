@@ -1,4 +1,13 @@
-import type { Agent, Conversation, Run, RunDetail, RunEventPayload, TokenRef } from './types'
+import type {
+  Agent,
+  Conversation,
+  RelaySettings,
+  Run,
+  RunDetail,
+  RunEventPayload,
+  TokenRef,
+  Workspace,
+} from './types'
 
 // This dashboard is a local/admin surface. localStorage keeps setup simple, but it is not
 // XSS-hardened like an httpOnly cookie, so the API token should stay scoped to this relay.
@@ -68,6 +77,17 @@ export async function listTokenRefs(): Promise<TokenRef[]> {
   return api('/api/agents/token-refs')
 }
 
+export async function getSettings(): Promise<RelaySettings> {
+  return api('/api/settings')
+}
+
+export async function updateSettings(body: {
+  current_agent_id?: number | null
+  current_workspace_id?: number | null
+}): Promise<RelaySettings> {
+  return api('/api/settings', { method: 'PATCH', body: JSON.stringify(body) })
+}
+
 export async function createAgent(body: {
   name: string
   trigger_url: string
@@ -99,7 +119,8 @@ export async function listConversations(): Promise<Conversation[]> {
 }
 
 export async function createConversation(body: {
-  agent_id: number
+  agent_id?: number
+  workspace_id?: number | null
   name: string
   conversation_key: string
 }): Promise<Conversation> {
@@ -137,14 +158,32 @@ export async function deleteConversation(conversationId: number): Promise<{ succ
   return api(`/api/conversations/${conversationId}`, { method: 'DELETE' })
 }
 
-export async function ensureDefaultConversation(agentId: number): Promise<Conversation[]> {
-  let conversations = await listConversations()
-  if (conversations.length === 0) {
-    const key = `default:${new Date().toISOString().slice(0, 10)}`
-    await createConversation({ agent_id: agentId, name: 'Default', conversation_key: key })
-    conversations = await listConversations()
-  }
-  return conversations
+export async function listWorkspaces(): Promise<Workspace[]> {
+  return api('/api/workspaces')
+}
+
+export async function createWorkspace(body: {
+  name: string
+  working_directory?: string | null
+}): Promise<Workspace> {
+  return api('/api/workspaces', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function updateWorkspace(
+  workspaceId: number,
+  body: {
+    name?: string
+    working_directory?: string | null
+  },
+): Promise<Workspace> {
+  return api(`/api/workspaces/${workspaceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteWorkspace(workspaceId: number): Promise<{ success: boolean }> {
+  return api(`/api/workspaces/${workspaceId}`, { method: 'DELETE' })
 }
 
 export async function listRuns(conversationId: number): Promise<Run[]> {

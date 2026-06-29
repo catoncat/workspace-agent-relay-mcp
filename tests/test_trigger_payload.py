@@ -129,6 +129,33 @@ def test_build_trigger_input_has_no_pull_mode_header() -> None:
     assert "relay_mcp: workspace-agent-relay-mcp" in rendered
 
 
+def test_build_trigger_input_includes_working_directory_header_when_present() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_123",
+        conversation_key="research:sherlog",
+        user_input="Please research sherlog.",
+        working_directory="/Users/envvar/work/repos/poke/workspace-agent-relay-mcp",
+    )
+
+    header = rendered.split("\n\n", 1)[0]
+    assert "request_id: relay_123" in header
+    assert "conversation_key: research:sherlog" in header
+    assert "relay_mcp: workspace-agent-relay-mcp" in header
+    assert "working_directory: /Users/envvar/work/repos/poke/workspace-agent-relay-mcp" in header
+    assert rendered.endswith("Please research sherlog.")
+
+
+def test_build_trigger_input_omits_empty_working_directory_header() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_123",
+        conversation_key="research:sherlog",
+        user_input="Please research sherlog.",
+        working_directory="",
+    )
+
+    assert "working_directory:" not in rendered
+
+
 class FakeResponse:
     def __init__(self, status: int, body: bytes, headers: dict[str, str]) -> None:
         self.status = status
