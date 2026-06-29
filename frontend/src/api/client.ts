@@ -1,4 +1,4 @@
-import type { Agent, Conversation, InteractionMode, PullSyncStatus, Run, RunDetail, RunEventPayload, TokenRef } from './types'
+import type { Agent, Conversation, Run, RunDetail, RunEventPayload, TokenRef } from './types'
 
 // This dashboard is a local/admin surface. localStorage keeps setup simple, but it is not
 // XSS-hardened like an httpOnly cookie, so the API token should stay scoped to this relay.
@@ -111,8 +111,6 @@ export async function updateConversation(
   body: {
     name?: string
     pinned?: boolean
-    interaction_mode?: InteractionMode
-    polling_paused?: boolean
   },
 ): Promise<Conversation> {
   return api(`/api/conversations/${conversationId}`, {
@@ -135,31 +133,8 @@ export async function setConversationPinned(
   return updateConversation(conversationId, { pinned })
 }
 
-export async function setConversationInteractionMode(
-  conversationId: number,
-  interaction_mode: InteractionMode,
-): Promise<Conversation> {
-  return updateConversation(conversationId, { interaction_mode })
-}
-
-export async function setConversationPollingPaused(
-  conversationId: number,
-  polling_paused: boolean,
-): Promise<Conversation> {
-  return updateConversation(conversationId, { polling_paused })
-}
-
 export async function deleteConversation(conversationId: number): Promise<{ success: boolean }> {
   return api(`/api/conversations/${conversationId}`, { method: 'DELETE' })
-}
-
-/** Heartbeat while the operator has this conversation open in the dashboard. */
-export async function postConversationPresence(conversationId: number): Promise<Conversation> {
-  return api(`/api/conversations/${conversationId}/presence`, { method: 'POST', body: '{}' })
-}
-
-export async function getPullSyncStatus(conversationId: number): Promise<PullSyncStatus> {
-  return api(`/api/conversations/${conversationId}/pull-sync`)
 }
 
 export async function ensureDefaultConversation(agentId: number): Promise<Conversation[]> {

@@ -158,59 +158,43 @@ def test_api_can_pin_conversation_without_name(tmp_path: Path) -> None:
     assert unpin_response.json()["pinned_at"] is None
 
 
-def test_api_conversation_presence_sets_first_viewed(tmp_path: Path) -> None:
+def test_api_patch_conversation_rejects_retired_pull_fields(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
     with client:
         _, conversation = _seed_conversation(client)
-        response = client.post(f"/api/conversations/{conversation['id']}/presence", json={})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["first_viewed_at"]
-    assert body["presence_at"]
-
-
-def test_api_patch_conversation_interaction_mode(tmp_path: Path) -> None:
-    client, _ = _client(tmp_path)
-
-    with client:
-        _, conversation = _seed_conversation(client)
-        response = client.patch(
+        mode_response = client.patch(
             f"/api/conversations/{conversation['id']}",
             json={"interaction_mode": "pull"},
         )
+        paused_response = client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"polling_paused": True},
+        )
 
-    assert response.status_code == 200
-    assert response.json()["interaction_mode"] == "pull"
+    assert mode_response.status_code == 400
+    assert "unsupported field" in mode_response.json()["error"]
+    assert paused_response.status_code == 400
+    assert "unsupported field" in paused_response.json()["error"]
 
 
-def test_api_pull_sync_status(tmp_path: Path) -> None:
+def test_api_retired_presence_and_pull_sync_routes_are_gone(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
     with client:
         _, conversation = _seed_conversation(client)
-        client.patch(
-            f"/api/conversations/{conversation['id']}",
-            json={"interaction_mode": "pull"},
-        )
-        response = client.get(f"/api/conversations/{conversation['id']}/pull-sync")
+        presence = client.post(f"/api/conversations/{conversation['id']}/presence", json={})
+        pull_sync = client.get(f"/api/conversations/{conversation['id']}/pull-sync")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["visible"] is False
-    assert body["state"] == "idle"
+    assert presence.status_code == 404
+    assert pull_sync.status_code == 404
 
 
-def test_api_pull_mode_run_uses_pull_trigger(tmp_path: Path) -> None:
+def test_api_run_always_uses_relay_trigger(tmp_path: Path) -> None:
     client, trigger_client = _client(tmp_path)
 
     with client:
         _, conversation = _seed_conversation(client)
-        client.patch(
-            f"/api/conversations/{conversation['id']}",
-            json={"interaction_mode": "pull"},
-        )
         run_response = client.post(
             f"/api/conversations/{conversation['id']}/runs",
             json={"input_markdown": "Research sherlog"},
@@ -218,10 +202,10 @@ def test_api_pull_mode_run_uses_pull_trigger(tmp_path: Path) -> None:
 
     assert run_response.status_code == 200
     run = run_response.json()
-    assert run["interaction_mode"] == "pull"
+    assert "interaction_mode" not in run
     call = trigger_client.calls[0]
-    assert "relay_mode: pull" in call["input_text"]
-    assert "workspace-agent-relay-mcp.record_plan" not in call["input_text"]
+    assert "relay_mode: pull" not in call["input_text"]
+    assert "relay_mcp: workspace-agent-relay-mcp" in call["input_text"]
     assert call["input_text"].endswith("Research sherlog")
 
 

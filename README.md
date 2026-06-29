@@ -29,6 +29,8 @@ you (browser)     your machine                         ChatGPT
 - **This repo** — reporting MCP (`record_plan`, `record_progress`, `record_result`, …) + dashboard + SSE.
 - **[notion-local-ops-mcp](https://github.com/catoncat/notion-local-ops-mcp)** (optional) — execution tools; `bind_relay_run` mirrors tool calls here.
 
+The active code path is intentionally relay-only: MCP callback events plus local tool traces. Older cloud-side readback experiments have been removed from the working tree; use Git history if you need to study them.
+
 ## Quick start
 
 ```bash

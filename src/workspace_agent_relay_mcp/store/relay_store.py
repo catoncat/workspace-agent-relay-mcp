@@ -14,22 +14,6 @@ if TYPE_CHECKING:
 
 
 TERMINAL_STATUSES = {"done", "blocked", "failed", "superseded"}
-# Runs that may still receive ChatGPT-side updates; poller keeps refetching their
-# Hermes conversation even when the dashboard conversation was never opened.
-POLLING_HOT_RUN_STATUSES = (
-    "draft",
-    "sent",
-    "pending",
-    "running",
-    "accepted",
-    "waiting",
-    "needs_user",
-    "trigger_failed",
-)
-PRESENCE_TTL_SEC = 30
-POLL_INTERVAL_ACTIVE_SEC = 5
-POLL_INTERVAL_IDLE_SEC = 60
-POLLER_HEARTBEAT_TTL_SEC = 15
 # Active runs paused on a human decision (set by ask_user). Steering such a run
 # is the operator's ANSWER — it resumes the SAME turn rather than starting a new
 # one, so the route labels the steer trigger accordingly and steer_run transitions
@@ -42,125 +26,10 @@ TRIGGER_MUTABLE_RUN_STATUSES = {"draft", "sent"}
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
 MAX_STEP_TITLE_LEN = 200
-VALID_INTERACTION_MODES = frozenset({"relay", "pull"})
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _epoch_to_iso(value: Any) -> str:
-    """Convert a ChatGPT message create_time (float epoch seconds) to an ISO
-    timestamp matching callback events' created_at format, so polling and
-    callback events sort together lexicographically. Non-numeric values fall
-    back to now."""
-    if isinstance(value, (int, float)) and value > 0:
-        try:
-            return datetime.fromtimestamp(float(value), UTC).isoformat()
-        except (OverflowError, OSError, ValueError):
-            pass
-    return _now()
-
-
-def _event_payload_dict(row: dict[str, Any]) -> dict[str, Any]:
-    payload = row.get("payload")
-    if isinstance(payload, dict):
-        return payload
-    raw = row.get("payload_json")
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return parsed
-    except (TypeError, json.JSONDecodeError):
-        pass
-    return {}
-
-
-def _merged_event_sort_key(row: dict[str, Any]) -> tuple[str, int, int]:
-    """Legacy timestamp merge for relay-only runs (no polling plane)."""
-    sort_at = str(row.get("created_at") or "")
-    if row.get("source_key"):
-        payload = _event_payload_dict(row)
-        mapping_ord = payload.get("mapping_ord")
-        sub = int(mapping_ord) if isinstance(mapping_ord, (int, float)) else 0
-        return (sort_at, 1, sub)
-    event_id = row.get("id")
-    return (sort_at, 0, int(event_id) if isinstance(event_id, int) else 0)
-
-
-_MERGE_LANE_USER = 0
-_MERGE_LANE_CALLBACK = 1
-_MERGE_LANE_POLLING = 2
-
-
-def _merge_lane(row: dict[str, Any]) -> int:
-    if row.get("event_type") == "user_message":
-        return _MERGE_LANE_USER
-    if row.get("source_key"):
-        return _MERGE_LANE_POLLING
-    return _MERGE_LANE_CALLBACK
-
-
-def _legacy_turn_ord_from_user_messages(event_id: int, user_message_ids: list[int]) -> int:
-    seg = 0
-    for uid in user_message_ids:
-        if event_id > uid:
-            seg += 1
-        else:
-            break
-    return seg
-
-
-def _event_turn_ord(row: dict[str, Any], *, user_message_ids: list[int]) -> int:
-    """ChatGPT turn index: 0 = initial trigger, 1+ = each dashboard steer."""
-    payload = _event_payload_dict(row)
-    turn_ord = payload.get("turn_ord")
-    if isinstance(turn_ord, int):
-        return turn_ord
-    event_id = int(row.get("id") or 0)
-    if row.get("event_type") == "user_message":
-        try:
-            return user_message_ids.index(event_id) + 1
-        except ValueError:
-            return 1
-    return _legacy_turn_ord_from_user_messages(event_id, user_message_ids)
-
-
-def _merged_event_structure_sort_key(
-    row: dict[str, Any],
-    *,
-    user_message_ids: list[int],
-) -> tuple[int, int, int, int]:
-    """Spec §7 structure merge: (turn_ord, lane, sub, id).
-
-    lane 0=user steer, 1=callback (tool traces / plan / question), 2=polling.
-  """
-    turn_ord = _event_turn_ord(row, user_message_ids=user_message_ids)
-    lane = _merge_lane(row)
-    payload = _event_payload_dict(row)
-    if lane == _MERGE_LANE_POLLING:
-        mapping_ord = payload.get("mapping_ord")
-        sub = int(mapping_ord) if isinstance(mapping_ord, (int, float)) else 0
-    else:
-        sub = int(row.get("id") or 0)
-    return (turn_ord, lane, sub, int(row.get("id") or 0))
-
-
-def _uses_structure_merge(merged: list[dict[str, Any]]) -> bool:
-    if any(row.get("source_key") for row in merged):
-        return True
-    return any(
-        isinstance(_event_payload_dict(row).get("turn_ord"), int) for row in merged
-    )
-
-
-def _normalize_interaction_mode(value: Any) -> str:
-    mode = str(value or "relay").strip().lower()
-    if mode not in VALID_INTERACTION_MODES:
-        raise ValueError(f"interaction_mode must be one of {sorted(VALID_INTERACTION_MODES)}, got {value!r}")
-    return mode
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -266,7 +135,7 @@ class RelayStore:
                 run_id,
                 {
                     "run": self.get_run(run_id),
-                    "events": self.list_events_merged(run_id),
+                    "events": self.list_events(run_id),
                     "artifacts": self.list_artifacts(run_id),
                     "plan": self.get_plan(run_id),
                 },
@@ -440,50 +309,16 @@ class RelayStore:
             conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
             conv_migrations = {
                 "pinned_at": "TEXT",
-                "first_viewed_at": "TEXT",
-                "presence_at": "TEXT",
-                "interaction_mode": "TEXT NOT NULL DEFAULT 'relay'",
-                "polling_paused": "INTEGER NOT NULL DEFAULT 0",
             }
             for column, column_type in conv_migrations.items():
                 if column not in conv_cols:
                     conn.execute(f"ALTER TABLE conversations ADD COLUMN {column} {column_type}")
-            if "hermes_conversation_id" not in cols:
-                conn.execute("ALTER TABLE runs ADD COLUMN hermes_conversation_id TEXT")
-            run_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
-            if "interaction_mode" not in run_cols:
-                conn.execute("ALTER TABLE runs ADD COLUMN interaction_mode TEXT")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS agent_secrets (
                     agent_id INTEGER PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
                     access_token TEXT NOT NULL,
                     updated_at TEXT NOT NULL
-                );
-                """
-            )
-            # Polling-derived events (from ChatGPT conversation readback) carry a
-            # source_key = the ChatGPT mapping node id. Callback events have
-            # source_key = NULL. A partial unique index dedups polling writes
-            # idempotently per (run_id, node_id) without constraining callback rows.
-            event_cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
-            if "source_key" not in event_cols:
-                conn.execute("ALTER TABLE events ADD COLUMN source_key TEXT")
-            conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_polling_key "
-                "ON events(run_id, source_key) WHERE source_key IS NOT NULL"
-            )
-            agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
-            if "hermes_agent_id" not in agent_cols:
-                conn.execute("ALTER TABLE agents ADD COLUMN hermes_agent_id TEXT")
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS poller_heartbeats (
-                    hermes_agent_id TEXT PRIMARY KEY,
-                    last_seen_at TEXT NOT NULL,
-                    last_fetched INTEGER NOT NULL DEFAULT 0,
-                    last_inserted INTEGER NOT NULL DEFAULT 0,
-                    last_error TEXT
                 );
                 """
             )
@@ -599,8 +434,8 @@ class RelayStore:
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO conversations (agent_id, name, conversation_key, interaction_mode, created_at, updated_at)
-                VALUES (?, ?, ?, 'relay', ?, ?)
+                INSERT INTO conversations (agent_id, name, conversation_key, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (agent_id, name, conversation_key, now, now),
             )
@@ -633,336 +468,6 @@ class RelayStore:
             row = conn.execute("SELECT * FROM agents WHERE trigger_id = ?", (tid,)).fetchone()
         return _row_to_dict(row)
 
-    def get_agent_by_hermes_id(self, hermes_agent_id: str) -> dict[str, Any] | None:
-        hid = hermes_agent_id.strip()
-        if not hid:
-            return None
-        with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT * FROM agents WHERE hermes_agent_id = ?", (hid,)).fetchone()
-        return _row_to_dict(row)
-
-    def bind_agent_hermes_id(self, agent_id: int, *, hermes_agent_id: str) -> None:
-        hid = hermes_agent_id.strip()
-        if not hid:
-            raise ValueError("hermes_agent_id must not be empty")
-        now = _now()
-        with self._lock, self._connect(immediate=True) as conn:
-            row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
-            if row is None:
-                raise KeyError(f"Agent not found: {agent_id}")
-            conn.execute(
-                "UPDATE agents SET hermes_agent_id = ?, updated_at = ? WHERE id = ?",
-                (hid, now, agent_id),
-            )
-
-    def _infer_agent_for_hermes(self, hermes_agent_id: str, *, presence_cutoff: str) -> dict[str, Any] | None:
-        """When hermes_agent_id is not yet bound, pick the relay agent with hot runs
-        on recently-present conversations (structural: that is who the operator is watching)."""
-        hot = tuple(POLLING_HOT_RUN_STATUSES)
-        placeholders_hot = ",".join("?" * len(hot))
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                f"""
-                SELECT r.agent_id AS agent_id, COUNT(*) AS n
-                FROM runs r
-                JOIN conversations c ON c.id = r.conversation_id
-                WHERE r.status IN ({placeholders_hot})
-                  AND c.archived_at IS NULL
-                  AND c.presence_at IS NOT NULL AND c.presence_at >= ?
-                GROUP BY r.agent_id
-                ORDER BY n DESC, r.agent_id ASC
-                LIMIT 1
-                """,
-                (*hot, presence_cutoff),
-            ).fetchone()
-        if row is None:
-            return None
-        agent_id = int(row["agent_id"])
-        self.bind_agent_hermes_id(agent_id, hermes_agent_id=hermes_agent_id)
-        return self.get_agent(agent_id)
-
-    def record_conversation_presence(self, conversation_id: int) -> dict[str, Any]:
-        """Dashboard heartbeat while a conversation is open. Sets presence_at every
-        call; first_viewed_at is written once on the first heartbeat."""
-        now = _now()
-        with self._lock, self._connect(immediate=True) as conn:
-            row = conn.execute(
-                "SELECT id, first_viewed_at FROM conversations WHERE id = ? AND archived_at IS NULL",
-                (conversation_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(f"Conversation not found: {conversation_id}")
-            if row["first_viewed_at"]:
-                conn.execute(
-                    "UPDATE conversations SET presence_at = ?, updated_at = ? WHERE id = ?",
-                    (now, now, conversation_id),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE conversations
-                    SET first_viewed_at = ?, presence_at = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (now, now, now, conversation_id),
-                )
-            updated = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
-        return _row_to_dict(updated) or {}
-
-    def get_polling_targets(
-        self,
-        *,
-        hermes_agent_id: str = "",
-        trigger_id: str = "",
-        presence_ttl_sec: int = PRESENCE_TTL_SEC,
-    ) -> dict[str, Any]:
-        """Tell the Hermes poller which ChatGPT conversations to fetch.
-
-        Only conversations the operator is actively viewing (fresh dashboard
-        presence heartbeat) are fetched. Unfocused conversations are never polled.
-        """
-        hid = hermes_agent_id.strip()
-        agent = self.get_agent_by_hermes_id(hid) if hid else None
-        cutoff = datetime.fromtimestamp(
-            datetime.now(UTC).timestamp() - max(1, int(presence_ttl_sec)),
-            UTC,
-        ).isoformat()
-        if agent is None and hid:
-            agent = self._infer_agent_for_hermes(hid, presence_cutoff=cutoff)
-        if agent is None and trigger_id.strip():
-            agent = self.get_agent_by_trigger_id(trigger_id)
-        if agent is None:
-            return {
-                "hermes_agent_id": hid or None,
-                "trigger_id": trigger_id.strip() or None,
-                "agent_id": None,
-                "active_conversation_ids": [],
-                "fetch_hermes_ids": [],
-                "fast_hermes_ids": [],
-                "discover_in_progress": False,
-                "interval_active_sec": POLL_INTERVAL_ACTIVE_SEC,
-                "interval_idle_sec": POLL_INTERVAL_IDLE_SEC,
-            }
-        agent_id = int(agent["id"])
-        hot = tuple(POLLING_HOT_RUN_STATUSES)
-        placeholders_hot = ",".join("?" * len(hot))
-        with self._lock, self._connect() as conn:
-            active_rows = conn.execute(
-                """
-                SELECT id FROM conversations
-                WHERE agent_id = ? AND archived_at IS NULL
-                  AND presence_at IS NOT NULL AND presence_at >= ?
-                  AND COALESCE(polling_paused, 0) = 0
-                ORDER BY id
-                """,
-                (agent_id, cutoff),
-            ).fetchall()
-            fetch_rows = conn.execute(
-                """
-                SELECT DISTINCT r.hermes_conversation_id AS cid
-                FROM runs r
-                JOIN conversations c ON c.id = r.conversation_id
-                WHERE r.agent_id = ?
-                  AND c.presence_at IS NOT NULL AND c.presence_at >= ?
-                  AND COALESCE(c.polling_paused, 0) = 0
-                  AND r.hermes_conversation_id IS NOT NULL
-                  AND TRIM(r.hermes_conversation_id) != ''
-                ORDER BY cid
-                """,
-                (agent_id, cutoff),
-            ).fetchall()
-            hot_unmapped = conn.execute(
-                f"""
-                SELECT COUNT(*) AS n
-                FROM runs r
-                JOIN conversations c ON c.id = r.conversation_id
-                WHERE r.agent_id = ?
-                  AND c.presence_at IS NOT NULL AND c.presence_at >= ?
-                  AND COALESCE(c.polling_paused, 0) = 0
-                  AND r.status IN ({placeholders_hot})
-                  AND (r.hermes_conversation_id IS NULL OR TRIM(r.hermes_conversation_id) = '')
-                """,
-                (agent_id, cutoff, *hot),
-            ).fetchone()
-        fetch_hermes_ids = [str(row["cid"]) for row in fetch_rows if row["cid"]]
-        active_conversation_ids = [int(row["id"]) for row in active_rows]
-        discover = int(hot_unmapped["n"] or 0) > 0 if hot_unmapped else False
-        resolved_hid = str(hid or agent.get("hermes_agent_id") or "").strip()
-        if resolved_hid:
-            self.record_poller_heartbeat(resolved_hid)
-        return {
-            "hermes_agent_id": hid or agent.get("hermes_agent_id"),
-            "trigger_id": str(agent.get("trigger_id") or ""),
-            "agent_id": agent_id,
-            "active_conversation_ids": active_conversation_ids,
-            "fetch_hermes_ids": fetch_hermes_ids,
-            "fast_hermes_ids": fetch_hermes_ids,
-            "discover_in_progress": discover,
-            "hot_run_count": len(active_conversation_ids),
-            "interval_active_sec": POLL_INTERVAL_ACTIVE_SEC,
-            "interval_idle_sec": POLL_INTERVAL_IDLE_SEC,
-        }
-
-    def record_poller_heartbeat(
-        self,
-        hermes_agent_id: str,
-        *,
-        fetched: int = 0,
-        inserted: int = 0,
-        error: str | None = None,
-    ) -> None:
-        hid = hermes_agent_id.strip()
-        if not hid:
-            return
-        now = _now()
-        with self._lock, self._connect(immediate=True) as conn:
-            conn.execute(
-                """
-                INSERT INTO poller_heartbeats (hermes_agent_id, last_seen_at, last_fetched, last_inserted, last_error)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(hermes_agent_id) DO UPDATE SET
-                    last_seen_at = excluded.last_seen_at,
-                    last_fetched = CASE WHEN excluded.last_fetched > 0 THEN excluded.last_fetched ELSE poller_heartbeats.last_fetched END,
-                    last_inserted = CASE WHEN excluded.last_inserted > 0 THEN excluded.last_inserted ELSE poller_heartbeats.last_inserted END,
-                    last_error = excluded.last_error
-                """,
-                (hid, now, max(0, int(fetched)), max(0, int(inserted)), error),
-            )
-
-    def _poller_last_seen_at(self, hermes_agent_id: str) -> str | None:
-        hid = hermes_agent_id.strip()
-        if not hid:
-            return None
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT last_seen_at FROM poller_heartbeats WHERE hermes_agent_id = ?",
-                (hid,),
-            ).fetchone()
-        if row is None:
-            return None
-        seen = str(row["last_seen_at"] or "").strip()
-        return seen or None
-
-    def _poller_is_online(self, hermes_agent_id: str, *, ttl_sec: int = POLLER_HEARTBEAT_TTL_SEC) -> bool:
-        seen = self._poller_last_seen_at(hermes_agent_id)
-        if not seen:
-            return False
-        try:
-            seen_dt = datetime.fromisoformat(seen.replace("Z", "+00:00"))
-        except ValueError:
-            return False
-        age = datetime.now(UTC).timestamp() - seen_dt.timestamp()
-        return age <= max(1, int(ttl_sec))
-
-    def get_pull_sync_status(self, conversation_id: int) -> dict[str, Any]:
-        """Dashboard-facing Hermes poll sync indicator (pull convs and relay convs with bound Hermes runs)."""
-        with self._lock, self._connect() as conn:
-            conv = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
-            if conv is None:
-                raise KeyError(f"Conversation not found: {conversation_id}")
-            conv_dict = _row_to_dict(conv) or {}
-            polling_paused = bool(int(conv_dict.get("polling_paused") or 0))
-            interaction_mode = str(conv_dict.get("interaction_mode") or "relay")
-            agent = conn.execute(
-                "SELECT hermes_agent_id FROM agents WHERE id = ?",
-                (int(conv_dict["agent_id"]),),
-            ).fetchone()
-            hermes_agent_id = str(agent["hermes_agent_id"] or "").strip() if agent else ""
-            heartbeat_row = None
-            if hermes_agent_id:
-                heartbeat_row = conn.execute(
-                    "SELECT last_seen_at FROM poller_heartbeats WHERE hermes_agent_id = ?",
-                    (hermes_agent_id,),
-                ).fetchone()
-            run_row = conn.execute(
-                """
-                SELECT id, status, hermes_conversation_id, interaction_mode
-                FROM runs WHERE conversation_id = ? ORDER BY id DESC LIMIT 1
-                """,
-                (conversation_id,),
-            ).fetchone()
-            if run_row is None or str(run_row["status"]) in TERMINAL_STATUSES:
-                return {
-                    "visible": False,
-                    "state": "idle",
-                    "poller_online": self._poller_is_online(hermes_agent_id) if hermes_agent_id else False,
-                    "last_heartbeat_at": str(heartbeat_row["last_seen_at"]) if heartbeat_row else None,
-                    "interval_active_sec": POLL_INTERVAL_ACTIVE_SEC,
-                }
-            run_id = int(run_row["id"])
-            hermes_cid = str(run_row["hermes_conversation_id"] or "").strip()
-            run_mode = str(run_row["interaction_mode"] or interaction_mode)
-            needs_hermes_poll = (
-                interaction_mode == "pull"
-                or run_mode == "pull"
-                or bool(hermes_cid)
-            )
-            if not needs_hermes_poll:
-                return {"visible": False, "state": "idle"}
-            event_rows = conn.execute(
-                """
-                SELECT event_type, created_at, payload_json
-                FROM events WHERE run_id = ? ORDER BY id
-                """,
-                (run_id,),
-            ).fetchall()
-        last_user_at: datetime | None = None
-        last_poll_at: datetime | None = None
-        for row in event_rows:
-            created_at = str(row["created_at"] or "")
-            try:
-                ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            except ValueError:
-                continue
-            if str(row["event_type"]) == "user_message":
-                if last_user_at is None or ts > last_user_at:
-                    last_user_at = ts
-            payload = json.loads(str(row["payload_json"] or "{}"))
-            if payload.get("polling"):
-                if last_poll_at is None or ts > last_poll_at:
-                    last_poll_at = ts
-        poller_online = self._poller_is_online(hermes_agent_id) if hermes_agent_id else False
-        needs_sync = last_user_at is not None and (last_poll_at is None or last_user_at > last_poll_at)
-        if polling_paused:
-            state = "paused"
-        elif not poller_online:
-            state = "offline"
-        elif needs_sync:
-            state = "syncing"
-        else:
-            state = "live"
-        return {
-            "visible": True,
-            "state": state,
-            "polling_paused": polling_paused,
-            "needs_sync": needs_sync,
-            "poller_online": poller_online,
-            "last_heartbeat_at": str(heartbeat_row["last_seen_at"]) if heartbeat_row else None,
-            "interval_active_sec": POLL_INTERVAL_ACTIVE_SEC,
-            "run_id": run_id,
-            "run_status": str(run_row["status"]),
-        }
-
-    def _bind_run_hermes_conversation(
-        self,
-        conn: sqlite3.Connection,
-        *,
-        run_id: int,
-        hermes_conversation_id: str,
-    ) -> None:
-        cid = hermes_conversation_id.strip()
-        if not cid:
-            return
-        conn.execute(
-            """
-            UPDATE runs
-            SET hermes_conversation_id = ?, updated_at = ?
-            WHERE id = ?
-              AND (hermes_conversation_id IS NULL OR TRIM(hermes_conversation_id) = '')
-            """,
-            (cid, _now(), run_id),
-        )
-
     def rename_agent(self, agent_id: int, *, name: str) -> dict[str, Any]:
         if not name or not name.strip():
             raise ValueError("name must not be empty")
@@ -978,7 +483,7 @@ class RelayStore:
         return _row_to_dict(row) or {}
 
     def update_conversation(self, conversation_id: int, **fields: Any) -> dict[str, Any]:
-        allowed = {"name", "pinned", "interaction_mode", "polling_paused"}
+        allowed = {"name", "pinned"}
         unknown = sorted(set(fields) - allowed)
         if unknown:
             raise ValueError(f"unsupported field(s): {', '.join(unknown)}")
@@ -996,12 +501,6 @@ class RelayStore:
         if "pinned" in fields:
             sets.append("pinned_at = ?")
             params.append(now if bool(fields["pinned"]) else None)
-        if "interaction_mode" in fields:
-            sets.append("interaction_mode = ?")
-            params.append(_normalize_interaction_mode(fields["interaction_mode"]))
-        if "polling_paused" in fields:
-            sets.append("polling_paused = ?")
-            params.append(1 if bool(fields["polling_paused"]) else 0)
         params.append(conversation_id)
         with self._lock, self._connect(immediate=True) as conn:
             row = conn.execute(
@@ -1016,9 +515,6 @@ class RelayStore:
             )
             row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
         return _row_to_dict(row) or {}
-
-    def set_conversation_polling_paused(self, conversation_id: int, *, paused: bool) -> dict[str, Any]:
-        return self.update_conversation(conversation_id, polling_paused=paused)
 
     def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
         return self.update_conversation(conversation_id, name=name)
@@ -1067,7 +563,6 @@ class RelayStore:
                 raise ValueError("conversation_key does not match conversation_id.")
             if conversation["agent_id"] != agent_id:
                 raise ValueError("agent_id does not own conversation_id.")
-            interaction_mode = _normalize_interaction_mode(conversation["interaction_mode"])
             # Zombie cleanup: when a new turn starts, close out older non-terminal
             # runs in the same conversation. The user moved on; their late
             # callbacks (if any) must be rejected as run_closed rather than
@@ -1083,10 +578,10 @@ class RelayStore:
                 """
                 INSERT INTO runs (
                     request_id, agent_id, conversation_id, conversation_key,
-                    idempotency_key, input_markdown, interaction_mode, parent_run_id,
+                    idempotency_key, input_markdown, parent_run_id,
                     status, trigger_status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
                 """,
                 (
                     request_id,
@@ -1095,7 +590,6 @@ class RelayStore:
                     conversation_key,
                     idempotency_key,
                     input_markdown,
-                    interaction_mode,
                     parent_run_id,
                     now,
                     now,
@@ -1599,126 +1093,18 @@ class RelayStore:
         return self.get_run(run_id)
 
     def list_events(self, run_id: int) -> list[dict[str, Any]]:
-        """Callback-only events (source_key IS NULL). Used for the agent's own
-        get_run_context view — the agent does not need to see its own polled
-        chat messages echoed back."""
+        """Relay callback/local trace events for a run."""
         with self._lock, self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM events WHERE run_id = ? AND source_key IS NULL ORDER BY id",
+                """
+                SELECT id, run_id, request_id, event_type, title, markdown, payload_json, created_at
+                FROM events
+                WHERE run_id = ?
+                ORDER BY id
+                """,
                 (run_id,),
             ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]
-
-    def list_events_merged(self, run_id: int) -> list[dict[str, Any]]:
-        """Unified timeline: callback + polling, sorted by turn anchor / created_at.
-
-        Dedup: callback `result` wins over polling `result`. Polling events sort
-        by turn-anchor timestamp + mapping_ord (see spec §7), not assistant
-        streaming completion time. No content-based heuristics."""
-        with self._lock, self._connect() as conn:
-            callback_rows = conn.execute(
-                "SELECT * FROM events WHERE run_id = ? AND source_key IS NULL",
-                (run_id,),
-            ).fetchall()
-            polling_rows = conn.execute(
-                "SELECT * FROM events WHERE run_id = ? AND source_key IS NOT NULL",
-                (run_id,),
-            ).fetchall()
-        callback = [_row_to_dict(row) or {} for row in callback_rows]
-        has_callback_result = any(row.get("event_type") == "result" for row in callback)
-        polling = [_row_to_dict(row) or {} for row in polling_rows]
-        if has_callback_result:
-            polling = [row for row in polling if row.get("event_type") != "result"]
-        merged = callback + polling
-        user_message_ids = [
-            int(row["id"])
-            for row in merged
-            if row.get("event_type") == "user_message" and row.get("id") is not None
-        ]
-        if _uses_structure_merge(merged):
-            merged.sort(
-                key=lambda row: _merged_event_structure_sort_key(
-                    row,
-                    user_message_ids=user_message_ids,
-                )
-            )
-        else:
-            merged.sort(key=_merged_event_sort_key)
-        return merged
-
-    def record_polling_events(
-        self,
-        *,
-        run_id: int,
-        events: list[dict[str, Any]],
-        hermes_conversation_id: str | None = None,
-        hermes_agent_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Idempotent write of polling-derived events (from ChatGPT conversation
-        readback). Each event must carry a stable `source_key` (the ChatGPT
-        mapping node id); the partial unique index on (run_id, source_key) makes
-        re-polls a no-op. After inserting any new row, notify the run so the
-        dashboard SSE pushes the merged timeline."""
-        allowed = {"progress", "result"}
-        with self._lock, self._connect(immediate=True) as conn:
-            row = conn.execute(
-                "SELECT request_id, agent_id FROM runs WHERE id = ?",
-                (run_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(f"Run not found: {run_id}")
-            request_id = str(row["request_id"])
-            run_agent_id = int(row["agent_id"])
-            inserted = 0
-            for event in events:
-                event_type = str(event.get("event_type") or "")
-                if event_type not in allowed:
-                    raise ValueError(f"polling event_type must be one of {sorted(allowed)}, got {event_type!r}")
-                source_key = event.get("source_key")
-                if not isinstance(source_key, str) or not source_key.strip():
-                    raise ValueError("polling event requires a non-empty source_key")
-                create_time = event.get("create_time")
-                created_at = _epoch_to_iso(create_time)
-                cur = conn.execute(
-                    """
-                    INSERT OR IGNORE INTO events
-                        (run_id, request_id, event_type, title, markdown, payload_json, created_at, source_key)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        run_id,
-                        request_id,
-                        event_type,
-                        event.get("title"),
-                        event.get("markdown"),
-                        _json_dumps(event.get("payload") or {}),
-                        created_at,
-                        source_key.strip(),
-                    ),
-                )
-                if cur.rowcount > 0:
-                    inserted += 1
-            if isinstance(hermes_conversation_id, str) and hermes_conversation_id.strip():
-                self._bind_run_hermes_conversation(
-                    conn,
-                    run_id=run_id,
-                    hermes_conversation_id=hermes_conversation_id,
-                )
-            if isinstance(hermes_agent_id, str) and hermes_agent_id.strip():
-                agent_row = conn.execute(
-                    "SELECT hermes_agent_id FROM agents WHERE id = ?",
-                    (run_agent_id,),
-                ).fetchone()
-                if agent_row is not None and not str(agent_row["hermes_agent_id"] or "").strip():
-                    conn.execute(
-                        "UPDATE agents SET hermes_agent_id = ?, updated_at = ? WHERE id = ?",
-                        (hermes_agent_id.strip(), _now(), run_agent_id),
-                    )
-        if isinstance(hermes_agent_id, str) and hermes_agent_id.strip():
-            self.record_poller_heartbeat(hermes_agent_id.strip(), inserted=inserted)
-        if inserted > 0:
-            self._notify_run(run_id)
-        return {"success": True, "inserted": inserted}
 
     def list_artifacts(self, run_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as conn:

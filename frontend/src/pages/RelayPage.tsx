@@ -9,18 +9,15 @@ import { ThreadComposer, resolveComposerMode } from '@/features/relay/components
 import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
 import {
   useBootstrap,
-  useConversationPresence,
   useCreateConversation,
   useCreateRun,
   useDeleteConversation,
   useDismissRun,
   usePinConversation,
-  usePullSyncStatus,
   useRenameConversation,
   useRunDetailStream,
   useRunDetails,
   useRuns,
-  useSetInteractionMode,
   useSteer,
   useWorkingConversationIds,
 } from '@/features/relay/hooks'
@@ -46,7 +43,6 @@ export function RelayPage() {
   const conversations = bootstrapQuery.data?.conversations ?? EMPTY_CONVERSATIONS
 
   const runsQuery = useRuns(selectedConversationId)
-  useConversationPresence(selectedConversationId)
   const runs = runsQuery.data ?? EMPTY_RUNS
   const { details: runDetails, isLoading: runDetailsLoading } = useRunDetails(runs)
   useRunDetailStream(selectedRunId)
@@ -65,7 +61,6 @@ export function RelayPage() {
   const renameConversationMutation = useRenameConversation()
   const deleteConversationMutation = useDeleteConversation()
   const pinConversationMutation = usePinConversation()
-  const setInteractionModeMutation = useSetInteractionMode()
 
   const agentNameById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent.name])),
@@ -85,8 +80,6 @@ export function RelayPage() {
   )
   const latestRun = runDetails[runDetails.length - 1]?.run
   const latestRunStatus = latestRun?.status
-  const interactionMode = selectedConversation?.interaction_mode ?? 'relay'
-  const pullSync = usePullSyncStatus(selectedConversationId, interactionMode, latestRun?.id)
   // Route composer sends: continue the latest run (steer) when it is in-flight
   // OR paused on ask_user (answering resumes the same turn); otherwise start a
   // new turn. steerConversation falls back to createRun on 409, so a race that
@@ -202,17 +195,6 @@ export function RelayPage() {
           loading={bootstrapQuery.isLoading}
           recentUrl={recentUrl}
           runCount={runDetails.length}
-          interactionMode={interactionMode}
-          interactionModePending={setInteractionModeMutation.isPending}
-          pullSyncVisible={pullSync.visible}
-          pullSyncState={pullSync.state}
-          pullSyncIntervalSec={pullSync.intervalActiveSec}
-          onPullSyncResume={() => pullSync.resume()}
-          pullSyncResumePending={pullSync.resumePending}
-          onInteractionModeChange={(mode) => {
-            if (!selectedConversationId) return
-            setInteractionModeMutation.mutate({ id: selectedConversationId, interaction_mode: mode })
-          }}
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -221,7 +203,6 @@ export function RelayPage() {
 
         <ThreadComposer
           conversationKey={selectedConversation?.conversation_key}
-          interactionMode={selectedConversation?.interaction_mode ?? 'relay'}
           disabled={!selectedConversationId}
           dismissing={dismissRunMutation.isPending}
           mode={composerMode}
