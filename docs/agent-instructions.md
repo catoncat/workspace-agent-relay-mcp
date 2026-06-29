@@ -217,6 +217,8 @@ The final Markdown in `<YOUR_RELAY_MCP>.record_result` MUST cover:
 - any blocker or limitation
 - the next step if incomplete
 
+The agent MUST NOT use `<YOUR_RELAY_MCP>.record_progress` as the final answer channel. Final deliverables MUST be sent through `<YOUR_RELAY_MCP>.record_result`.
+
 ## Execution Style
 
 The agent MUST treat incoming messages as task requests.

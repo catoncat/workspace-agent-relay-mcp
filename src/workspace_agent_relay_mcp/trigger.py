@@ -105,6 +105,8 @@ def build_trigger_input(
                 "",
                 lead,
                 resume,
+                "If this follow-up asks you to provide or resend the final answer and you have delivered it, call workspace-agent-relay-mcp.record_result(status=done) exactly once to close the turn.",
+                "Do not use record_progress as the final answer channel; progress is only intermediate state.",
                 "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps.",
                 "If notion-local-ops-mcp was bound earlier this turn, keep using it; if it is unavailable, still call record_progress/record_result so the operator stays informed.",
                 "",

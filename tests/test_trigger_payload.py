@@ -78,6 +78,8 @@ def test_build_trigger_input_steer_reuses_request_id_for_same_turn() -> None:
     assert "SAME turn" in rendered
     assert "freshly rotated" not in rendered
     assert "record_plan" in rendered
+    assert "record_result" in rendered
+    assert "Do not use record_progress as the final answer channel" in rendered
     assert "do not start a new turn" in rendered.lower() or "Do NOT start a new turn" in rendered
     assert "Operator added:" in rendered
     assert rendered.endswith("You didn't push.")
@@ -112,6 +114,8 @@ def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
     # Same steer guardrails apply.
     assert "Do NOT start a new turn" in rendered
     assert "record_plan" in rendered
+    assert "record_result" in rendered
+    assert "Do not use record_progress as the final answer channel" in rendered
 
 
 def test_build_trigger_input_has_no_pull_mode_header() -> None:
