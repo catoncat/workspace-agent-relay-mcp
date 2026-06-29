@@ -8,7 +8,6 @@ import {
   Message,
   MessageContent,
 } from '@/components/ai-elements/message'
-import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -248,8 +247,6 @@ function RunThread({
         />
       ) : null}
 
-      <RunPhaseHint detail={detail} />
-
       {timelineEvents.length > 0 ? (
         <RunProgressTimeline
           events={timelineEvents}
@@ -445,24 +442,6 @@ function stepVisual(status: PlanStepStatus): { icon: React.ReactNode; className:
         className: 'scale-100',
       }
   }
-}
-
-function RunPhaseHint({ detail }: { detail: RunDetail }) {
-  const run = detail.run
-  const hint = phaseHint(detail)
-  if (!hint) return null
-  const isActive = ACTIVE_STATUSES.has(run.status)
-  return (
-    <div className="text-sm text-muted-foreground">
-      {isActive ? (
-        <Shimmer className="text-sm" duration={1.5}>
-          {hint}
-        </Shimmer>
-      ) : (
-        <p className="whitespace-pre-line">{hint}</p>
-      )}
-    </div>
-  )
 }
 
 function RunProgressTimeline({
@@ -917,23 +896,6 @@ function ThreadLoadingSkeleton() {
       </div>
     </div>
   )
-}
-
-function phaseHint(detail: RunDetail): string | null {
-  const run = detail.run
-  if (detail.events.length > 0 || detail.plan) return null
-  if (run.status === 'draft' || run.trigger_status === 'draft') {
-    return 'Sending trigger to ChatGPT. Callback events can appear only after the Workspace Agent starts.'
-  }
-  if (run.status === 'trigger_failed' || run.trigger_status === 'failed' || run.status === 'failed') {
-    const reason = run.trigger_error?.trim()
-    const base = 'Trigger did not return a clean 202. This run stays open for late callbacks; sending a newer request will not close it.'
-    return reason ? `${base}\n${reason}` : base
-  }
-  if (run.trigger_status === 'accepted') {
-    return 'Trigger accepted by ChatGPT. Waiting for the agent to call back through this relay MCP.'
-  }
-  return `Trigger state: ${run.trigger_status || run.status || 'pending'}. Waiting for callback events.`
 }
 
 function eventPayload(event: RunEvent): RunEventPayload {
