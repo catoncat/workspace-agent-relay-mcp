@@ -42,7 +42,13 @@ class PWHermes:
         self.jwt = ""
         self.account_id = ""
 
-    def _fetch(self, url: str, extra_headers: dict | None = None) -> tuple[int, str]:
+    def _fetch(
+        self,
+        url: str,
+        extra_headers: dict | None = None,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> tuple[int, str]:
         headers = {"accept": "application/json"}
         if self.jwt:
             headers["authorization"] = f"Bearer {self.jwt}"
@@ -52,16 +58,28 @@ class PWHermes:
             headers.update(extra_headers)
         try:
             res = self.page.evaluate(
-                """async ({url, headers}) => {
-                    const r = await fetch(url, {headers, credentials: 'include'});
-                    const text = await r.text();
-                    return {status: r.status, body: text};
+                """async ({url, headers, timeoutMs}) => {
+                    const ctl = new AbortController();
+                    const timer = setTimeout(() => ctl.abort(), timeoutMs);
+                    try {
+                        const r = await fetch(url, {headers, credentials: 'include', signal: ctl.signal});
+                        const text = await r.text();
+                        return {status: r.status, body: text};
+                    } catch (e) {
+                        return {status: -1, body: String(e)};
+                    } finally {
+                        clearTimeout(timer);
+                    }
                 }""",
-                {"url": url, "headers": headers},
+                {"url": url, "headers": headers, "timeoutMs": timeout_ms},
             )
         except Exception as e:
             return -1, f"eval_error:{e}"
-        return res["status"], res["body"]
+        status = int(res.get("status", -1))
+        body = str(res.get("body", ""))
+        if status == -1 and "abort" in body.lower():
+            return -1, f"timeout after {timeout_ms}ms"
+        return status, body
 
     def refresh_session(self) -> bool:
         s, b = self._fetch("/api/auth/session")

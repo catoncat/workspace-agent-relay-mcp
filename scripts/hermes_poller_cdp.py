@@ -71,6 +71,7 @@ def post_polling_events(
     events: list[dict],
     *,
     hermes_conversation_id: str | None = None,
+    hermes_agent_id: str | None = None,
 ) -> dict:
     body: dict = {
         "events": [
@@ -87,6 +88,8 @@ def post_polling_events(
     }
     if hermes_conversation_id:
         body["hermes_conversation_id"] = hermes_conversation_id
+    if hermes_agent_id:
+        body["hermes_agent_id"] = hermes_agent_id
     req = urllib.request.Request(
         f"{relay_url.rstrip('/')}/internal/runs/{run_id}/polling-events",
         data=json.dumps(body).encode("utf-8"),
@@ -102,8 +105,11 @@ def post_polling_events(
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
 
 
-def fetch_polling_targets(relay_url: str, token: str, trigger_id: str) -> dict:
-    url = f"{relay_url.rstrip('/')}/internal/polling-targets?trigger_id={urllib.parse.quote(trigger_id)}"
+def fetch_polling_targets(relay_url: str, token: str, hermes_agent_id: str) -> dict:
+    url = (
+        f"{relay_url.rstrip('/')}/internal/polling-targets"
+        f"?hermes_agent_id={urllib.parse.quote(hermes_agent_id)}"
+    )
     req = urllib.request.Request(
         url,
         headers={"Authorization": f"Bearer {token}"},
@@ -234,61 +240,51 @@ def main() -> int:
                         f"discover={'on' if targets.get('discover_in_progress') else 'off'} "
                         f"active_convs={len(targets.get('active_conversation_ids') or [])}"
                     )
-                all_items: list[dict] = []
-                cursor = None
-                for _ in range(args.pages):
-                    items, cursor = h.list_conversations(agent_id, args.limit, cursor)
-                    all_items.extend(items)
-                    if not cursor:
-                        break
-                print(f"  listed {len(all_items)} runs")
+                fetch_targets = set(targets.get("fetch_hermes_ids") or []) if not args.no_smart else set()
+                discover = bool(targets.get("discover_in_progress")) if not args.no_smart else False
+                if not args.no_smart and not fetch_targets and not discover and not args.refetch:
+                    sleep_sec = float(targets.get("interval_idle_sec") or 60)
+                    print("  idle: no focused conversation to sync")
+                    print(f"== pass done: 0 fetched, 0 skipped (unwatched), 0 turns bound; records in {out_dir} ==")
+                    return 0, sleep_sec
+
                 new_count = 0
                 bound_count = 0
                 skipped = 0
-                discovery_left = args.discovery_limit if not args.no_smart else 0
-                for it in all_items:
-                    cid = it.get("id")
-                    status = it.get("fiber_status")
-                    tag = f"  - {cid} status={status} inv={it.get('invocation')} title={it.get('title')!r}"
-                    # Re-fetch conversations that are not yet terminal even if already seen —
-                    # an in-progress conversation fetched early may contain only route echoes;
-                    # the agent's real replies arrive later and must be re-read. Idempotent
-                    # writes (INSERT OR IGNORE on source_key) make re-fetching safe. Only
-                    # terminal (completed/failed) seen conversations are skipped.
-                    is_terminal = status in ("completed", "failed")
-                    if cid in seen["seen"] and is_terminal and not args.refetch:
-                        continue
-                    if not args.no_smart:
-                        smart_fetch, reason = should_fetch_conversation(
-                            cid, it, targets, discovery_budget=discovery_left,
-                        )
-                        if not smart_fetch:
-                            skipped += 1
-                            continue
-                        if reason == "discover":
-                            discovery_left -= 1
-                    else:
-                        reason = "legacy"
+                discovery_left = args.discovery_limit if (not args.no_smart and discover) else 0
+
+                def process_conversation(cid: str, it: dict | None, *, reason: str) -> None:
+                    nonlocal new_count, bound_count
+                    status = (it or {}).get("fiber_status")
+                    tag = f"  - {cid} status={status} inv={(it or {}).get('invocation')} title={(it or {}).get('title')!r}"
                     suffix = ""
                     if cid in seen["seen"]:
-                        suffix = "  (seen, in-progress → refetch)"
+                        suffix = "  (seen → refetch)"
                     elif reason == "discover":
                         suffix = "  (discover)"
                     elif reason == "target":
                         suffix = "  (target)"
                     print(tag + suffix)
                     if args.list_only:
-                        continue
+                        new_count += 1
+                        return
                     conv = h.fetch_conversation(cid)
                     if conv is None:
-                        continue
+                        return
                     msgs = flatten_mapping(conv.get("mapping"), conv.get("current_node"))
+                    meta = it or {}
                     record = {
-                        "conversation_id": cid, "title": conv.get("title"),
-                        "create_time": conv.get("create_time"), "current_node": conv.get("current_node"),
-                        "hermes_meta": {"fiber_id": it.get("fiber_id"), "fiber_status": it.get("fiber_status"),
-                                        "fiber_is_responding": it.get("fiber_is_responding"),
-                                        "invocation": it.get("invocation"), "last_used_at": it.get("last_used_at")},
+                        "conversation_id": cid,
+                        "title": conv.get("title"),
+                        "create_time": conv.get("create_time"),
+                        "current_node": conv.get("current_node"),
+                        "hermes_meta": {
+                            "fiber_id": meta.get("fiber_id"),
+                            "fiber_status": meta.get("fiber_status"),
+                            "fiber_is_responding": meta.get("fiber_is_responding"),
+                            "invocation": meta.get("invocation"),
+                            "last_used_at": meta.get("last_used_at"),
+                        },
                         "messages": msgs,
                     }
                     (out_dir / f"{cid}.json").write_text(json.dumps(record, ensure_ascii=False, indent=2))
@@ -312,6 +308,7 @@ def main() -> int:
                                 res = post_polling_events(
                                     args.relay_url, relay_token, run_id, evs,
                                     hermes_conversation_id=cid,
+                                    hermes_agent_id=agent_id,
                                 )
                                 if res.get("success"):
                                     print(f"     applied run={run_id}: inserted={res.get('inserted')} of {len(evs)}")
@@ -319,18 +316,55 @@ def main() -> int:
                                     print(f"  ! apply run={run_id}: {res.get('error')}", file=sys.stderr)
                         except Exception as exc:
                             print(f"  ! apply {cid}: {exc}", file=sys.stderr)
-                    # Only mark seen once the conversation reaches a terminal state —
-                    # otherwise it stays re-fetchable until the agent's real replies land.
+                    is_terminal = status in ("completed", "failed")
                     if is_terminal and cid not in seen["seen"]:
                         seen["seen"].append(cid)
                     new_count += 1
+
+                for cid in sorted(fetch_targets):
+                    process_conversation(cid, None, reason="target")
+
+                if discovery_left > 0:
+                    all_items: list[dict] = []
+                    cursor = None
+                    for _ in range(args.pages):
+                        items, cursor = h.list_conversations(agent_id, args.limit, cursor)
+                        all_items.extend(items)
+                        if not cursor:
+                            break
+                    print(f"  listed {len(all_items)} runs (discover)")
+                    for it in all_items:
+                        cid = it.get("id")
+                        if not cid or cid in fetch_targets:
+                            continue
+                        smart_fetch, reason = should_fetch_conversation(
+                            cid, it, targets, discovery_budget=discovery_left,
+                        )
+                        if not smart_fetch:
+                            skipped += 1
+                            continue
+                        if reason == "discover":
+                            discovery_left -= 1
+                        process_conversation(str(cid), it, reason=reason)
+                elif args.no_smart:
+                    all_items = []
+                    cursor = None
+                    for _ in range(args.pages):
+                        items, cursor = h.list_conversations(agent_id, args.limit, cursor)
+                        all_items.extend(items)
+                        if not cursor:
+                            break
+                    print(f"  listed {len(all_items)} runs")
+                    for it in all_items:
+                        process_conversation(str(it.get("id")), it, reason="legacy")
+                else:
+                    print(f"  listed 0 runs (focused direct fetch only)")
                 seen["last_run"] = int(time.time())
                 save_seen(out_dir, seen)
                 sleep_sec = float(args.interval or 60)
                 if not args.no_smart and targets:
-                    fast = set(targets.get("fast_hermes_ids") or [])
                     active = bool(targets.get("active_conversation_ids"))
-                    if active or fast:
+                    if active and (fetch_targets or discover):
                         sleep_sec = float(targets.get("interval_active_sec") or 5)
                     else:
                         sleep_sec = float(targets.get("interval_idle_sec") or 60)
