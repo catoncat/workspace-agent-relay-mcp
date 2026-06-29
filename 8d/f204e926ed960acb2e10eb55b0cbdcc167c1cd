@@ -1,0 +1,20 @@
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_fc2ddfba2fd548::t_86a94734ab7406 146,260,270,275,281-287
+  s_fc2ddfba2fd548::t_e416d124b2fe81 267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "8df204e926ed960acb2e10eb55b0cbdcc167c1cd",
+  "prompts": {},
+  "sessions": {
+    "s_fc2ddfba2fd548": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f133f-a26e-7ef2-9acd-20d9893a2c78",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
