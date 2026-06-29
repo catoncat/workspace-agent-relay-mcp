@@ -1,0 +1,20 @@
+AGENTS.md
+  s_f531845dcc6dc9::t_932465da3c9054 11,21-23,29,40-46,59,71,74-77,81-83,88,91-100
+  s_f531845dcc6dc9::t_3f9e681a38efeb 101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "81a64da26a86ce4715db49dfd6edc392c2f9a782",
+  "prompts": {},
+  "sessions": {
+    "s_f531845dcc6dc9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "bda026c2-fa19-418e-b9cd-a92a8071de2b",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
