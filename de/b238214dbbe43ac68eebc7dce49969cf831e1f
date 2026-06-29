@@ -1,0 +1,19 @@
+frontend/src/components/RelaySidebar.tsx
+  s_9ac40e568cf465::t_5baf981082935a 354-360,459
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "deb238214dbbe43ac68eebc7dce49969cf831e1f",
+  "prompts": {},
+  "sessions": {
+    "s_9ac40e568cf465": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a774050e-4016-4e26-b90d-d0f74349295a",
+        "model": "default"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
