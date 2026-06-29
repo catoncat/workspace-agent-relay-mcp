@@ -116,16 +116,20 @@ def internal_routes(store: Any) -> list[tuple]:
                 run_id=run_id,
                 events=normalized,
                 hermes_conversation_id=_require_str(payload, "hermes_conversation_id"),
+                hermes_agent_id=_require_str(payload, "hermes_agent_id"),
             )
         except KeyError:
             return json_error(f"Run not found: {run_id}", status_code=404)
         return JSONResponse(result, status_code=200)
 
     async def get_polling_targets(request: Request) -> JSONResponse:
+        hermes_agent_id = (request.query_params.get("hermes_agent_id") or "").strip()
         trigger_id = (request.query_params.get("trigger_id") or "").strip()
-        if not trigger_id:
-            return json_error("trigger_id query parameter is required", status_code=400)
-        return JSONResponse(store.get_polling_targets(trigger_id=trigger_id))
+        if not hermes_agent_id and not trigger_id:
+            return json_error("hermes_agent_id or trigger_id query parameter is required", status_code=400)
+        return JSONResponse(
+            store.get_polling_targets(hermes_agent_id=hermes_agent_id, trigger_id=trigger_id)
+        )
 
     return [
         ("/internal/tool-trace", post_tool_trace, ["POST"]),

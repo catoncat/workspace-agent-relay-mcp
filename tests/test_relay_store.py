@@ -1335,21 +1335,19 @@ def test_list_events_callback_only_excludes_polling(tmp_path: Path) -> None:
 def test_list_events_merged_orders_by_created_at(tmp_path: Path) -> None:
     store = RelayStore(tmp_path / "relay.sqlite")
     run = _make_run_for_polling(store)
-    # Callback progress lands first (server now, lower id).
     store.record_progress(
         request_id="poll_run", conversation_key="research:poll", message="callback after",
     )
-    # Polling event with an earlier create_time (higher id, but earlier timestamp)
-    # must sort BEFORE the callback event in the merged timeline.
     store.record_polling_events(
         run_id=run["id"],
         events=[{"source_key": "p1", "event_type": "progress", "title": None,
-                 "markdown": "polled before", "payload": {"polling": True}, "create_time": 1700000000.0}],
+                 "markdown": "polled before", "payload": {"polling": True, "turn_ord": 0, "mapping_ord": 2},
+                 "create_time": 1700000000.0}],
     )
     merged = store.list_events_merged(run["id"])
-    assert merged[0]["markdown"] == "polled before"
-    assert merged[0].get("source_key") == "p1"
-    assert merged[1]["markdown"] == "callback after"
+    # Structure merge (§7): same turn → callback lane before polling lane.
+    assert merged[0]["markdown"] == "callback after"
+    assert merged[1]["markdown"] == "polled before"
 
 
 def test_list_events_merged_sorts_polling_by_turn_anchor_and_mapping_ord(tmp_path: Path) -> None:
@@ -1383,6 +1381,57 @@ def test_list_events_merged_sorts_polling_by_turn_anchor_and_mapping_ord(tmp_pat
     assert types.index("progress") < types.index("question")
     poll = next(e for e in merged if e.get("source_key") == "late_assistant")
     assert json.loads(poll["payload_json"])["mapping_ord"] == 3
+
+
+def test_list_events_merged_orders_traces_before_polled_narration(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.record_progress(
+        request_id="poll_run",
+        conversation_key="research:poll",
+        message="callback narration",
+    )
+    store.steer_run(run_id=run["id"], user_input="do the thing")
+    run_row = store.get_run(run["id"])
+    store.record_tool_trace(
+        request_id=run_row["request_id"],
+        conversation_key=run_row["conversation_key"],
+        tool="list_files",
+        title="list_files",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "assistant_reply",
+            "event_type": "result",
+            "title": None,
+            "markdown": "polled final reply",
+            "payload": {"polling": True, "turn_ord": 1, "mapping_ord": 2},
+            "create_time": 1700000000.0,
+        }],
+    )
+    merged = store.list_events_merged(run["id"])
+    trace_idx = next(
+        i for i, e in enumerate(merged) if json.loads(e.get("payload_json") or "{}").get("trace")
+    )
+    poll_idx = next(i for i, e in enumerate(merged) if e.get("source_key") == "assistant_reply")
+    assert trace_idx < poll_idx
+
+
+def test_record_tool_trace_tags_active_turn_ord(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    run = _make_run_for_polling(store)
+    store.steer_run(run_id=run["id"], user_input="steer one")
+    run_row = store.get_run(run["id"])
+    store.record_tool_trace(
+        request_id=run_row["request_id"],
+        conversation_key=run_row["conversation_key"],
+        tool="list_files",
+        title="list_files",
+    )
+    events = store.list_events(run["id"])
+    trace = next(e for e in events if json.loads(e["payload_json"]).get("trace"))
+    assert json.loads(trace["payload_json"])["turn_ord"] == 1
 
 
 def test_record_polling_events_rejects_unknown_run(tmp_path: Path) -> None:
@@ -1481,11 +1530,47 @@ def test_polling_targets_fetch_when_viewed_or_hot(tmp_path: Path) -> None:
         hermes_conversation_id="hermes-hot",
     )
     targets = store.get_polling_targets(trigger_id="agtch_test")
-    assert "hermes-hot" in targets["fetch_hermes_ids"]
+    assert targets["fetch_hermes_ids"] == []
 
     store.record_conversation_presence(conv["id"])
-    targets2 = store.get_polling_targets(trigger_id="agtch_test")
-    assert "hermes-hot" in targets2["fast_hermes_ids"]
+    targets = store.get_polling_targets(trigger_id="agtch_test")
+    assert "hermes-hot" in targets["fetch_hermes_ids"]
+    assert targets["fetch_hermes_ids"] == targets["fast_hermes_ids"]
+
+
+def test_polling_targets_skip_when_paused(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="task",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "n1",
+            "event_type": "progress",
+            "title": None,
+            "markdown": "m",
+            "payload": {},
+            "create_time": 1.0,
+        }],
+        hermes_conversation_id="hermes-hot",
+    )
+    store.record_conversation_presence(conv["id"])
+    store.set_conversation_polling_paused(conv["id"], paused=True)
+    targets = store.get_polling_targets(trigger_id="agtch_test")
+    assert targets["fetch_hermes_ids"] == []
+    assert conv["id"] not in targets["active_conversation_ids"]
 
 
 def test_record_polling_events_binds_hermes_conversation_id(tmp_path: Path) -> None:
@@ -1505,6 +1590,31 @@ def test_record_polling_events_binds_hermes_conversation_id(tmp_path: Path) -> N
     )
     updated = store.get_run(run["id"])
     assert updated["hermes_conversation_id"] == "hermes-bind"
+
+
+def test_polling_targets_infer_agent_from_hot_presence(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    conv = store.create_conversation(agent_id=agent["id"], name="A", conversation_key="k:a")
+    store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="task",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    store.record_conversation_presence(conv["id"])
+    targets = store.get_polling_targets(hermes_agent_id="agt_infer_me")
+    assert targets["agent_id"] == agent["id"]
+    assert targets["discover_in_progress"] is True
+    rebound = store.get_agent_by_hermes_id("agt_infer_me")
+    assert rebound is not None
+    assert int(rebound["id"]) == agent["id"]
 
 
 def _now_iso() -> str:
@@ -1556,3 +1666,191 @@ def test_create_run_snapshots_interaction_mode(tmp_path: Path) -> None:
         request_id="run_1",
     )
     assert run["interaction_mode"] == "pull"
+
+
+def test_pull_sync_status_offline_when_poller_silent(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="Fu",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.bind_agent_hermes_id(agent["id"], hermes_agent_id="agt_test")
+    conv = store.create_conversation(agent_id=agent["id"], name="pull", conversation_key="pull-key")
+    store.update_conversation(conv["id"], interaction_mode="pull")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="hello",
+        idempotency_key="k1",
+        request_id="req1",
+    )
+    store.update_run_trigger_result(
+        request_id="req1",
+        trigger_http_status=202,
+        trigger_x_request_id="x",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    store.steer_run(run_id=run["id"], user_input="follow up")
+    status = store.get_pull_sync_status(conv["id"])
+    assert status["visible"] is True
+    assert status["state"] == "offline"
+
+
+def test_pull_sync_status_syncing_when_poller_online(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="Fu",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.bind_agent_hermes_id(agent["id"], hermes_agent_id="agt_test")
+    conv = store.create_conversation(agent_id=agent["id"], name="pull", conversation_key="pull-key")
+    store.update_conversation(conv["id"], interaction_mode="pull")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="hello",
+        idempotency_key="k1",
+        request_id="req1",
+    )
+    store.update_run_trigger_result(
+        request_id="req1",
+        trigger_http_status=202,
+        trigger_x_request_id="x",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    store.steer_run(run_id=run["id"], user_input="follow up")
+    store.record_poller_heartbeat("agt_test")
+    status = store.get_pull_sync_status(conv["id"])
+    assert status["state"] == "syncing"
+    assert status["poller_online"] is True
+
+
+def test_pull_sync_status_live_after_polling_catch_up(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="Fu",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.bind_agent_hermes_id(agent["id"], hermes_agent_id="agt_test")
+    conv = store.create_conversation(agent_id=agent["id"], name="pull", conversation_key="pull-key")
+    store.update_conversation(conv["id"], interaction_mode="pull")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="hello",
+        idempotency_key="k1",
+        request_id="req1",
+    )
+    store.update_run_trigger_result(
+        request_id="req1",
+        trigger_http_status=202,
+        trigger_x_request_id="x",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    store.steer_run(run_id=run["id"], user_input="follow up")
+    store.record_poller_heartbeat("agt_test")
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[
+            {
+                "source_key": "node-1",
+                "event_type": "progress",
+                "markdown": "reply",
+                "payload": {"polling": True},
+                "create_time": 4102444800.0,
+            }
+        ],
+        hermes_agent_id="agt_test",
+    )
+    status = store.get_pull_sync_status(conv["id"])
+    assert status["state"] == "live"
+
+
+def test_pull_sync_status_visible_for_relay_conv_with_hermes_run(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="Fu",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.bind_agent_hermes_id(agent["id"], hermes_agent_id="agt_test")
+    conv = store.create_conversation(agent_id=agent["id"], name="relay", conversation_key="relay-key")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="hello",
+        idempotency_key="k1",
+        request_id="req1",
+    )
+    store.update_run_trigger_result(
+        request_id="req1",
+        trigger_http_status=202,
+        trigger_x_request_id="x",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "n1",
+            "event_type": "progress",
+            "markdown": "m",
+            "payload": {"polling": True},
+            "create_time": 1.0,
+        }],
+        hermes_conversation_id="hermes-bound",
+    )
+    status = store.get_pull_sync_status(conv["id"])
+    assert status["visible"] is True
+    assert status["state"] in {"offline", "syncing", "live", "paused"}
+
+
+def test_pull_sync_status_paused_when_flag_set(tmp_path: Path) -> None:
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.upsert_agent(
+        name="Fu",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        token_ref="env:TOKEN",
+    )
+    store.bind_agent_hermes_id(agent["id"], hermes_agent_id="agt_test")
+    conv = store.create_conversation(agent_id=agent["id"], name="pull", conversation_key="pull-key")
+    store.update_conversation(conv["id"], interaction_mode="pull")
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conv["id"],
+        conversation_key=conv["conversation_key"],
+        input_markdown="hello",
+        idempotency_key="k1",
+        request_id="req1",
+    )
+    store.update_run_trigger_result(
+        request_id="req1",
+        trigger_http_status=202,
+        trigger_x_request_id="x",
+        conversation_url="https://chatgpt.com/c/1",
+    )
+    store.steer_run(run_id=run["id"], user_input="follow up")
+    store.record_poller_heartbeat("agt_test")
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[
+            {
+                "source_key": "node-1",
+                "event_type": "progress",
+                "markdown": "reply",
+                "payload": {"polling": True},
+                "create_time": 4102444800.0,
+            }
+        ],
+        hermes_agent_id="agt_test",
+    )
+    store.set_conversation_polling_paused(conv["id"], paused=True)
+    status = store.get_pull_sync_status(conv["id"])
+    assert status["state"] == "paused"
+    assert status["polling_paused"] is True

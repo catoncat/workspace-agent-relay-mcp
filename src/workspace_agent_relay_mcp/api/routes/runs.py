@@ -126,6 +126,8 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             idempotency_key=idempotency_key,
             request_id=request_id,
         )
+        if interaction_mode == "pull":
+            store.set_conversation_polling_paused(int(conversation["id"]), paused=False)
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         try:
             trigger_result = await run_in_threadpool(
@@ -216,6 +218,8 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             return json_error(str(exc), status_code=404)
         except ValueError as exc:
             return json_error(str(exc), status_code=409)
+        if _conversation_interaction_mode(conversation) == "pull":
+            store.set_conversation_polling_paused(int(conversation["id"]), paused=False)
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,

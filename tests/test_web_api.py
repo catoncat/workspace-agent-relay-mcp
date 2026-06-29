@@ -185,6 +185,23 @@ def test_api_patch_conversation_interaction_mode(tmp_path: Path) -> None:
     assert response.json()["interaction_mode"] == "pull"
 
 
+def test_api_pull_sync_status(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+
+    with client:
+        _, conversation = _seed_conversation(client)
+        client.patch(
+            f"/api/conversations/{conversation['id']}",
+            json={"interaction_mode": "pull"},
+        )
+        response = client.get(f"/api/conversations/{conversation['id']}/pull-sync")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["visible"] is False
+    assert body["state"] == "idle"
+
+
 def test_api_pull_mode_run_uses_pull_trigger(tmp_path: Path) -> None:
     client, trigger_client = _client(tmp_path)
 

@@ -167,7 +167,7 @@ cd frontend && pnpm run build          # 须零错误
 ## 变更记录
 
 - **2026-06-28**：初稿。锁定 polling 映射到现有 event_type、`source_key` 部分唯一索引幂等、internal 端点单写者、读取端仅终态去重、UI 零改。
-- **2026-06-28（结构合并 v2）**：排序改用 **turn 锚点 + mapping_ord**，不用 ChatGPT assistant `create_time`；去掉正文子串去重。槽位去重（callback `question` 占 turn 的 ask 槽、polling 不重复占同槽）待 callback `ask_user` 写入 `turn_ord` 后启用，**不**用场景关键词或题干匹配。
+- **2026-06-29**：§7.3 锁定结构排序 `(turn_ord, lane, sub)`；`steer_run` / `record_tool_trace` 写入 `turn_ord`，与 `hermes_translate` 的 turn 计数对齐。禁止用 event id 段推断作为长期方案（仅 legacy 读路径回退）。
 
 ## 7. 结构合并 v2（排序与槽位，无 hard code）
 
@@ -190,12 +190,18 @@ payload 携带 `turn_ord`、`mapping_ord`（实现标记，前端不读）。
 
 ### 7.3 读取（`list_events_merged`）
 
-排序键：
+排序键（**结构合并**，不混用 server 时间与 turn 锚点）：
 
-- callback：`created_at`, `id`
-- polling：turn 锚点 `created_at`, `mapping_ord`（从 payload 解析）
+| 事件 | `turn_ord` | lane | sub |
+|------|------------|------|-----|
+| dashboard `user_message`（steer） | 写入时：已有 steer 数 + 1 | 0 | `id` |
+| callback tool trace | 写入时：当前 active turn（最近 steer，无 steer 则为 0） | 1 | `id` |
+| 其他 callback | payload `turn_ord` 或 legacy 推断 | 1 | `id` |
+| polling | payload `turn_ord` + `mapping_ord` | 2 | `mapping_ord` |
 
-合并后按 `(sort_at, sub_key)` 排序，`sub_key` 对 callback 用 `id`，对 polling 用 `mapping_ord`。
+合并后按 `(turn_ord, lane, sub, id)` 排序。同一 turn 内：**用户 steer → 本地 tool traces → Hermes 可见消息**。
+
+纯 relay（无 polling 平面）仍用 `(created_at, …)` 时间排序。
 
 去重（仅结构）：
 

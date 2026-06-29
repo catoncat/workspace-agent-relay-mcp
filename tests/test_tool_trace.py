@@ -511,7 +511,7 @@ def test_internal_polling_events_rejects_missing_source_key(tmp_path: Path) -> N
     assert response.json()["success"] is False
 
 
-def test_internal_polling_targets_requires_trigger_id(tmp_path: Path) -> None:
+def test_internal_polling_targets_requires_agent_id(tmp_path: Path) -> None:
     client, _store = _http_client(tmp_path, auth_token="local-secret")
     with client:
         response = client.get(
@@ -546,3 +546,33 @@ def test_internal_polling_targets_returns_fetch_set(tmp_path: Path) -> None:
     body = response.json()
     assert "hermes-1" in body["fetch_hermes_ids"]
     assert "hermes-1" in body["fast_hermes_ids"]
+
+
+def test_internal_polling_targets_by_hermes_agent_id(tmp_path: Path) -> None:
+    client, store = _http_client(tmp_path, auth_token="local-secret")
+    run = _seed_active_run(store)
+    agent = store.get_agent(int(run["agent_id"]))
+    store.bind_agent_hermes_id(int(agent["id"]), hermes_agent_id="agt_test_hermes")
+    store.record_polling_events(
+        run_id=run["id"],
+        events=[{
+            "source_key": "n1",
+            "event_type": "progress",
+            "title": None,
+            "markdown": "m",
+            "payload": {},
+            "create_time": 1.0,
+        }],
+        hermes_conversation_id="hermes-1",
+    )
+    store.record_conversation_presence(run["conversation_id"])
+    with client:
+        response = client.get(
+            "/internal/polling-targets?hermes_agent_id=agt_test_hermes",
+            headers={"Authorization": "Bearer local-secret"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["agent_id"] == agent["id"]
+    assert "hermes-1" in body["fetch_hermes_ids"]
+    assert body["interval_active_sec"] == 5
