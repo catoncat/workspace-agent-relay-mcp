@@ -1,0 +1,79 @@
+frontend/src/features/relay/hooks.ts
+  s_9b51c2be1ca495::t_74a2d8da2eb099 2,141,178-179,184-187,198-199,201-202,207,477-510
+  s_9b51c2be1ca495::t_77cce955440f96 511
+src/workspace_agent_relay_mcp/server.py
+  s_072cce7bc0e67c::t_d05a5993b8a957 213-231
+  s_9b51c2be1ca495::t_f3c6a5c75347e8 66,232-235
+src/workspace_agent_relay_mcp/api/routes/workspaces.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 9
+  s_9b51c2be1ca495::t_ab395a15cbd745 34-37,89
+frontend/src/pages/RelayPage.tsx
+  s_a30eac566bfbae::t_7af142b72e17db 5,276,284-285
+  s_a30eac566bfbae::t_b151a3e80d198f 169,229,243,277,287
+  s_9b51c2be1ca495::t_531294095a88da 2,50,66,70-71,79-80,84-86,117,156,164-168,216-219,228,230,232,242,244,246-275,278-283,286,288,290,295,335,337,453-462,471,479,481,483,521,541,543-544,569-574,582,584
+tests/test_web_api.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 282,286-287,289-293,329-347
+frontend/src/lib/conversationKey.ts
+  s_072cce7bc0e67c::t_0b7fb7e152a716 12-17
+tests/test_mcp_callbacks.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 81,91-138
+  s_9b51c2be1ca495::t_563406f6d43d84 139-140
+src/workspace_agent_relay_mcp/workspace_directories.py
+  s_a30eac566bfbae::t_27f8bd14115d0a 26
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_9b51c2be1ca495::t_74a2d8da2eb099 80-81
+  s_9b51c2be1ca495::t_6b24602c02e2d1 82-84
+  s_9b51c2be1ca495::t_851de21169b0cd 33,49
+docs/agent-instructions.md
+  s_9b51c2be1ca495::t_74a2d8da2eb099 42
+  s_9b51c2be1ca495::t_8d486e7e3f9b75 140-141
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 33,89-97,796-843,848-849
+  s_9b51c2be1ca495::t_f9d20c1029c73b 844-847
+docs/superpowers/specs/2026-06-29-draft-conversation-title-tool.md
+  s_a30eac566bfbae::t_44b2e7761a8bee 1-33
+frontend/src/components/AddWorkspaceDialog.tsx
+  s_a30eac566bfbae::t_aca197e2b4dbcb 110-111
+frontend/src/components/RelaySidebar.tsx
+  s_a30eac566bfbae::t_7ac57a201813fd 68,107,141,248
+frontend/src/components/ThreadView.tsx
+  s_a30eac566bfbae::t_2451e1a01c397f 130-131,139-140,160-161
+frontend/src/features/relay/components/ThreadHeader.tsx
+  s_a30eac566bfbae::t_999755b74ef157 30
+src/workspace_agent_relay_mcp/trigger.py
+  s_9b51c2be1ca495::t_3200d8bb8ae0b5 154
+tests/test_trigger_payload.py
+  s_9b51c2be1ca495::t_f8d959da49cc18 36-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "b56813e7db731382cf58d9a3f095a1ca123ae318",
+  "prompts": {},
+  "sessions": {
+    "s_072cce7bc0e67c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1351-45ed-75d1-a08f-b1f482b2973c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_9b51c2be1ca495": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f149c-a6c9-7ce1-9b11-740c2e2cb8c3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a30eac566bfbae": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f045082f-f780-40df-8cf9-fa627e923b65",
+        "model": "composer-2.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
