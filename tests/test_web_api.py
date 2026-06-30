@@ -279,19 +279,18 @@ def test_api_workspace_crud_and_delete_moves_conversations_to_no_directory(tmp_p
     assert missing_delete.status_code == 404
 
 
-def test_api_pick_workspace_directory_returns_selected_path(tmp_path: Path, monkeypatch: Any) -> None:
-    from workspace_agent_relay_mcp.api.routes import workspaces as workspace_routes_module
-
-    picked_dir = tmp_path / "picked-repo"
-    picked_dir.mkdir()
-    monkeypatch.setattr(workspace_routes_module, "pick_directory", lambda: str(picked_dir))
+def test_api_pick_workspace_directory_route_is_retired_without_not_found(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
     with client:
-        response = client.post("/api/workspaces/pick-directory")
+        get_response = client.get("/api/workspaces/pick-directory")
+        post_response = client.post("/api/workspaces/pick-directory")
 
-    assert response.status_code == 200
-    assert response.json() == {"working_directory": str(picked_dir), "name": "picked-repo"}
+    for response in (get_response, post_response):
+        assert response.status_code == 410
+        body = response.json()
+        assert body["success"] is False
+        assert "browse-directories" in body["error"]
 
 
 def test_api_browse_workspace_directories_lists_host_directories(tmp_path: Path) -> None:
@@ -325,6 +324,25 @@ def test_api_browse_workspace_directories_rejects_non_absolute_path(tmp_path: Pa
 
     assert response.status_code == 400
     assert "absolute" in response.json()["error"]
+
+
+def test_api_browse_workspace_directories_defaults_to_server_cwd(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    browse_root = tmp_path / "server-cwd"
+    browse_root.mkdir()
+    (browse_root / "repo").mkdir()
+    monkeypatch.chdir(browse_root)
+    client, _ = _client(tmp_path)
+
+    with client:
+        response = client.get("/api/workspaces/browse-directories")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] == str(browse_root.resolve())
+    assert body["entries"] == [{"name": "repo", "path": str((browse_root / "repo").resolve())}]
 
 
 def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:

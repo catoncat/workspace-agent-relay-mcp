@@ -63,6 +63,7 @@ MCP_INSTRUCTIONS = (
     "record_result once when the turn truly ends (done/failed/blocked). Plan changes use record_plan or skipped steps, not record_result. "
     "Do not use record_progress as the final answer channel; when you have delivered the requested answer or work, put the final Markdown in record_result and close the turn. "
     "A queued/new request arrives with a fresh request_id and needs its own record_result. A mid-turn follow-up (steer) arrives as another trigger with the SAME request_id (keep using that request_id for all further callbacks); treat it as guidance on the CURRENT turn — update the plan, do not start a new turn. The operator's answer to your ask_user arrives the same way, labeled 'Operator answered:'. "
+    "On the first turn of a newly created conversation, call update_conversation_title once after reading the user task; keep the title concise (15 characters or fewer). "
     "If the trigger includes working_directory, treat it as the default cwd for that request_id; verify it before filesystem/git operations, do not guess a different repository, and explain before leaving it. "
     "Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as steps unless debugging that plumbing. "
     "ask_user pauses the turn; it is not completion — the operator's answer resumes the SAME turn (as a steer), so do not start a new turn when it arrives. blocked is for external hard blockers only.\n"
@@ -206,6 +207,29 @@ def record_result(
         title=title,
         markdown=markdown,
         artifacts=artifacts,
+    )
+
+
+@mcp.tool(
+    name="update_conversation_title",
+    title="Update Conversation Title",
+    annotations=LOCAL_STATE_TOOL,
+    description=(
+        "Use this once in the first turn of a newly created conversation, after reading the user task, "
+        "to replace the dashboard's timestamp fallback title. The title must be concise and no longer than 15 characters. "
+        "This updates only the conversation attached to the given request_id and conversation_key, and returns the updated conversation.\n"
+        "Example: title=\"修复登录错误\""
+    ),
+)
+def update_conversation_title(
+    request_id: Annotated[str, Field(description="The request_id from the trigger header.")],
+    conversation_key: Annotated[str, Field(description="The conversation_key from the trigger header.")],
+    title: Annotated[str, Field(description="Concise conversation title, 1-15 characters.", json_schema_extra={"minLength": 1, "maxLength": 15})],
+) -> dict[str, Any]:
+    return store.update_conversation_title(
+        request_id=request_id,
+        conversation_key=conversation_key,
+        title=title,
     )
 
 

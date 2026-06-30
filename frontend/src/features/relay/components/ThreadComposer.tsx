@@ -30,6 +30,7 @@ type Props = {
   conversationKey?: string
   disabled?: boolean
   dismissing?: boolean
+  focusToken?: number
   mode?: ComposerMode
   canSteer?: boolean
   queuedMessages?: QueuedComposerMessage[]
@@ -45,6 +46,7 @@ type Props = {
 export function ThreadComposer({
   disabled = false,
   dismissing = false,
+  focusToken = 0,
   mode = 'idle',
   canSteer = false,
   queuedMessages = [],
@@ -74,6 +76,11 @@ export function ThreadComposer({
         : isAgentWorking
           ? '要求后续变更'
           : '发送任务给 Workspace Agent…'
+
+  useEffect(() => {
+    if (disabled) return
+    textareaRef.current?.focus()
+  }, [disabled, focusToken])
 
   const submit = async (intentOverride?: SendIntent) => {
     const trimmed = text.trim()

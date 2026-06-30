@@ -33,6 +33,8 @@ def test_build_trigger_input_contains_completion_contract() -> None:
     assert "conversation_key: research:sherlog" in rendered
     assert "callback_token" not in rendered
     assert "record_result" in rendered
+    assert "update_conversation_title" in rendered
+    assert "15 characters or fewer" in rendered
     assert "Do not only answer in the ChatGPT conversation." in rendered
     assert "Keep record_plan user-visible" in rendered
     assert "If notion-local-ops-mcp is unavailable" in rendered

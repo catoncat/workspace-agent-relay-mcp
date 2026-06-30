@@ -127,6 +127,8 @@ export function buildTimelineSegments(events: RunEvent[]): TimelineSegment[] {
 type Props = {
   details: RunDetail[]
   loading?: boolean
+  emptyTitle?: string
+  emptyDescription?: string
   optimisticMessages?: OptimisticMessage[]
   onSend?: (text: string, intent?: SendIntent) => void | Promise<void>
 }
@@ -134,6 +136,8 @@ type Props = {
 export function ThreadView({
   details,
   loading = false,
+  emptyTitle = 'No runs yet',
+  emptyDescription = 'Send a task below to trigger the Workspace Agent.',
   optimisticMessages = [],
   onSend,
 }: Props) {
@@ -153,8 +157,8 @@ export function ThreadView({
     return (
       <Conversation className="h-full">
         <ConversationEmptyState
-          title="No runs yet"
-          description="Send a task below to trigger the Workspace Agent."
+          title={emptyTitle}
+          description={emptyDescription}
         />
       </Conversation>
     )

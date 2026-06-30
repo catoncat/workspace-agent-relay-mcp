@@ -27,7 +27,7 @@ export function ThreadHeader({
   recentUrl,
   runCount,
 }: Props) {
-  const title = selectedConversation?.name ?? (loading ? 'Loading...' : 'No conversation selected')
+  const title = selectedConversation?.name ?? (loading ? 'Loading...' : 'New conversation')
   const conversationKey = selectedConversation?.conversation_key
 
   const subtitleParts = [

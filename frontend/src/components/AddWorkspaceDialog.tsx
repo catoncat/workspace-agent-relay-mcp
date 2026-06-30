@@ -107,8 +107,8 @@ export function AddWorkspaceDialog({ open, onOpenChange, onSubmit, pending = fal
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={pending || browsing || !workingDirectory.trim()}
-                  onClick={() => void loadDirectory(workingDirectory)}
+                  disabled={pending || browsing}
+                  onClick={() => void loadDirectory(workingDirectory || null)}
                 >
                   <RefreshCw className={cn('size-3.5', browsing && 'animate-spin')} />
                   Browse

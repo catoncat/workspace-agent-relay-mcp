@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useLocation, useNavigate, useParams } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { AddWorkspaceDialog, type AddWorkspaceInput } from '@/components/AddWorkspaceDialog'
-import { RelaySidebar, type CreateConversationInput } from '@/components/RelaySidebar'
+import { RelaySidebar } from '@/components/RelaySidebar'
 import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
 import { WorkspaceCommandMenu } from '@/components/WorkspaceCommandMenu'
@@ -47,6 +47,7 @@ import {
   useWorkingConversationIds,
 } from '@/features/relay/hooks'
 import type { SendIntent } from '@/features/relay/sendIntent'
+import { buildConversationKey, defaultConversationName } from '@/lib/conversationKey'
 import { isConversationWorking, RUN_TERMINAL_STATUSES } from '@/lib/runStatus'
 import { useAuth } from '@/providers/AuthContext'
 import { nanoid } from 'nanoid'
@@ -62,11 +63,12 @@ const DEFAULT_SETTINGS: RelaySettings = {
 
 export function RelayPage() {
   const params = useParams({ strict: false })
+  const location = useLocation()
   const navigate = useNavigate()
   const { token, setToken } = useAuth()
 
-  const selectedConversationId = parseRouteId(params.conversationId)
-  const selectedRunId = parseRouteId(params.runId)
+  const routeConversationId = parseRouteId(params.conversationId)
+  const routeRunId = parseRouteId(params.runId)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false)
@@ -74,8 +76,13 @@ export function RelayPage() {
   const [queuedMessagesByConversation, setQueuedMessagesByConversation] = useState<QueuedMessageBuckets>({})
   const [optimisticMessagesByConversation, setOptimisticMessagesByConversation] = useState<OptimisticMessageBuckets>({})
   const [flushQueuedConversationId, setFlushQueuedConversationId] = useState<number | null>(null)
+  const [draftActive, setDraftActive] = useState(location.pathname === '/')
+  const [draftFocusToken, setDraftFocusToken] = useState(0)
   const queuedMessagesByConversationRef = useRef<QueuedMessageBuckets>(queuedMessagesByConversation)
   const dispatchingConversationIdsRef = useRef<Set<number>>(new Set())
+
+  const selectedConversationId = draftActive || location.pathname === '/' ? null : routeConversationId
+  const selectedRunId = draftActive || location.pathname === '/' ? null : routeRunId
 
   const bootstrapQuery = useBootstrap()
   const agents = bootstrapQuery.data?.agents ?? EMPTY_AGENTS
@@ -107,7 +114,7 @@ export function RelayPage() {
   const queueFlushPending = flushQueuedConversationId === activeConversationId
 
   const runsQuery = useRuns(activeConversationId)
-  const runs = runsQuery.data ?? EMPTY_RUNS
+  const runs = activeConversationId ? (runsQuery.data ?? EMPTY_RUNS) : EMPTY_RUNS
   const { details: runDetails, isLoading: runDetailsLoading } = useRunDetails(runs)
   useRunDetailStream(selectedRunId)
   const threadLoading = Boolean(
@@ -146,13 +153,19 @@ export function RelayPage() {
     ? selectedRun
     : latestActiveRun
   const steerTargetStatus = steerTargetRun?.status
-  const sending = createRunMutation.isPending || steerMutation.isPending
+  const sending = createConversationMutation.isPending || createRunMutation.isPending || steerMutation.isPending
   const composerMode = resolveComposerMode(steerTargetStatus, sending)
   const agentWorking = isConversationWorking(steerTargetStatus)
 
   useEffect(() => {
     queuedMessagesByConversationRef.current = queuedMessagesByConversation
   }, [queuedMessagesByConversation])
+
+  useEffect(() => {
+    if (location.pathname !== '/' && routeConversationId) {
+      setDraftActive(false)
+    }
+  }, [location.pathname, routeConversationId])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -200,24 +213,23 @@ export function RelayPage() {
     )
   }, [])
 
+  const focusDraftComposer = useCallback(() => {
+    setDraftFocusToken((value) => value + 1)
+  }, [])
+
   useEffect(() => {
-    if (visibleConversations.length === 0) {
-      if (selectedConversationId && !bootstrapQuery.isFetching) {
-        navigate({ to: '/', replace: true })
-      }
-      return
-    }
     if (!selectedConversationId) {
-      navigate({ to: '/c/$conversationId', params: { conversationId: String(visibleConversations[0].id) }, replace: true })
       return
     }
     const stillSelected = visibleConversations.some(
       (conversation) => conversation.id === selectedConversationId,
     )
     if (!stillSelected && !bootstrapQuery.isFetching) {
-      navigate({ to: '/c/$conversationId', params: { conversationId: String(visibleConversations[0].id) }, replace: true })
+      setDraftActive(true)
+      navigate({ to: '/', replace: true })
+      focusDraftComposer()
     }
-  }, [bootstrapQuery.isFetching, navigate, selectedConversationId, visibleConversations])
+  }, [bootstrapQuery.isFetching, focusDraftComposer, navigate, selectedConversationId, visibleConversations])
 
   useEffect(() => {
     if (!activeConversationId || selectedRunId || runDetails.length === 0) return
@@ -227,16 +239,60 @@ export function RelayPage() {
 
   const handleSend = useCallback(
     async (text: string, intent: SendIntent = 'queue') => {
+      const trimmed = text.trim()
+      if (!trimmed) return
+
       const conversationId = activeConversationId
+      if (!conversationId) {
+        const fallbackName = defaultConversationName()
+        const conversation = await createConversationMutation.mutateAsync({
+          name: fallbackName,
+          key: buildConversationKey(fallbackName),
+          workspaceId: currentWorkspaceId,
+        })
+        const createdConversationId = conversation.id
+        setDraftActive(false)
+        navigate({
+          to: '/c/$conversationId',
+          params: { conversationId: String(createdConversationId) },
+          replace: true,
+        })
+        const optimisticMessageId = appendOptimisticMessage(createdConversationId, trimmed)
+        dispatchingConversationIdsRef.current.add(createdConversationId)
+        try {
+          const detail = await createRunMutation.mutateAsync({
+            input: trimmed,
+            conversationId: createdConversationId,
+          })
+          clearOptimisticMessage(createdConversationId, optimisticMessageId)
+          navigate({
+            to: '/c/$conversationId/r/$runId',
+            params: {
+              conversationId: String(createdConversationId),
+              runId: String(detail.run.id),
+            },
+            replace: true,
+          })
+        } catch (error) {
+          clearOptimisticMessage(createdConversationId, optimisticMessageId)
+          dispatchingConversationIdsRef.current.delete(createdConversationId)
+          navigate({
+            to: '/c/$conversationId',
+            params: { conversationId: String(createdConversationId) },
+            replace: true,
+          })
+          throw error
+        }
+        return
+      }
+
       const plan = planComposerSend({
-        text,
+        text: trimmed,
         intent,
         conversationId,
         agentWorking,
         sending,
-        localDispatchPending: conversationId
-          ? dispatchingConversationIdsRef.current.has(conversationId)
-          : false,
+        localDispatchPending: dispatchingConversationIdsRef.current.has(conversationId),
         steerTargetRunId: steerTargetRun?.id,
       })
 
@@ -276,7 +332,9 @@ export function RelayPage() {
       agentWorking,
       appendOptimisticMessage,
       clearOptimisticMessage,
+      createConversationMutation,
       createRunMutation,
+      currentWorkspaceId,
       navigate,
       sending,
       steerMutation,
@@ -392,21 +450,16 @@ export function RelayPage() {
     sending,
   ])
 
-  const handleCreateConversation = useCallback(
-    async (values: CreateConversationInput) => {
-      const conversation = await createConversationMutation.mutateAsync({
-        name: values.name,
-        key: values.key,
-        workspaceId: currentWorkspaceId,
-      })
-      navigate({
-        to: '/c/$conversationId',
-        params: { conversationId: String(conversation.id) },
-        replace: true,
-      })
-    },
-    [createConversationMutation, currentWorkspaceId, navigate],
-  )
+  const handleStartDraftConversation = useCallback(() => {
+    setDraftActive(true)
+    navigate({ to: '/', replace: true })
+    focusDraftComposer()
+  }, [focusDraftComposer, navigate])
+
+  const handleSelectConversation = useCallback((id: number) => {
+    setDraftActive(false)
+    navigate({ to: '/c/$conversationId', params: { conversationId: String(id) } })
+  }, [navigate])
 
   const handleWorkspaceChange = useCallback(
     async (workspaceId: number | null) => {
@@ -415,6 +468,7 @@ export function RelayPage() {
         (conversation) => (conversation.workspace_id ?? null) === workspaceId,
       )
       if (target) {
+        setDraftActive(false)
         navigate({
           to: '/c/$conversationId',
           params: { conversationId: String(target.id) },
@@ -422,9 +476,11 @@ export function RelayPage() {
         })
         return
       }
+      setDraftActive(true)
       navigate({ to: '/', replace: true })
+      focusDraftComposer()
     },
-    [conversations, navigate, updateSettingsMutation],
+    [conversations, focusDraftComposer, navigate, updateSettingsMutation],
   )
 
   const handleCreateWorkspaceFromDirectory = useCallback(async (input: AddWorkspaceInput) => {
@@ -462,6 +518,7 @@ export function RelayPage() {
     async (id: number) => {
       await deleteConversationMutation.mutateAsync(id)
       if (selectedConversationId === id) {
+        setDraftActive(true)
         navigate({ to: '/', replace: true })
       }
     },
@@ -481,16 +538,15 @@ export function RelayPage() {
         workspaces={workspaces}
         currentWorkspaceId={currentWorkspaceId}
         conversations={visibleConversations}
-        selectedId={selectedConversationId}
+        selectedId={activeConversationId}
         onWorkspaceChange={handleWorkspaceChange}
-        onSelect={(id) => navigate({ to: '/c/$conversationId', params: { conversationId: String(id) } })}
-        onCreate={handleCreateConversation}
+        onSelect={handleSelectConversation}
+        onCreate={handleStartDraftConversation}
         creating={createConversationMutation.isPending}
         onRename={(id, name) => renameConversationMutation.mutateAsync({ id, name })}
         onDelete={handleDeleteConversation}
         onPin={handlePinConversation}
         onOpenSettings={() => setSettingsOpen(true)}
-        onManageWorkspaces={() => setSettingsOpen(true)}
         onAddWorkspace={handleAddWorkspace}
         addingWorkspace={addingWorkspace}
         onOpenWorkspaceSwitcher={() => setWorkspaceSwitcherOpen(true)}
@@ -510,6 +566,12 @@ export function RelayPage() {
           <ThreadView
             details={runDetails}
             loading={threadLoading}
+            emptyTitle={activeConversationId ? 'No runs yet' : 'New conversation'}
+            emptyDescription={
+              activeConversationId
+                ? 'Send a task below to trigger the Workspace Agent.'
+                : 'Send a task below to create this thread.'
+            }
             optimisticMessages={optimisticMessages}
             onSend={handleSend}
           />
@@ -517,8 +579,9 @@ export function RelayPage() {
 
         <ThreadComposer
           conversationKey={selectedConversation?.conversation_key}
-          disabled={!activeConversationId}
+          disabled={bootstrapQuery.isLoading}
           dismissing={dismissRunMutation.isPending}
+          focusToken={draftFocusToken}
           mode={composerMode}
           canSteer={Boolean(steerTargetRun)}
           queuedMessages={queuedMessages}
@@ -557,7 +620,6 @@ export function RelayPage() {
         onTokenChange={setToken}
         agents={agents}
         settings={settings}
-        workspaces={workspaces}
       />
     </SidebarProvider>
   )

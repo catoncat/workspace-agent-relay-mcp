@@ -50,7 +50,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { buildConversationKey, defaultConversationName } from '@/lib/conversationKey'
 import { cn } from '@/lib/utils'
 
 const threadButtonClass =
@@ -59,12 +58,6 @@ const threadButtonClass =
 const threadIndentSingleClass = 'pl-7 pr-2'
 const threadStatusSlotSingleClass = 'left-1.5'
 
-export type CreateConversationInput = {
-  name: string
-  key: string
-  workspaceId?: number | null
-}
-
 type Props = {
   workspaces: Workspace[]
   currentWorkspaceId: number | null
@@ -72,13 +65,12 @@ type Props = {
   selectedId: number | null
   onWorkspaceChange?: (id: number | null) => void | Promise<unknown>
   onSelect: (id: number) => void
-  onCreate?: (input: CreateConversationInput) => void | Promise<unknown>
+  onCreate?: () => void | Promise<unknown>
   creating?: boolean
   onRename?: (id: number, name: string) => void | Promise<unknown>
   onDelete?: (id: number) => void | Promise<unknown>
   onPin?: (id: number, pinned: boolean) => void | Promise<unknown>
   onOpenSettings?: () => void
-  onManageWorkspaces?: () => void
   onAddWorkspace?: () => void | Promise<unknown>
   addingWorkspace?: boolean
   onOpenWorkspaceSwitcher?: () => void
@@ -99,14 +91,12 @@ export function RelaySidebar({
   onDelete,
   onPin,
   onOpenSettings,
-  onManageWorkspaces,
   onAddWorkspace,
   addingWorkspace = false,
   onOpenWorkspaceSwitcher,
   loading = false,
   workingConversationIds,
 }: Props) {
-  const [isComposing, setIsComposing] = useState(false)
   const currentWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === currentWorkspaceId) ?? null,
     [currentWorkspaceId, workspaces],
@@ -114,21 +104,8 @@ export function RelaySidebar({
 
   const handleStartCreate = useCallback(() => {
     if (!onCreate) return
-    setIsComposing(true)
+    void onCreate()
   }, [onCreate])
-
-  const handleCancelCreate = useCallback(() => {
-    setIsComposing(false)
-  }, [])
-
-  const handleSubmitCreate = useCallback(
-    async (input: CreateConversationInput) => {
-      if (!onCreate) return
-      await onCreate(input)
-      setIsComposing(false)
-    },
-    [onCreate],
-  )
 
   return (
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border">
@@ -137,7 +114,6 @@ export function RelaySidebar({
           workspaces={workspaces}
           currentWorkspace={currentWorkspace}
           onWorkspaceChange={onWorkspaceChange}
-          onManageWorkspaces={onManageWorkspaces ?? onOpenSettings}
           onAddWorkspace={onAddWorkspace}
           addingWorkspace={addingWorkspace}
           onOpenWorkspaceSwitcher={onOpenWorkspaceSwitcher}
@@ -162,16 +138,7 @@ export function RelaySidebar({
 
         <SidebarGroup className="p-0">
           <SidebarGroupContent className="px-0">
-            {isComposing && onCreate ? (
-              <InlineCreateRow
-                workspaceId={currentWorkspaceId}
-                pending={creating}
-                onCancel={handleCancelCreate}
-                onSubmit={handleSubmitCreate}
-              />
-            ) : null}
-
-            {conversations.length === 0 && !isComposing ? (
+            {conversations.length === 0 ? (
               <p className="px-2 py-4 text-center text-xs text-muted-foreground">
                 {loading ? 'Loading…' : 'No threads yet'}
               </p>
@@ -220,18 +187,10 @@ export function RelaySidebar({
   )
 }
 
-type InlineCreateProps = {
-  workspaceId: number | null
-  pending?: boolean
-  onCancel: () => void
-  onSubmit: (input: CreateConversationInput) => void | Promise<unknown>
-}
-
 function WorkspaceSelector({
   workspaces,
   currentWorkspace,
   onWorkspaceChange,
-  onManageWorkspaces,
   onAddWorkspace,
   addingWorkspace = false,
   onOpenWorkspaceSwitcher,
@@ -239,7 +198,6 @@ function WorkspaceSelector({
   workspaces: Workspace[]
   currentWorkspace: Workspace | null
   onWorkspaceChange?: (id: number | null) => void | Promise<unknown>
-  onManageWorkspaces?: () => void
   onAddWorkspace?: () => void | Promise<unknown>
   addingWorkspace?: boolean
   onOpenWorkspaceSwitcher?: () => void
@@ -287,7 +245,7 @@ function WorkspaceSelector({
               </span>
             </DropdownMenuItem>
           ))}
-          {onManageWorkspaces ? (
+          {onOpenWorkspaceSwitcher || onAddWorkspace ? (
             <>
               <DropdownMenuSeparator />
               {onOpenWorkspaceSwitcher ? (
@@ -303,10 +261,6 @@ function WorkspaceSelector({
                   Add directory...
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuItem onClick={onManageWorkspaces}>
-                <Settings />
-                Manage workspaces...
-              </DropdownMenuItem>
             </>
           ) : null}
         </DropdownMenuContent>
@@ -325,51 +279,6 @@ function WorkspaceSelector({
           <span className="sr-only">Add directory</span>
         </Button>
       ) : null}
-    </div>
-  )
-}
-
-function InlineCreateRow({ workspaceId, pending = false, onCancel, onSubmit }: InlineCreateProps) {
-  const [name, setName] = useState('')
-
-  useEffect(() => {
-    setName('')
-  }, [workspaceId])
-
-  const commit = useCallback(async () => {
-    if (pending) return
-    const trimmed = name.trim() || defaultConversationName()
-    await onSubmit({
-      name: trimmed,
-      key: buildConversationKey(trimmed),
-      workspaceId,
-    })
-  }, [name, onSubmit, pending, workspaceId])
-
-  return (
-    <div className="mb-1.5 space-y-2 px-0.5 py-1">
-      <Input
-        autoFocus
-        value={name}
-        disabled={pending}
-        placeholder="Name this thread…"
-        aria-label="New thread name"
-        className="h-7 border-0 bg-background/80 shadow-none focus-visible:ring-1"
-        onChange={(event) => setName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            void commit()
-          } else if (event.key === 'Escape') {
-            event.preventDefault()
-            onCancel()
-          }
-        }}
-        onBlur={() => {
-          if (name.trim()) void commit()
-          else onCancel()
-        }}
-      />
     </div>
   )
 }

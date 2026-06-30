@@ -151,6 +151,7 @@ def build_trigger_input(
             "The local operator CANNOT see your ChatGPT-side plan, tool calls, or reasoning. This relay is their only view of your work.",
             "This trigger starts ONE turn (one request_id scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",
             "Before working, call workspace-agent-relay-mcp.record_plan with your step plan (each step needs a stable id and a title).",
+            "For this first turn of a newly created conversation, call workspace-agent-relay-mcp.update_conversation_title once after reading the user task. Use a concise title of 15 characters or fewer; the dashboard uses a timestamp fallback until you do.",
             "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps unless the user explicitly asked to debug that plumbing.",
             "Then call notion-local-ops-mcp.bind_relay_run with this request_id so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
             "After completing several steps, call workspace-agent-relay-mcp.record_progress with step_updates to batch-sync step statuses, optionally with a one-line message summarizing what you did.",

@@ -78,6 +78,7 @@ def test_server_info_lists_relay_tools(tmp_path: Path, monkeypatch) -> None:
         "record_plan",
         "record_progress",
         "record_result",
+        "update_conversation_title",
         "ask_user",
         "get_run_context",
     }
@@ -85,6 +86,56 @@ def test_server_info_lists_relay_tools(tmp_path: Path, monkeypatch) -> None:
     assert "auth_token" not in rendered
     assert "default_agent_token" not in rendered
     assert "callback_token" not in rendered
+
+
+def test_update_conversation_title_tool_updates_current_conversation(tmp_path: Path, monkeypatch) -> None:
+    from workspace_agent_relay_mcp import server
+
+    store = RelayStore(tmp_path / "relay.sqlite")
+    _seed_run(store)
+    monkeypatch.setattr(server, "store", store)
+
+    result = _call(
+        server.update_conversation_title,
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        title="登录修复",
+    )
+
+    assert result["success"] is True
+    conversation = result["conversation"]
+    assert conversation["name"] == "登录修复"
+    assert store.get_conversation(conversation["id"])["name"] == "登录修复"
+
+    run = store.get_run_by_request_id("run_1")
+    title_events = [event for event in store.list_events(run["id"]) if event["event_type"] == "conversation_title"]
+    assert len(title_events) == 1
+    import json as _json
+
+    payload = _json.loads(title_events[0]["payload_json"])
+    assert payload == {"conversation_id": conversation["id"], "title": "登录修复"}
+
+
+def test_update_conversation_title_rejects_long_title(tmp_path: Path, monkeypatch) -> None:
+    from workspace_agent_relay_mcp import server
+
+    store = RelayStore(tmp_path / "relay.sqlite")
+    _seed_run(store)
+    monkeypatch.setattr(server, "store", store)
+    conversation_id = store.list_conversations()[0]["id"]
+
+    result = _call(
+        server.update_conversation_title,
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        title="1234567890123456",
+    )
+
+    assert result["success"] is False
+    assert result["error"]["code"] == "invalid_title"
+    assert store.get_conversation(conversation_id)["name"] == "Sherlog"
+    run = store.get_run_by_request_id("run_1")
+    assert not [event for event in store.list_events(run["id"]) if event["event_type"] == "conversation_title"]
 
 
 def test_record_plan_and_step_updates_flow(tmp_path: Path, monkeypatch) -> None:

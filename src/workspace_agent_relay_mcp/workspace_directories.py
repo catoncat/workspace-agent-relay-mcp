@@ -23,7 +23,7 @@ def workspace_name_from_directory(value: str) -> str:
 
 def normalize_browse_directory(value: Any = None) -> Path:
     text = str(value or "").strip()
-    path = Path.home() if not text else Path(text).expanduser()
+    path = Path.cwd() if not text else Path(text).expanduser()
     if not path.is_absolute():
         raise ValueError("path must be an absolute directory path")
     resolved = path.resolve()

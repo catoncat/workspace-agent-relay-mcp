@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 VALID_STEP_STATUSES = {"pending", "in_progress", "done", "skipped"}
 MAX_PLAN_STEPS = 20
 MAX_STEP_TITLE_LEN = 200
+MAX_CONVERSATION_TITLE_LEN = 15
 AGENT_PUBLIC_COLUMNS = "id, name, trigger_url, trigger_id, token_ref, created_at, updated_at"
 WORKSPACE_PUBLIC_COLUMNS = "id, name, working_directory, created_at, updated_at, last_used_at"
 CONVERSATION_PUBLIC_COLUMNS = (
@@ -83,6 +84,15 @@ def _normalize_workspace_name(value: Any) -> str:
     if not name:
         raise ValueError("name must not be empty")
     return name
+
+
+def _normalize_conversation_title(value: Any) -> str:
+    title = re.sub(r"\s+", " ", str(value or "").strip())
+    if not title:
+        raise ValueError("title must not be empty")
+    if len(title) > MAX_CONVERSATION_TITLE_LEN:
+        raise ValueError(f"title must not exceed {MAX_CONVERSATION_TITLE_LEN} characters")
+    return title
 
 
 def _normalize_plan_steps(steps: Any) -> list[dict[str, Any]]:
@@ -782,6 +792,60 @@ class RelayStore:
 
     def rename_conversation(self, conversation_id: int, *, name: str) -> dict[str, Any]:
         return self.update_conversation(conversation_id, name=name)
+
+    def update_conversation_title(
+        self,
+        *,
+        request_id: str,
+        conversation_key: str,
+        title: str,
+    ) -> dict[str, Any]:
+        try:
+            normalized_title = _normalize_conversation_title(title)
+        except ValueError as exc:
+            return {"success": False, "error": {"code": "invalid_title", "message": str(exc)}}
+        with self._lock, self._connect(immediate=True) as conn:
+            validation = self._validate_callback_conn(conn, request_id, conversation_key)
+            if not validation["success"]:
+                return validation
+            run = validation["run"]
+            run_id = int(run["id"])
+            conversation_id = int(run["conversation_id"])
+            now = _now()
+            row = conn.execute(
+                "SELECT id FROM conversations WHERE id = ? AND archived_at IS NULL",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                return {
+                    "success": False,
+                    "error": {"code": "conversation_not_found", "message": "Conversation was not found."},
+                }
+            conn.execute(
+                "UPDATE conversations SET name = ?, updated_at = ? WHERE id = ?",
+                (normalized_title, now, conversation_id),
+            )
+            conversation_row = conn.execute(
+                f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+            conversation = _row_to_dict(conversation_row) or {}
+            event = self._append_event_conn(
+                conn,
+                run_id=run_id,
+                request_id=request_id,
+                event_type="conversation_title",
+                title="Conversation title updated",
+                markdown=None,
+                payload={"conversation_id": conversation_id, "title": normalized_title},
+            )
+        self._notify_run(run_id)
+        return {
+            "success": True,
+            "conversation": conversation,
+            "event_id": event["id"],
+            "run_status": self.get_run(run_id)["status"],
+        }
 
     def set_conversation_pinned(self, conversation_id: int, *, pinned: bool) -> dict[str, Any]:
         return self.update_conversation(conversation_id, pinned=pinned)

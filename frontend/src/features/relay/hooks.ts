@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQueries, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient, type Query, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   createAgent,
@@ -11,7 +11,6 @@ import {
   deleteConversation,
   deleteWorkspace,
   getRunDetail,
-  pickWorkspaceDirectory,
   renameAgent,
   renameConversation,
   setConversationPinned,
@@ -139,6 +138,7 @@ export function useRunDetailStream(runId: number | null) {
       runId,
       (detail) => {
         queryClient.setQueryData(relayQueryKeys.runDetail(detail.run.id), detail)
+        applyConversationTitleEvent(queryClient, detail)
       },
       controller.signal,
     ).catch((err: unknown) => {
@@ -175,13 +175,16 @@ export function useDismissRun(conversationId: number | null) {
   })
 }
 
+type CreateRunMutationInput = string | { input: string; conversationId?: number | null }
+
 export function useCreateRun(conversationId: number | null) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (input: string) => {
-      if (!conversationId) throw new Error('Select a conversation before sending a task.')
-      const { run, triggerFailed, warning } = await createRun(conversationId, input)
+    mutationFn: async (value: CreateRunMutationInput) => {
+      const resolved = resolveCreateRunMutationInput(value, conversationId)
+      if (!resolved.conversationId) throw new Error('Select a conversation before sending a task.')
+      const { run, triggerFailed, warning } = await createRun(resolved.conversationId, resolved.input)
       const detail = await getRunDetail(run.id)
       if (triggerFailed) {
         toast.warning(
@@ -192,15 +195,16 @@ export function useCreateRun(conversationId: number | null) {
       }
       return detail
     },
-    onSuccess: (detail) => {
+    onSuccess: (detail, value) => {
+      const resolved = resolveCreateRunMutationInput(value, conversationId)
       queryClient.setQueryData(relayQueryKeys.runDetail(detail.run.id), detail)
-      if (conversationId) {
-        queryClient.setQueryData<Run[]>(relayQueryKeys.runs(conversationId), (current) => {
+      if (resolved.conversationId) {
+        queryClient.setQueryData<Run[]>(relayQueryKeys.runs(resolved.conversationId), (current) => {
           const runs = current ?? []
           if (runs.some((run) => run.id === detail.run.id)) return runs
           return [...runs, detail.run].sort((a, b) => a.id - b.id)
         })
-        void queryClient.invalidateQueries({ queryKey: relayQueryKeys.runs(conversationId) })
+        void queryClient.invalidateQueries({ queryKey: relayQueryKeys.runs(resolved.conversationId) })
       }
     },
     onError: (err) => {
@@ -330,15 +334,6 @@ export function useCreateWorkspace() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: relayQueryKeys.bootstrap })
     },
-    onError: (err) => {
-      toast.error(toError(err).message)
-    },
-  })
-}
-
-export function usePickWorkspaceDirectory() {
-  return useMutation({
-    mutationFn: pickWorkspaceDirectory,
     onError: (err) => {
       toast.error(toError(err).message)
     },
@@ -477,6 +472,41 @@ export function usePinConversation() {
 function emptyRunDetail(run: Run | undefined): RunDetail {
   if (!run) throw new Error('Run detail query is missing a run placeholder.')
   return { run, events: [], artifacts: [], plan: null }
+}
+
+function resolveCreateRunMutationInput(
+  value: CreateRunMutationInput,
+  fallbackConversationId: number | null,
+): { input: string; conversationId: number | null } {
+  if (typeof value === 'string') return { input: value, conversationId: fallbackConversationId }
+  return { input: value.input, conversationId: value.conversationId ?? fallbackConversationId }
+}
+
+function applyConversationTitleEvent(queryClient: QueryClient, detail: RunDetail): void {
+  const titleEvent = [...detail.events]
+    .reverse()
+    .find((event) => event.event_type === 'conversation_title')
+  const rawConversationId = titleEvent?.payload?.conversation_id
+  const conversationId = typeof rawConversationId === 'number'
+    ? rawConversationId
+    : typeof rawConversationId === 'string'
+      ? Number(rawConversationId)
+      : NaN
+  const title = typeof titleEvent?.payload?.title === 'string'
+    ? titleEvent.payload.title.trim()
+    : ''
+  if (!Number.isFinite(conversationId) || !title) return
+
+  queryClient.setQueryData<BootstrapData>(relayQueryKeys.bootstrap, (current) => {
+    if (!current) return current
+    let changed = false
+    const conversations = current.conversations.map((conversation) => {
+      if (conversation.id !== conversationId || conversation.name === title) return conversation
+      changed = true
+      return { ...conversation, name: title }
+    })
+    return changed ? { ...current, conversations } : current
+  })
 }
 
 function toError(err: unknown): Error {

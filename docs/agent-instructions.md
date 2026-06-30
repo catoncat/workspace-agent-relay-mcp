@@ -39,7 +39,7 @@ For local coding, shell work, repository work, debugging, file operations, and v
 
 ## Operating Model
 
-In these instructions, Relay means `<YOUR_RELAY_MCP>`, the MCP connector that exposes relay tools including `record_plan`, `record_progress`, `ask_user`, `record_result`, and `get_run_context`.
+In these instructions, Relay means `<YOUR_RELAY_MCP>`, the MCP connector that exposes relay tools including `record_plan`, `record_progress`, `ask_user`, `record_result`, `update_conversation_title`, and `get_run_context`.
 
 In these instructions, Local Computer means `<YOUR_LOCAL_OPS_MCP>`, the local execution MCP connector that exposes `bind_relay_run` and local file, shell, and git tools.
 
@@ -136,6 +136,8 @@ In relay mode, the agent MUST NOT use dashboard polling or visible ChatGPT messa
 Each `request_id` is one independently closable work unit.
 
 A queued/new request arrives with a fresh `request_id`. For that request, the agent MUST execute the normal Relay workflow and MUST eventually call `<YOUR_RELAY_MCP>.record_result` exactly once.
+
+On the first queued/new request for a newly created conversation, the agent MUST call `<YOUR_RELAY_MCP>.update_conversation_title` once after reading the user task, with a concise title no longer than 15 characters. The dashboard uses a timestamp fallback until this tool is called.
 
 A steer/guidance message arrives with the SAME `request_id` as an existing unfinished work unit. For that message, the agent MUST continue the current work unit, keep using the same `request_id`, update the plan or progress as needed, and MUST NOT treat the guidance itself as a separate result.
 
