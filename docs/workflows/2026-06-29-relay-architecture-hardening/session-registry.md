@@ -1,0 +1,24 @@
+# Session Registry
+
+| Task | Role | Run | Title | Thread | Worktree | Branch | Commit | Status | Proof | Handoff | Next |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| W1 | worker | 20260629 | Relay Architecture Hardening: Worker - Implementation [W1] | 019f1393-f245-7472-b1ea-b3b081a76b4c | /Users/envvar/.codex/worktrees/cf47/workspace-agent-relay-mcp | codex/relay-architecture-hardening-w1 | f8527d6 | closed | controller reran pytest/node/build/diff-check | handoffs/W1.md | closed |
+| V1 | verifier | 20260629 | Relay Architecture Hardening: Verifier - Acceptance [V1] | controller | /Users/envvar/.codex/worktrees/cf47/workspace-agent-relay-mcp | codex/relay-architecture-hardening-w1 | f8527d6 | closed | pass | handoffs/V1.md | closed |
+| D1 | delivery | 20260629 | Relay Architecture Hardening: Main Publish [D1] | controller | /Users/envvar/.codex/worktrees/relay-hardening-main-publish | codex/relay-hardening-main-publish -> origin/main | ccf982d | pushed | pytest/node/build/diff-check + fast-forward push | handoffs/D1.md | closed |
+| A-BE | auditor | 20260629-reopen | Relay Hardening: Auditor - Backend [A-BE] | 019f13b1-3f1a-7b23-94cb-501efe72c822 | /Users/envvar/.codex/worktrees/7cd3/workspace-agent-relay-mcp | origin/main worktree | none | closed | R1/R4/R5/R6 closed; R2 blocker fixed by W2 and verified by V-FINAL | handoffs/A-BE.md | closed |
+| A-FE | auditor | 20260629-reopen | Relay Hardening: Auditor - Frontend [A-FE] | 019f13b1-3f1a-7b23-94cb-502b34bec9d5 | /Users/envvar/.codex/worktrees/a0e7/workspace-agent-relay-mcp | origin/main worktree | none | closed | R2 FE/R3/R9 FE closed | handoffs/A-FE.md | closed |
+| A-CM | auditor | 20260629-reopen | Relay Hardening: Auditor - Closure Matrix [A-CM] | 019f13b1-3f1a-7b23-94cb-5008c15ca5de | /Users/envvar/.codex/worktrees/d4f5/workspace-agent-relay-mcp | origin/main worktree | none | closed | R7/R8 closed | handoffs/A-CM.md | closed |
+| A-BE2 | auditor | 20260629-reopen | Relay Hardening: Auditor - Backend Replacement [A-BE2] | 019f13ba-7699-7b91-91be-89a7c0db24d8 | /Users/envvar/.codex/worktrees/73e6/workspace-agent-relay-mcp | origin/main worktree | none | superseded | original A-BE recovered before replacement needed | none | stand-down |
+| W2 | worker | 20260629-reopen | Relay Hardening: Worker - SSE Stream Fix [W2] | 019f13bd-b703-7af1-919b-ec5b0bfeb7dd | /Users/envvar/.codex/worktrees/3b45/workspace-agent-relay-mcp | codex/relay-sse-stream-smoke-w2 -> origin/main | 6d70122 | closed | controller full pytest/node/build + fast-forward push; V-FINAL reverified final ref | handoffs/W2.md | closed |
+| V-FINAL | verifier | 20260629-reopen | Relay Hardening: Verifier - Final Matrix [V-FINAL] | 019f13c6-9f0a-7f53-82f6-63fab7be1700 | /Users/envvar/.codex/worktrees/cf1c/workspace-agent-relay-mcp | detached HEAD == origin/main | 6d70122 | closed | R1-R9 closed; pytest/node/build/diff-check pass on `6d701225deab` | handoffs/V-FINAL.md | closed |
+
+## Noise Events
+
+- 2026-06-29: Controller checkout already dirty and `main` is ahead of `origin/main`; implementation will use isolated worktree from `origin/main` to avoid clobbering unowned work.
+- 2026-06-29: W1 create_thread returned pendingWorktreeId `local:9857cef0-c13e-46e4-99f6-048628ff0d69`; actual thread id pending launcher readback.
+- 2026-06-29: W1 readback showed actual worktree `/Users/envvar/.codex/worktrees/cf47/workspace-agent-relay-mcp`, branch `codex/relay-architecture-hardening-w1`, and initial failing/focused tests for lifecycle/API/tool-trace/composer controller.
+- 2026-06-29: Controller used direct verification instead of launching a separate V1 session because W1 had a clean committed worktree and the remaining V1 work was command/readback proof only. This reduced session overhead without reducing independence of proof commands.
+- 2026-06-29: Original W1 worktree path was no longer present at delivery time, but branch/commit `codex/relay-architecture-hardening-w1`/`f8527d6` remained in the repo. Controller created a fresh integration worktree from local `main`, cherry-picked W1, resolved one `RelayPage.tsx` conflict, verified, and pushed `ccf982d` to `origin/main`.
+- 2026-06-29: Process miss: controller prematurely marked the workflow complete without a report-wide closure matrix or independent per-item audit. User corrected the process. Workflow reopened with A-BE/A-FE/A-CM parallel auditors from `origin/main`.
+- 2026-06-29: A-BE was slow to write handoff; controller launched A-BE2 after closeout. Original A-BE recovered with useful evidence before A-BE2 was needed. A-BE2 was instructed to STAND DOWN; duplicate launch recorded as noise.
+- 2026-06-29: Final verifier used clean detached `origin/main` worktree for product proof because the canonical controller checkout remained dirty and behind; controller kept workflow artifacts local and out of product commits.
