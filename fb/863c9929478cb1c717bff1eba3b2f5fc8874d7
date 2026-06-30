@@ -1,0 +1,91 @@
+tests/test_skills_registry.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 1-69
+tests/test_web_api.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 348-532,969-1006
+  s_9b51c2be1ca495::t_59009394c04ed4 1007-1008
+docs/superpowers/specs/2026-06-30-local-agent-shell-protocol.md
+  s_9b51c2be1ca495::t_9d3869efec348d 1-276
+src/workspace_agent_relay_mcp/server.py
+  s_a30eac566bfbae::t_c2184d6a2c756b 70
+  s_9b51c2be1ca495::t_74a2d8da2eb099 62-65,72,286-372
+  s_9b51c2be1ca495::t_684c818d0dea1f 66,373-374
+frontend/tests/queueModel.test.mjs
+  s_9b51c2be1ca495::t_74a2d8da2eb099 8,26-44,64-96
+  s_9b51c2be1ca495::t_04887acdeda29e 97
+src/workspace_agent_relay_mcp/api/routes/workspaces.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 33-51,108
+  s_9b51c2be1ca495::t_e5b1f5e3020de2 9
+tests/test_mcp_callbacks.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 84-86,94-196
+  s_9b51c2be1ca495::t_5781b3eb087856 197-198
+docs/agent-instructions.md
+  s_a30eac566bfbae::t_749fadb7b62de9 89
+  s_a30eac566bfbae::t_3c892d1733e16b 166,176
+  s_9b51c2be1ca495::t_74a2d8da2eb099 121-122,129-139
+  s_9b51c2be1ca495::t_881c8b2ed241b3 42,140
+frontend/tests/composerController.test.mjs
+  s_9b51c2be1ca495::t_74a2d8da2eb099 38-84,121-164,166-168
+  s_9b51c2be1ca495::t_a6c5ca473a8559 165,169
+frontend/src/features/relay/queueModel.ts
+  s_9b51c2be1ca495::t_74a2d8da2eb099 1-2,6,11-12,40,44-52,87-111
+frontend/src/features/relay/hooks.ts
+  s_9b51c2be1ca495::t_74a2d8da2eb099 23-32,187-189,198-202,235-243,247-252,508,510-514
+src/workspace_agent_relay_mcp/local_context.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 1-107
+frontend/src/pages/RelayPage.tsx
+  s_9b51c2be1ca495::t_74a2d8da2eb099 10-19,250,275,307,314,324-328,332-336,400,443-447,476-486,623,626
+src/workspace_agent_relay_mcp/trigger.py
+  s_a30eac566bfbae::t_6a79fb1a632283 226-227
+  s_9b51c2be1ca495::t_74a2d8da2eb099 50,57-58,65-110,120-121,123-126,130,133-143,185-186,207-208,220-221
+frontend/src/features/relay/components/ThreadComposer.tsx
+  s_9b51c2be1ca495::t_74a2d8da2eb099 12-17,22-23,26-27,33,35,46,50-51,64,69,76-81,88,106-157,162-163,165,226,246-262,269-280,284,334,369-379,385,395,406,408,410,412-415,421,426,441,444,463-607,609
+  s_9b51c2be1ca495::t_abd68f1b7f7f90 608
+frontend/src/features/relay/composerController.ts
+  s_9b51c2be1ca495::t_74a2d8da2eb099 1-7,12-14,23,35,44,48,55,59-70,96,101
+src/workspace_agent_relay_mcp/workspace_directories.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 10,63-137
+  s_9b51c2be1ca495::t_ece6b21309e677 138-140
+tests/test_trigger_payload.py
+  s_a30eac566bfbae::t_8f67b4d3042db7 37-41
+  s_9b51c2be1ca495::t_74a2d8da2eb099 47-48,62,85,115,156-157,162-233
+  s_9b51c2be1ca495::t_5b72c7b714e369 234-235
+frontend/src/api/types.ts
+  s_9b51c2be1ca495::t_57da98d1d60d49 64,115
+  s_9b51c2be1ca495::t_74a2d8da2eb099 46-63,65-69
+  s_9b51c2be1ca495::t_b81a2c4df3ea23 70
+src/workspace_agent_relay_mcp/skills_registry.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 1-143
+src/workspace_agent_relay_mcp/store/relay_store.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 7,13,46,63-86,124-130,304,348,384,394,402,732-735,744,748,764-836,847-857,1011,1040-1043,1049,1052,1064,1070,1099,1120-1123,1139-1144,1152,1161,1172,1601-1717
+frontend/src/api/client.ts
+  s_9b51c2be1ca495::t_74a2d8da2eb099 4,12,183-196,240,245,272,277-280,291,301-315
+  s_9b51c2be1ca495::t_9dc5338a5b44b3 316
+src/workspace_agent_relay_mcp/api/routes/runs.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 9,12-13,21,77-95,163,167-169,176-177,246-252,257,270,306
+tests/test_local_context.py
+  s_9b51c2be1ca495::t_74a2d8da2eb099 1-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "fb863c9929478cb1c717bff1eba3b2f5fc8874d7",
+  "prompts": {},
+  "sessions": {
+    "s_9b51c2be1ca495": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f149c-a6c9-7ce1-9b11-740c2e2cb8c3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    },
+    "s_a30eac566bfbae": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f045082f-f780-40df-8cf9-fa627e923b65",
+        "model": "composer-2.5"
+      },
+      "human_author": "cat <git@chen.rs>"
+    }
+  }
+}
