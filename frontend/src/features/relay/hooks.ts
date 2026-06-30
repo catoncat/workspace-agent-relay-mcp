@@ -20,7 +20,16 @@ import {
   updateSettings,
   updateWorkspace,
 } from '@/api/client'
-import type { Agent, Conversation, RelaySettings, Run, RunDetail, RunStatus, Workspace } from '@/api/types'
+import type {
+  Agent,
+  Conversation,
+  LocalContext,
+  RelaySettings,
+  Run,
+  RunDetail,
+  RunStatus,
+  Workspace,
+} from '@/api/types'
 import {
   bootstrapOptions,
   runDetailOptions,
@@ -175,7 +184,9 @@ export function useDismissRun(conversationId: number | null) {
   })
 }
 
-type CreateRunMutationInput = string | { input: string; conversationId?: number | null }
+type CreateRunMutationInput =
+  | string
+  | { input: string; conversationId?: number | null; localContext?: LocalContext }
 
 export function useCreateRun(conversationId: number | null) {
   const queryClient = useQueryClient()
@@ -184,7 +195,11 @@ export function useCreateRun(conversationId: number | null) {
     mutationFn: async (value: CreateRunMutationInput) => {
       const resolved = resolveCreateRunMutationInput(value, conversationId)
       if (!resolved.conversationId) throw new Error('Select a conversation before sending a task.')
-      const { run, triggerFailed, warning } = await createRun(resolved.conversationId, resolved.input)
+      const { run, triggerFailed, warning } = await createRun(
+        resolved.conversationId,
+        resolved.input,
+        resolved.localContext,
+      )
       const detail = await getRunDetail(run.id)
       if (triggerFailed) {
         toast.warning(
@@ -217,11 +232,24 @@ export function useSteer(conversationId: number | null) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ input, runId }: { input: string; runId?: number | null }) => {
+    mutationFn: async ({
+      input,
+      localContext,
+      runId,
+    }: {
+      input: string
+      localContext?: LocalContext
+      runId?: number | null
+    }) => {
       if (!conversationId) throw new Error('Select a conversation before sending a task.')
       // steerConversation falls back to createRun on 409 (no active run), so
       // this returns a RunDetail either way.
-      const { run, triggerFailed, warning } = await steerConversation(conversationId, input, runId)
+      const { run, triggerFailed, warning } = await steerConversation(
+        conversationId,
+        input,
+        runId,
+        localContext,
+      )
       const detail = await getRunDetail(run.id)
       if (triggerFailed) {
         toast.warning(
@@ -477,9 +505,13 @@ function emptyRunDetail(run: Run | undefined): RunDetail {
 function resolveCreateRunMutationInput(
   value: CreateRunMutationInput,
   fallbackConversationId: number | null,
-): { input: string; conversationId: number | null } {
+): { input: string; conversationId: number | null; localContext?: LocalContext } {
   if (typeof value === 'string') return { input: value, conversationId: fallbackConversationId }
-  return { input: value.input, conversationId: value.conversationId ?? fallbackConversationId }
+  return {
+    input: value.input,
+    conversationId: value.conversationId ?? fallbackConversationId,
+    ...(value.localContext ? { localContext: value.localContext } : {}),
+  }
 }
 
 function applyConversationTitleEvent(queryClient: QueryClient, detail: RunDetail): void {

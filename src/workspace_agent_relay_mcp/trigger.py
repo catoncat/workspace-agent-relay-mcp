@@ -47,15 +47,64 @@ def _trigger_header(
     *,
     request_id: str,
     conversation_key: str,
+    turn_mode: str,
     working_directory: str | None = None,
 ) -> list[str]:
     lines = [
         f"request_id: {request_id}",
         f"conversation_key: {conversation_key}",
         "relay_mcp: workspace-agent-relay-mcp",
+        "protocol: local-agent-shell/v1",
+        f"turn_mode: {turn_mode}",
     ]
     if working_directory and working_directory.strip():
         lines.append(f"working_directory: {working_directory.strip()}")
+    return lines
+
+
+def _safe_text(value: Any, *, limit: int = 500) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    return text[:limit]
+
+
+def _render_local_context(
+    *,
+    local_context: dict[str, Any] | None = None,
+    available_skills: list[dict[str, Any]] | None = None,
+    include_available_skills: bool = False,
+) -> list[str]:
+    lines: list[str] = []
+    selected_files = []
+    if isinstance(local_context, dict) and isinstance(local_context.get("selected_files"), list):
+        selected_files = [item for item in local_context["selected_files"] if isinstance(item, dict)]
+    skills = available_skills or []
+    if not selected_files and not (include_available_skills and skills):
+        return lines
+    lines.append("Local context:")
+    if selected_files:
+        lines.append("selected_files:")
+        for item in selected_files:
+            lines.extend(
+                [
+                    f"  - path: {_safe_text(item.get('path'))}",
+                    f"    workspace_relative_path: {_safe_text(item.get('workspace_relative_path'))}",
+                    "    content: not_included",
+                    f"    reason: {_safe_text(item.get('reason') or 'user_selected', limit=80)}",
+                ]
+            )
+    if include_available_skills and skills:
+        lines.append("available_skills:")
+        for item in skills:
+            lines.extend(
+                [
+                    f"  - name: {_safe_text(item.get('name'), limit=120)}",
+                    f"    description: {_safe_text(item.get('description'), limit=300)}",
+                    f"    path: {_safe_text(item.get('path'))}",
+                    f"    scope: {_safe_text(item.get('scope'), limit=40)}",
+                ]
+            )
+    if lines:
+        lines.append("")
     return lines
 
 
@@ -68,12 +117,30 @@ def build_trigger_input(
     mode: str = "initial",
     answer: bool = False,
     working_directory: str | None = None,
+    local_context: dict[str, Any] | None = None,
+    available_skills: list[dict[str, Any]] | None = None,
 ) -> str:
+    if mode == "steer":
+        turn_mode = "answer" if answer else "steer"
+    else:
+        turn_mode = "continuation" if is_continuation else "initial"
     header = _trigger_header(
         request_id=request_id,
         conversation_key=conversation_key,
+        turn_mode=turn_mode,
         working_directory=working_directory,
     )
+    rendered_context = _render_local_context(
+        local_context=local_context,
+        available_skills=available_skills,
+        include_available_skills=turn_mode == "initial",
+    )
+    local_context_instruction = []
+    if rendered_context:
+        local_context_instruction = [
+            "Local context entries above are references only: selected_files include no file contents, and available_skills include only SKILL.md frontmatter metadata. Use local execution tools to inspect referenced paths when useful.",
+            "",
+        ]
     cwd_instruction = []
     if working_directory and working_directory.strip():
         cwd_instruction = [
@@ -115,6 +182,8 @@ def build_trigger_input(
             [
                 *header,
                 "",
+                *rendered_context,
+                *local_context_instruction,
                 *cwd_instruction,
                 lead,
                 resume,
@@ -135,6 +204,8 @@ def build_trigger_input(
             [
                 *header,
                 "",
+                *rendered_context,
+                *local_context_instruction,
                 *cwd_instruction,
                 "Same relay protocol as before: record_plan → notion-local-ops-mcp.bind_relay_run → record_progress(step_updates) → record_result, using the request_id above. Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as plan steps. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
                 "",
@@ -146,12 +217,14 @@ def build_trigger_input(
         [
             *header,
             "",
+            *rendered_context,
+            *local_context_instruction,
             *cwd_instruction,
             "Completion contract:",
             "The local operator CANNOT see your ChatGPT-side plan, tool calls, or reasoning. This relay is their only view of your work.",
             "This trigger starts ONE turn (one request_id scope). If the user corrects your direction mid-turn, call record_plan again with the new steps (and/or skip the old ones via record_progress step_updates) — do NOT use record_result to signal a plan change.",
-            "Before working, call workspace-agent-relay-mcp.record_plan with your step plan (each step needs a stable id and a title).",
-            "For this first turn of a newly created conversation, call workspace-agent-relay-mcp.update_conversation_title once after reading the user task. Use a concise title of 15 characters or fewer; the dashboard uses a timestamp fallback until you do.",
+            "After reading the user task, and on the first turn of a newly created conversation only, call workspace-agent-relay-mcp.update_conversation_title once. Use a concise title of 15 characters or fewer; the dashboard uses a timestamp fallback until you do.",
+            "Then call workspace-agent-relay-mcp.record_plan with your step plan (each step needs a stable id and a title).",
             "Keep record_plan user-visible: do not include relay binding, server_info, or routine tool setup as plan steps unless the user explicitly asked to debug that plumbing.",
             "Then call notion-local-ops-mcp.bind_relay_run with this request_id so your tool calls are mirrored to the operator automatically. You do not need to pass a relay_url; it is already configured locally. If notion-local-ops-mcp is unavailable, skip bind_relay_run and still call record_progress/record_result so the operator stays informed.",
             "After completing several steps, call workspace-agent-relay-mcp.record_progress with step_updates to batch-sync step statuses, optionally with a one-line message summarizing what you did.",

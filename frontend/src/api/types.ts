@@ -43,6 +43,31 @@ export type WorkspaceDirectoryBrowseResult = {
   truncated: boolean
 }
 
+export type WorkspaceFileEntry = {
+  name: string
+  path: string
+  workspace_relative_path: string
+  kind: 'file' | 'directory'
+}
+
+export type WorkspaceFileBrowseResult = {
+  root: string
+  path: string
+  parent: string | null
+  entries: WorkspaceFileEntry[]
+  truncated: boolean
+}
+
+export type SelectedFileContext = {
+  path: string
+  workspace_relative_path?: string
+  reason?: string
+}
+
+export type LocalContext = {
+  selected_files?: SelectedFileContext[]
+}
+
 export type Conversation = {
   id: number
   agent_id: number
@@ -87,6 +112,7 @@ export type Run = {
   superseded_by_run_id?: number | null
   supersede_reason?: string | null
   input_markdown: string
+  local_context?: LocalContext
   trigger_status: TriggerStatus
   trigger_http_status: number | null
   trigger_x_request_id: string | null

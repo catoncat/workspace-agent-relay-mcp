@@ -34,11 +34,18 @@ def test_build_trigger_input_contains_completion_contract() -> None:
     assert "callback_token" not in rendered
     assert "record_result" in rendered
     assert "update_conversation_title" in rendered
+    title_line = "call workspace-agent-relay-mcp.update_conversation_title once"
+    plan_line = "Then call workspace-agent-relay-mcp.record_plan"
+    assert title_line in rendered
+    assert plan_line in rendered
+    assert rendered.index(title_line) < rendered.index(plan_line)
     assert "15 characters or fewer" in rendered
     assert "Do not only answer in the ChatGPT conversation." in rendered
     assert "Keep record_plan user-visible" in rendered
     assert "If notion-local-ops-mcp is unavailable" in rendered
     assert rendered.endswith("Please research sherlog.")
+    assert "protocol: local-agent-shell/v1" in rendered
+    assert "turn_mode: initial" in rendered
 
 
 def test_build_trigger_input_continuation_is_compact() -> None:
@@ -52,6 +59,7 @@ def test_build_trigger_input_continuation_is_compact() -> None:
     )
 
     assert "request_id: relay_456" in rendered
+    assert "turn_mode: continuation" in rendered
     assert "callback_token" not in rendered
     assert "Same relay protocol as before" in rendered
     assert "Keep record_plan user-visible" in rendered
@@ -74,6 +82,7 @@ def test_build_trigger_input_steer_reuses_request_id_for_same_turn() -> None:
     )
 
     assert "request_id: relay_789" in rendered
+    assert "turn_mode: steer" in rendered
     assert "conversation_key: research:sherlog" in rendered
     assert "callback_token" not in rendered
     # Steer must reference same-turn continuation and plan revision.
@@ -103,6 +112,7 @@ def test_build_trigger_input_steer_answer_frames_ask_user_reply() -> None:
     )
 
     assert "request_id: relay_789" in rendered
+    assert "turn_mode: answer" in rendered
     assert "callback_token" not in rendered
     # Answer framing: references ask_user and asks the agent to RESUME the turn.
     assert "ask_user" in rendered
@@ -143,8 +153,84 @@ def test_build_trigger_input_includes_working_directory_header_when_present() ->
     assert "request_id: relay_123" in header
     assert "conversation_key: research:sherlog" in header
     assert "relay_mcp: workspace-agent-relay-mcp" in header
+    assert "protocol: local-agent-shell/v1" in header
+    assert "turn_mode: initial" in header
     assert "working_directory: /Users/envvar/work/repos/poke/workspace-agent-relay-mcp" in header
     assert rendered.endswith("Please research sherlog.")
+
+
+def test_build_trigger_input_renders_selected_file_references_without_content() -> None:
+    rendered = build_trigger_input(
+        request_id="relay_123",
+        conversation_key="research:sherlog",
+        user_input="Inspect the selected file.",
+        local_context={
+            "selected_files": [
+                {
+                    "path": "/workspace/src/app.py",
+                    "workspace_relative_path": "src/app.py",
+                    "reason": "user_selected",
+                    "content": "SECRET_FILE_CONTENT",
+                }
+            ]
+        },
+    )
+
+    assert "Local context:" in rendered
+    assert "selected_files:" in rendered
+    assert "path: /workspace/src/app.py" in rendered
+    assert "workspace_relative_path: src/app.py" in rendered
+    assert "content: not_included" in rendered
+    assert "SECRET_FILE_CONTENT" not in rendered
+
+
+def test_build_trigger_input_injects_skills_only_on_initial_turn() -> None:
+    skills = [
+        {
+            "name": "diagnose",
+            "description": "Disciplined diagnosis loop",
+            "path": "/Users/example/.agents/skills/diagnose/SKILL.md",
+            "scope": "global",
+            "body": "SECRET_SKILL_BODY",
+        }
+    ]
+
+    initial = build_trigger_input(
+        request_id="relay_initial",
+        conversation_key="research:sherlog",
+        user_input="Start",
+        available_skills=skills,
+    )
+    continuation = build_trigger_input(
+        request_id="relay_cont",
+        conversation_key="research:sherlog",
+        user_input="Continue",
+        is_continuation=True,
+        available_skills=skills,
+    )
+    steer = build_trigger_input(
+        request_id="relay_steer",
+        conversation_key="research:sherlog",
+        user_input="Guide",
+        mode="steer",
+        available_skills=skills,
+    )
+    answer = build_trigger_input(
+        request_id="relay_answer",
+        conversation_key="research:sherlog",
+        user_input="Answer",
+        mode="steer",
+        answer=True,
+        available_skills=skills,
+    )
+
+    assert "available_skills:" in initial
+    assert "name: diagnose" in initial
+    assert "Disciplined diagnosis loop" in initial
+    assert "SECRET_SKILL_BODY" not in initial
+    assert "available_skills:" not in continuation
+    assert "available_skills:" not in steer
+    assert "available_skills:" not in answer
 
 
 def test_build_trigger_input_omits_empty_working_directory_header() -> None:

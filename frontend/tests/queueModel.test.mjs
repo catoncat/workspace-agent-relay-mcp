@@ -5,6 +5,7 @@ import {
   appendQueuedMessage,
   editQueuedMessage,
   getQueuedMessagesForConversation,
+  mergeQueuedLocalContext,
   mergeQueuedMessages,
   removeQueuedMessage,
   takeQueuedMessage,
@@ -20,6 +21,25 @@ test('queued messages append in FIFO order and ignore blank input', () => {
     { id: 'q1', text: 'first' },
     { id: 'q2', text: 'second' },
   ])
+})
+
+test('queued messages retain selected file context', () => {
+  const localContext = {
+    selected_files: [
+      { path: '/repo/src/app.py', workspace_relative_path: 'src/app.py' },
+    ],
+  }
+
+  const queue = appendQueuedMessage([], ' inspect ', () => 'q1', localContext)
+
+  assert.deepEqual(queue, [
+    {
+      id: 'q1',
+      text: 'inspect',
+      localContext,
+    },
+  ])
+  assert.deepEqual(takeQueuedMessage(queue, 'q1').message?.localContext, localContext)
 })
 
 test('queued messages can be edited or removed without reordering remaining items', () => {
@@ -39,6 +59,40 @@ test('queued messages can be edited or removed without reordering remaining item
     { id: 'q1', text: 'first' },
     { id: 'q3', text: 'third' },
   ])
+})
+
+test('queued selected files merge deterministically and skip duplicate paths', () => {
+  const queue = [
+    {
+      id: 'q1',
+      text: 'first',
+      localContext: {
+        selected_files: [
+          { path: '/repo/a.py', workspace_relative_path: 'a.py' },
+          { path: '/repo/shared.py', workspace_relative_path: 'shared.py' },
+        ],
+      },
+    },
+    { id: 'q2', text: 'second' },
+    {
+      id: 'q3',
+      text: 'third',
+      localContext: {
+        selected_files: [
+          { path: '/repo/shared.py', workspace_relative_path: 'shared.py' },
+          { path: '/repo/b.py', workspace_relative_path: 'b.py' },
+        ],
+      },
+    },
+  ]
+
+  assert.deepEqual(mergeQueuedLocalContext(queue), {
+    selected_files: [
+      { path: '/repo/a.py', workspace_relative_path: 'a.py' },
+      { path: '/repo/shared.py', workspace_relative_path: 'shared.py' },
+      { path: '/repo/b.py', workspace_relative_path: 'b.py' },
+    ],
+  })
 })
 
 test('taking one queued message removes only that item for immediate guidance', () => {

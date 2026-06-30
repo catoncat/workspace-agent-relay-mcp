@@ -59,12 +59,17 @@ MCP_INSTRUCTIONS = (
     "This server (workspace-agent-relay-mcp) is the local operator's only window into the current turn. "
     "They cannot see ChatGPT-side planning, reasoning, or chat replies — only what you write here "
     "(and local tool traces after bind_relay_run on your local-ops MCP).\n"
-    "Relay workflow: record_plan first → bind_relay_run on your local execution MCP → batch record_progress(step_updates) → "
+    "Trigger inputs use protocol: local-agent-shell/v1 and turn_mode: initial|continuation|steer|answer. "
+    "Local context sections contain references only: selected_files are metadata pointers with content: not_included, "
+    "and available_skills are SKILL.md frontmatter summaries shown only on a newly created conversation's first turn. "
+    "Use selected file paths or skill paths with your local execution MCP when useful; this relay does not expose file contents. "
+    "Relay workflow: on a newly created conversation's first turn, update_conversation_title once after reading the user task (≤15 characters) → record_plan → bind_relay_run on your local execution MCP → batch record_progress(step_updates) → "
     "record_result once when the turn truly ends (done/failed/blocked). Plan changes use record_plan or skipped steps, not record_result. "
     "Do not use record_progress as the final answer channel; when you have delivered the requested answer or work, put the final Markdown in record_result and close the turn. "
     "A queued/new request arrives with a fresh request_id and needs its own record_result. A mid-turn follow-up (steer) arrives as another trigger with the SAME request_id (keep using that request_id for all further callbacks); treat it as guidance on the CURRENT turn — update the plan, do not start a new turn. The operator's answer to your ask_user arrives the same way, labeled 'Operator answered:'. "
-    "On the first turn of a newly created conversation, call update_conversation_title once after reading the user task; keep the title concise (15 characters or fewer). "
+    "Do not call update_conversation_title on steer, continuation, or later queued requests in the same conversation. "
     "If the trigger includes working_directory, treat it as the default cwd for that request_id; verify it before filesystem/git operations, do not guess a different repository, and explain before leaving it. "
+    "Use list_local_conversations/create_local_conversation/read_local_conversation for bounded relay-stored local conversation context; these tools are local-state only and do not dispatch Workspace Agent triggers. "
     "Keep record_plan user-visible: do not list relay binding, server_info, or routine tool setup as steps unless debugging that plumbing. "
     "ask_user pauses the turn; it is not completion — the operator's answer resumes the SAME turn (as a steer), so do not start a new turn when it arrives. blocked is for external hard blockers only.\n"
     "Every call returns the current plan snapshot. No shell/filesystem/git on this server — use your local-ops MCP for execution."
@@ -276,6 +281,95 @@ def get_run_context(
     limit: Annotated[int, Field(description="How many recent runs to return (1-20).", json_schema_extra={"minimum": 1, "maximum": 20})] = 5,
 ) -> dict[str, Any]:
     return store.get_run_context(conversation_key, limit=limit)
+
+
+@mcp.tool(
+    name="list_local_conversations",
+    title="List Local Conversations",
+    annotations=READ_ONLY_TOOL,
+    description=(
+        "List relay-stored local conversations for context discovery. "
+        "Returns public conversation fields plus a bounded latest-run summary. "
+        "Does not return agent access tokens, dashboard auth tokens, or local files."
+    ),
+)
+def list_local_conversations(
+    workspace_id: Annotated[int | None, Field(description="Optional workspace id filter.")] = None,
+    agent_id: Annotated[int | None, Field(description="Optional agent/backend id filter.")] = None,
+    limit: Annotated[int, Field(description="Maximum conversations to return, clamped to 1-100.", json_schema_extra={"minimum": 1, "maximum": 100})] = 50,
+    include_archived: Annotated[bool, Field(description="Whether to include archived conversations.")] = False,
+) -> dict[str, Any]:
+    try:
+        conversations = store.list_local_conversations(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            limit=limit,
+            include_archived=include_archived,
+        )
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "error": {"code": "invalid_request", "message": str(exc)}}
+    return {"success": True, "conversations": conversations}
+
+
+@mcp.tool(
+    name="create_local_conversation",
+    title="Create Local Conversation",
+    annotations=LOCAL_STATE_TOOL,
+    description=(
+        "Create a relay-local conversation record without dispatching a Workspace Agent trigger. "
+        "If conversation_key is omitted, the relay generates one. Defaults to the current agent/workspace settings."
+    ),
+)
+def create_local_conversation(
+    name: Annotated[str, Field(description="Conversation display name.")],
+    conversation_key: Annotated[str | None, Field(description="Optional stable conversation_key.")] = None,
+    agent_id: Annotated[int | None, Field(description="Optional agent/backend id. Defaults to current agent.")] = None,
+    workspace_id: Annotated[int | None, Field(description="Optional workspace id. Defaults to current workspace when configured.")] = None,
+) -> dict[str, Any]:
+    try:
+        resolved_workspace_id = workspace_id if workspace_id is not None else store.resolve_default_workspace_id()
+        conversation = store.create_local_conversation(
+            name=name,
+            conversation_key=conversation_key,
+            agent_id=agent_id,
+            workspace_id=resolved_workspace_id,
+        )
+    except (KeyError, ValueError) as exc:
+        return {"success": False, "error": {"code": "invalid_request", "message": str(exc)}}
+    except Exception as exc:
+        return {"success": False, "error": {"code": "create_failed", "message": str(exc)}}
+    return {"success": True, "conversation": conversation}
+
+
+@mcp.tool(
+    name="read_local_conversation",
+    title="Read Local Conversation",
+    annotations=READ_ONLY_TOOL,
+    description=(
+        "Read bounded relay-stored conversation context by conversation_id or conversation_key. "
+        "Returns public conversation fields, recent run summaries, plans, bounded event excerpts, and artifact metadata. "
+        "Artifact content is omitted unless include_artifacts=true, and even then content is excerpted."
+    ),
+)
+def read_local_conversation(
+    conversation_id: Annotated[int | None, Field(description="Conversation id. Provide exactly one of conversation_id or conversation_key.")] = None,
+    conversation_key: Annotated[str | None, Field(description="Conversation key. Provide exactly one of conversation_id or conversation_key.")] = None,
+    run_limit: Annotated[int, Field(description="Recent runs to return, clamped to 1-20.", json_schema_extra={"minimum": 1, "maximum": 20})] = 5,
+    event_limit_per_run: Annotated[int, Field(description="Events per run, clamped to 0-50.", json_schema_extra={"minimum": 0, "maximum": 50})] = 10,
+    include_artifacts: Annotated[bool, Field(description="Include bounded artifact content excerpts. Metadata is always safe to return.")] = False,
+) -> dict[str, Any]:
+    try:
+        return store.read_local_conversation(
+            conversation_id=conversation_id,
+            conversation_key=conversation_key,
+            run_limit=run_limit,
+            event_limit_per_run=event_limit_per_run,
+            include_artifacts=include_artifacts,
+        )
+    except KeyError as exc:
+        return {"success": False, "error": {"code": "not_found", "message": str(exc)}}
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "error": {"code": "invalid_request", "message": str(exc)}}
 
 
 def build_http_app():

@@ -4,11 +4,13 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 import json
 import re
+import secrets
 import sqlite3
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
+from ..local_context import normalize_local_context
 from ..run_lifecycle import (
     TERMINAL_STATUSES,
     TRIGGER_MUTABLE_RUN_STATUSES,
@@ -41,7 +43,7 @@ RUN_PUBLIC_COLUMNS = (
     "workspace_id, working_directory_snapshot, "
     "parent_run_id, superseded_by_run_id, supersede_reason, trigger_error, "
     "idempotency_key, input_markdown, trigger_status, trigger_http_status, "
-    "trigger_x_request_id, conversation_url, status, created_at, updated_at, completed_at"
+    "trigger_x_request_id, conversation_url, status, local_context_json, created_at, updated_at, completed_at"
 )
 APP_SETTING_CURRENT_AGENT_ID = "current_agent_id"
 APP_SETTING_CURRENT_WORKSPACE_ID = "current_workspace_id"
@@ -56,6 +58,30 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return {key: row[key] for key in row.keys()}
+
+
+def _json_loads_object(value: Any) -> dict[str, Any]:
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_loads_array(value: Any) -> list[Any]:
+    try:
+        parsed = json.loads(str(value or "[]"))
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _run_row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    payload = _row_to_dict(row)
+    if payload is None:
+        return None
+    payload["local_context"] = _json_loads_object(payload.pop("local_context_json", "{}"))
+    return payload
 
 
 def _json_dumps(value: Any) -> str:
@@ -93,6 +119,13 @@ def _normalize_conversation_title(value: Any) -> str:
     if len(title) > MAX_CONVERSATION_TITLE_LEN:
         raise ValueError(f"title must not exceed {MAX_CONVERSATION_TITLE_LEN} characters")
     return title
+
+
+def _normalize_conversation_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise ValueError("name must not be empty")
+    return name
 
 
 def _normalize_plan_steps(steps: Any) -> list[dict[str, Any]]:
@@ -268,6 +301,7 @@ class RelayStore:
                     trigger_x_request_id TEXT,
                     conversation_url TEXT,
                     status TEXT NOT NULL DEFAULT 'draft',
+                    local_context_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     completed_at TEXT
@@ -311,6 +345,7 @@ class RelayStore:
                 "supersede_reason": "TEXT",
                 "workspace_id": "INTEGER",
                 "working_directory_snapshot": "TEXT",
+                "local_context_json": "TEXT NOT NULL DEFAULT '{}'",
             }
             for column, column_type in run_migrations.items():
                 if column not in cols:
@@ -346,6 +381,7 @@ class RelayStore:
                         trigger_x_request_id TEXT,
                         conversation_url TEXT,
                         status TEXT NOT NULL DEFAULT 'draft',
+                        local_context_json TEXT NOT NULL DEFAULT '{}',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
                         completed_at TEXT
@@ -355,7 +391,7 @@ class RelayStore:
                         workspace_id, working_directory_snapshot,
                         parent_run_id, superseded_by_run_id, supersede_reason, trigger_error,
                         idempotency_key, input_markdown, trigger_status, trigger_http_status,
-                        trigger_x_request_id, conversation_url, status, created_at, updated_at,
+                        trigger_x_request_id, conversation_url, status, local_context_json, created_at, updated_at,
                         completed_at
                     )
                     SELECT
@@ -363,7 +399,7 @@ class RelayStore:
                         workspace_id, working_directory_snapshot,
                         parent_run_id, superseded_by_run_id, supersede_reason, trigger_error,
                         idempotency_key, input_markdown, trigger_status, trigger_http_status,
-                        trigger_x_request_id, conversation_url, status, created_at, updated_at,
+                        trigger_x_request_id, conversation_url, status, local_context_json, created_at, updated_at,
                         completed_at
                     FROM runs;
                     DROP TABLE runs;
@@ -693,6 +729,10 @@ class RelayStore:
         workspace_id: int | None = None,
     ) -> dict[str, Any]:
         now = _now()
+        normalized_name = _normalize_conversation_name(name)
+        normalized_key = str(conversation_key or "").strip()
+        if not normalized_key:
+            raise ValueError("conversation_key must not be empty")
         with self._lock, self._connect() as conn:
             if workspace_id is not None and not self._workspace_exists_conn(conn, int(workspace_id)):
                 raise KeyError(f"Workspace not found: {workspace_id}")
@@ -701,11 +741,11 @@ class RelayStore:
                 INSERT INTO conversations (agent_id, workspace_id, name, conversation_key, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (agent_id, workspace_id, name, conversation_key, now, now),
+                (agent_id, workspace_id, normalized_name, normalized_key, now, now),
             )
             row = conn.execute(
                 f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE conversation_key = ?",
-                (conversation_key,),
+                (normalized_key,),
             ).fetchone()
         return _row_to_dict(row) or {}
 
@@ -721,6 +761,79 @@ class RelayStore:
             ).fetchall()
         return [_row_to_dict(row) or {} for row in rows]
 
+    def list_local_conversations(
+        self,
+        *,
+        workspace_id: int | None = None,
+        agent_id: int | None = None,
+        limit: int = 50,
+        include_archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        capped_limit = max(1, min(int(limit), 100))
+        where = []
+        params: list[Any] = []
+        if not include_archived:
+            where.append("archived_at IS NULL")
+        if workspace_id is not None:
+            where.append("workspace_id = ?")
+            params.append(int(workspace_id))
+        if agent_id is not None:
+            where.append("agent_id = ?")
+            params.append(int(agent_id))
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        params.append(capped_limit)
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {CONVERSATION_PUBLIC_COLUMNS}
+                FROM conversations
+                {where_sql}
+                ORDER BY (pinned_at IS NULL) ASC, pinned_at DESC, updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            conversations = [_row_to_dict(row) or {} for row in rows]
+            for conversation in conversations:
+                latest = conn.execute(
+                    f"""
+                    SELECT {RUN_PUBLIC_COLUMNS}
+                    FROM runs
+                    WHERE conversation_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (conversation["id"],),
+                ).fetchone()
+                run = _run_row_to_dict(latest)
+                conversation["latest_run"] = self._public_run_summary(run) if run else None
+        return conversations
+
+    def create_local_conversation(
+        self,
+        *,
+        name: str,
+        conversation_key: str | None = None,
+        agent_id: int | None = None,
+        workspace_id: int | None = None,
+    ) -> dict[str, Any]:
+        resolved_agent_id = int(agent_id) if agent_id is not None else self.resolve_default_agent_id()
+        key = str(conversation_key or "").strip()
+        for _ in range(10):
+            candidate = key or f"local:{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}:{secrets.token_hex(4)}"
+            try:
+                return self.create_conversation(
+                    agent_id=resolved_agent_id,
+                    workspace_id=workspace_id,
+                    name=name,
+                    conversation_key=candidate,
+                )
+            except sqlite3.IntegrityError:
+                if key:
+                    raise
+                continue
+        raise sqlite3.IntegrityError("could not generate a unique conversation_key")
+
     def get_conversation(self, conversation_id: int) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
             row = conn.execute(
@@ -729,6 +842,17 @@ class RelayStore:
             ).fetchone()
         if row is None:
             raise KeyError(f"Conversation not found: {conversation_id}")
+        return _row_to_dict(row) or {}
+
+    def get_conversation_by_key(self, conversation_key: str) -> dict[str, Any]:
+        key = str(conversation_key or "").strip()
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE conversation_key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Conversation not found: {key}")
         return _row_to_dict(row) or {}
 
     def get_agent_by_trigger_id(self, trigger_id: str) -> dict[str, Any] | None:
@@ -884,6 +1008,7 @@ class RelayStore:
         input_markdown: str,
         idempotency_key: str,
         request_id: str,
+        local_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         now = _now()
         with self._lock, self._connect(immediate=True) as conn:
@@ -912,15 +1037,19 @@ class RelayStore:
                 ).fetchone()
                 if workspace is not None:
                     working_directory_snapshot = workspace["working_directory"]
+            normalized_local_context = normalize_local_context(
+                local_context,
+                working_directory_snapshot=working_directory_snapshot,
+            )
             conn.execute(
                 """
                 INSERT INTO runs (
                     request_id, agent_id, conversation_id, conversation_key,
                     workspace_id, working_directory_snapshot,
-                    idempotency_key, input_markdown, parent_run_id,
+                    idempotency_key, input_markdown, parent_run_id, local_context_json,
                     status, trigger_status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'draft', ?, ?)
                 """,
                 (
                     request_id,
@@ -932,12 +1061,13 @@ class RelayStore:
                     idempotency_key,
                     input_markdown,
                     parent_run_id,
+                    _json_dumps(normalized_local_context),
                     now,
                     now,
                 ),
             )
             row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE request_id = ?", (request_id,)).fetchone()
-        payload = _row_to_dict(row) or {}
+        payload = _run_row_to_dict(row) or {}
         self._notify_run(int(payload["id"]))
         return payload
 
@@ -966,6 +1096,7 @@ class RelayStore:
         *,
         run_id: int,
         user_input: str,
+        local_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Operator adds a mid-turn instruction to an active run (steer).
 
@@ -986,6 +1117,10 @@ class RelayStore:
             run = _row_to_dict(row) or {}
             if run["status"] in TERMINAL_STATUSES:
                 raise ValueError("Run is already terminal; send a new turn instead.")
+            normalized_local_context = normalize_local_context(
+                local_context,
+                working_directory_snapshot=run.get("working_directory_snapshot"),
+            )
             # Answering a paused question (needs_user) resumes the turn: a fresh
             # trigger is about to be dispatched, so the run leaves the question
             # state. Reset to "sent" so the upcoming trigger-result update advances
@@ -1001,6 +1136,12 @@ class RelayStore:
                 """,
                 (next_status, now, run_id),
             )
+            event_payload: dict[str, Any] = {
+                "source": "operator_steer",
+                "turn_ord": self._dashboard_steer_count_conn(conn, run_id) + 1,
+            }
+            if normalized_local_context:
+                event_payload["local_context"] = normalized_local_context
             self._append_event_conn(
                 conn,
                 run_id=run_id,
@@ -1008,10 +1149,7 @@ class RelayStore:
                 event_type="user_message",
                 title=None,
                 markdown=user_input,
-                payload={
-                    "source": "operator_steer",
-                    "turn_ord": self._dashboard_steer_count_conn(conn, run_id) + 1,
-                },
+                payload=event_payload,
             )
         self._notify_run(run_id)
         return self.get_run(run_id)
@@ -1020,7 +1158,7 @@ class RelayStore:
         row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE request_id = ?", (request_id,)).fetchone()
         if row is None:
             raise KeyError(f"Run not found: {request_id}")
-        return _row_to_dict(row) or {}
+        return _run_row_to_dict(row) or {}
 
     def get_run_by_request_id(self, request_id: str) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
@@ -1031,7 +1169,7 @@ class RelayStore:
             row = conn.execute(f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE id = ?", (run_id,)).fetchone()
         if row is None:
             raise KeyError(f"Run not found: {run_id}")
-        return _row_to_dict(row) or {}
+        return _run_row_to_dict(row) or {}
 
     def _get_plan_conn(self, conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
         row = conn.execute("SELECT * FROM plans WHERE run_id = ?", (run_id,)).fetchone()
@@ -1460,7 +1598,123 @@ class RelayStore:
                 f"SELECT {RUN_PUBLIC_COLUMNS} FROM runs WHERE conversation_id = ? ORDER BY id DESC",
                 (conversation_id,),
             ).fetchall()
-        return [_row_to_dict(row) or {} for row in rows]
+        return [_run_row_to_dict(row) or {} for row in rows]
+
+    @staticmethod
+    def _public_run_summary(run: dict[str, Any] | None) -> dict[str, Any] | None:
+        if run is None:
+            return None
+        return {
+            "id": run.get("id"),
+            "request_id": run.get("request_id"),
+            "conversation_key": run.get("conversation_key"),
+            "status": run.get("status"),
+            "trigger_status": run.get("trigger_status"),
+            "input_markdown_excerpt": str(run.get("input_markdown") or "")[:500],
+            "created_at": run.get("created_at"),
+            "updated_at": run.get("updated_at"),
+            "completed_at": run.get("completed_at"),
+        }
+
+    @staticmethod
+    def _public_event(event: dict[str, Any], *, excerpt_limit: int = 2000) -> dict[str, Any]:
+        markdown = str(event.get("markdown") or "")
+        return {
+            "id": event.get("id"),
+            "event_type": event.get("event_type"),
+            "title": event.get("title"),
+            "markdown_excerpt": markdown[:excerpt_limit],
+            "markdown_truncated": len(markdown) > excerpt_limit,
+            "payload": _json_loads_object(event.get("payload_json")),
+            "created_at": event.get("created_at"),
+        }
+
+    @staticmethod
+    def _public_artifact(artifact: dict[str, Any], *, include_content: bool = False, content_limit: int = 4000) -> dict[str, Any]:
+        content = str(artifact.get("content") or "")
+        public = {
+            "id": artifact.get("id"),
+            "run_id": artifact.get("run_id"),
+            "name": artifact.get("name"),
+            "mime_type": artifact.get("mime_type"),
+            "metadata": _json_loads_object(artifact.get("metadata_json")),
+            "created_at": artifact.get("created_at"),
+        }
+        if include_content:
+            public["content_excerpt"] = content[:content_limit]
+            public["content_truncated"] = len(content) > content_limit
+        return public
+
+    def read_local_conversation(
+        self,
+        *,
+        conversation_id: int | None = None,
+        conversation_key: str | None = None,
+        run_limit: int = 5,
+        event_limit_per_run: int = 10,
+        include_artifacts: bool = False,
+    ) -> dict[str, Any]:
+        if (conversation_id is None) == (conversation_key is None):
+            raise ValueError("exactly one of conversation_id or conversation_key is required")
+        capped_run_limit = max(1, min(int(run_limit), 20))
+        capped_event_limit = max(0, min(int(event_limit_per_run), 50))
+        with self._lock, self._connect() as conn:
+            if conversation_id is not None:
+                conversation_row = conn.execute(
+                    f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE id = ?",
+                    (int(conversation_id),),
+                ).fetchone()
+            else:
+                conversation_row = conn.execute(
+                    f"SELECT {CONVERSATION_PUBLIC_COLUMNS} FROM conversations WHERE conversation_key = ?",
+                    (str(conversation_key or "").strip(),),
+                ).fetchone()
+            if conversation_row is None:
+                raise KeyError("Conversation not found")
+            conversation = _row_to_dict(conversation_row) or {}
+            run_rows = conn.execute(
+                f"""
+                SELECT {RUN_PUBLIC_COLUMNS}
+                FROM runs
+                WHERE conversation_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (conversation["id"], capped_run_limit),
+            ).fetchall()
+            runs: list[dict[str, Any]] = []
+            for row in run_rows:
+                run = _run_row_to_dict(row) or {}
+                event_rows = conn.execute(
+                    """
+                    SELECT id, run_id, request_id, event_type, title, markdown, payload_json, created_at
+                    FROM events
+                    WHERE run_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (run["id"], capped_event_limit),
+                ).fetchall()
+                events = [_row_to_dict(event_row) or {} for event_row in reversed(event_rows)]
+                artifact_rows = conn.execute(
+                    "SELECT * FROM artifacts WHERE run_id = ? ORDER BY id",
+                    (run["id"],),
+                ).fetchall()
+                runs.append(
+                    {
+                        "run": self._public_run_summary(run),
+                        "plan": self._get_plan_conn(conn, int(run["id"])),
+                        "events": [self._public_event(event) for event in events],
+                        "artifacts": [
+                            self._public_artifact(
+                                _row_to_dict(artifact_row) or {},
+                                include_content=include_artifacts,
+                            )
+                            for artifact_row in artifact_rows[:20]
+                        ],
+                    }
+                )
+        return {"success": True, "conversation": conversation, "runs": runs}
 
     def get_run_context(self, conversation_key: str, limit: int = 5) -> dict[str, Any]:
         capped_limit = max(1, min(int(limit), 20))

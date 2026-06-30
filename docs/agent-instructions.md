@@ -39,7 +39,7 @@ For local coding, shell work, repository work, debugging, file operations, and v
 
 ## Operating Model
 
-In these instructions, Relay means `<YOUR_RELAY_MCP>`, the MCP connector that exposes relay tools including `record_plan`, `record_progress`, `ask_user`, `record_result`, `update_conversation_title`, and `get_run_context`.
+In these instructions, Relay means `<YOUR_RELAY_MCP>`, the MCP connector that exposes relay tools including `record_plan`, `record_progress`, `ask_user`, `record_result`, `update_conversation_title`, `get_run_context`, `list_local_conversations`, `create_local_conversation`, and `read_local_conversation`.
 
 In these instructions, Local Computer means `<YOUR_LOCAL_OPS_MCP>`, the local execution MCP connector that exposes `bind_relay_run` and local file, shell, and git tools.
 
@@ -86,7 +86,7 @@ The agent MUST NOT force call consolidation when a combined call would be riskie
 
 This economy rule applies only to Local Computer.
 
-The agent MUST NOT merge, skip, weaken, or substitute required Relay calls such as `<YOUR_RELAY_MCP>.record_plan`, `<YOUR_RELAY_MCP>.record_progress`, `<YOUR_RELAY_MCP>.ask_user`, or `<YOUR_RELAY_MCP>.record_result`.
+The agent MUST NOT merge, skip, weaken, or substitute required Relay calls such as `<YOUR_RELAY_MCP>.record_plan`, `<YOUR_RELAY_MCP>.record_progress`, `<YOUR_RELAY_MCP>.ask_user`, or `<YOUR_RELAY_MCP>.record_result`. On the first queued/new request for a newly created conversation, the agent MUST NOT skip `<YOUR_RELAY_MCP>.update_conversation_title`.
 
 ## Core Rules
 
@@ -118,11 +118,25 @@ Relay mode is active if and only if the input includes all of the following fiel
 - `conversation_key`
 - `relay_mcp: <YOUR_RELAY_MCP>`
 
+The trigger also includes `protocol: local-agent-shell/v1` and `turn_mode: initial|continuation|steer|answer`.
+
 The trigger MAY also include `working_directory`, which is the dashboard's directory snapshot for this run.
 
 If all three fields are present, the agent MUST enter relay mode.
 
 If any of the three fields is absent, the agent MUST NOT assume relay mode unless another explicit callback contract is provided.
+
+### Local Context
+
+The trigger MAY include a `Local context:` section.
+
+`selected_files` entries are local file references only. They contain absolute paths, optional workspace-relative paths, `reason: user_selected`, and `content: not_included`. The agent MUST NOT assume the relay embedded file contents. When the task requires reading a selected file, the agent MUST use Local Computer file tools against the referenced path after verifying `working_directory`.
+
+`available_skills` entries are SKILL.md metadata only. They include `name`, `description`, `path`, and `scope`. They appear only on the first queued/new request for a newly created local conversation. The agent MUST NOT assume the full SKILL.md body was embedded. Before applying a skill, the agent SHOULD read the referenced SKILL.md with Local Computer when that path is available.
+
+Continuation, steer, and answer triggers MUST NOT rely on `available_skills` being repeated. Selected files are per-trigger context and MAY appear on any `turn_mode`.
+
+For relay-stored local conversation context, the agent MAY use `<YOUR_RELAY_MCP>.list_local_conversations`, `<YOUR_RELAY_MCP>.create_local_conversation`, and `<YOUR_RELAY_MCP>.read_local_conversation`. These tools operate on local relay state only and MUST NOT be treated as Workspace Agent trigger dispatch.
 
 In relay mode, visible ChatGPT replies are not a sufficient outward communication channel. The operator is expected to rely on:
 
@@ -149,6 +163,7 @@ In relay mode, the following workflow is mandatory.
 
 ### Required sequence
 
+0. On the first queued/new request for a newly created conversation only, after reading the user task and before `<YOUR_RELAY_MCP>.record_plan`, the agent MUST call `<YOUR_RELAY_MCP>.update_conversation_title` once with a concise title no longer than 15 characters. The dashboard uses a timestamp fallback until this tool is called.
 1. The agent MUST call `<YOUR_RELAY_MCP>.record_plan` before any substantive execution, implementation, or verification work.
 2. The agent MUST call `<YOUR_LOCAL_OPS_MCP>.bind_relay_run` immediately after `<YOUR_RELAY_MCP>.record_plan`, using the incoming `request_id`, and `conversation_key` if the tool schema accepts it.
 3. After binding succeeds, the agent MUST perform substantive execution on Local Computer.
@@ -158,6 +173,7 @@ In relay mode, the following workflow is mandatory.
 
 ### Hard requirements
 
+- On the first queued/new request for a newly created conversation, the agent MUST NOT skip `<YOUR_RELAY_MCP>.update_conversation_title`, and MUST call it before `<YOUR_RELAY_MCP>.record_plan`.
 - The agent MUST NOT skip `<YOUR_RELAY_MCP>.record_plan`, `<YOUR_LOCAL_OPS_MCP>.bind_relay_run`, `<YOUR_RELAY_MCP>.record_progress`, or `<YOUR_RELAY_MCP>.record_result`.
 - The agent MUST NOT reorder the required sequence.
 - The agent MUST NOT do substantive local work before `<YOUR_RELAY_MCP>.record_plan` and `<YOUR_LOCAL_OPS_MCP>.bind_relay_run`.

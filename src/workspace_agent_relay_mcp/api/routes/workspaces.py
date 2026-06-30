@@ -6,7 +6,7 @@ from starlette.requests import Request
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 
-from ...workspace_directories import browse_directory
+from ...workspace_directories import browse_directory, browse_workspace_files
 from ..deps import json_body
 from ..errors import json_error
 from ..validation import missing_fields
@@ -22,6 +22,25 @@ def workspace_routes(store: Any) -> list[tuple]:
                 browse_directory,
                 request.query_params.get("path"),
             )
+        except PermissionError as exc:
+            return json_error(str(exc), status_code=403)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        except OSError as exc:
+            return json_error(str(exc), status_code=500)
+        return JSONResponse(payload)
+
+    async def browse_workspace_files_route(request: Request) -> JSONResponse:
+        workspace_id = int(request.path_params["workspace_id"])
+        try:
+            workspace = store.get_workspace(workspace_id)
+            payload = await run_in_threadpool(
+                browse_workspace_files,
+                root=workspace.get("working_directory"),
+                path=request.query_params.get("path") or workspace.get("working_directory"),
+            )
+        except KeyError as exc:
+            return json_error(str(exc), status_code=404)
         except PermissionError as exc:
             return json_error(str(exc), status_code=403)
         except ValueError as exc:
@@ -86,6 +105,7 @@ def workspace_routes(store: Any) -> list[tuple]:
     return [
         ("/api/workspaces", list_workspaces, ["GET"]),
         ("/api/workspaces/browse-directories", browse_workspace_directories, ["GET"]),
+        ("/api/workspaces/{workspace_id:int}/browse-files", browse_workspace_files_route, ["GET"]),
         ("/api/workspaces/pick-directory", pick_workspace_directory, ["GET", "POST"]),
         ("/api/workspaces", create_workspace, ["POST"]),
         ("/api/workspaces/{workspace_id:int}", update_workspace, ["PATCH"]),

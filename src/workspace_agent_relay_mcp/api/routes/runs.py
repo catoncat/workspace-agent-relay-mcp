@@ -6,8 +6,11 @@ import sqlite3
 from typing import Any
 
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse, StreamingResponse
 
+from ...local_context import normalize_local_context
+from ...skills_registry import list_available_skills
 from ...store.relay_store import TERMINAL_STATUSES, USER_REPLY_STATUSES
 from ...store.bus import RunEventBus
 from ...trigger import (
@@ -15,6 +18,7 @@ from ...trigger import (
     build_trigger_input,
     generate_request_id,
 )
+from ...workspace_directories import browse_workspace_files
 from ..deps import json_body
 from ..errors import json_error
 from ..validation import resolve_agent_token, validate_trigger_url
@@ -69,6 +73,25 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             return JSONResponse(_run_detail(store, run_id))
         except KeyError as exc:
             return json_error(str(exc), status_code=404)
+
+    async def browse_run_files(request: Request) -> JSONResponse:
+        run_id = int(request.path_params["run_id"])
+        try:
+            run = store.get_run(run_id)
+            payload = await run_in_threadpool(
+                browse_workspace_files,
+                root=run.get("working_directory_snapshot"),
+                path=request.query_params.get("path") or run.get("working_directory_snapshot"),
+            )
+        except KeyError as exc:
+            return json_error(str(exc), status_code=404)
+        except PermissionError as exc:
+            return json_error(str(exc), status_code=403)
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        except OSError as exc:
+            return json_error(str(exc), status_code=500)
+        return JSONResponse(payload)
 
     async def stream_run(request: Request):
         run_id = int(request.path_params["run_id"])
@@ -137,15 +160,21 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
                 input_markdown=input_markdown,
                 idempotency_key=idempotency_key,
                 request_id=request_id,
+                local_context=payload.get("local_context"),
             )
         except (KeyError, ValueError, sqlite3.IntegrityError) as exc:
             return json_error(str(exc), status_code=400)
+        available_skills = []
+        if not is_continuation:
+            available_skills = list_available_skills(working_directory=run.get("working_directory_snapshot"))
         trigger_input = build_trigger_input(
             request_id=request_id,
             conversation_key=conversation_key,
             user_input=input_markdown,
             is_continuation=is_continuation,
             working_directory=run.get("working_directory_snapshot"),
+            local_context=run.get("local_context"),
+            available_skills=available_skills,
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         run = store.mark_run_trigger_sent(request_id)
@@ -215,9 +244,17 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         request_id = str(active["request_id"])
         idempotency_key = generate_request_id("idem")
         try:
+            local_context = normalize_local_context(
+                payload.get("local_context"),
+                working_directory_snapshot=active.get("working_directory_snapshot"),
+            )
+        except ValueError as exc:
+            return json_error(str(exc), status_code=400)
+        try:
             run = store.steer_run(
                 run_id=int(active["id"]),
                 user_input=input_markdown,
+                local_context=local_context,
             )
         except KeyError as exc:
             return json_error(str(exc), status_code=404)
@@ -230,6 +267,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
             mode="steer",
             answer=is_answer,
             working_directory=run.get("working_directory_snapshot"),
+            local_context=local_context,
         )
         trigger_client = getattr(request.app.state, "trigger_client", None) or TriggerClient()
         schedule_trigger_dispatch(
@@ -265,6 +303,7 @@ def run_routes(store: Any, config: Any, event_bus: RunEventBus) -> list[tuple]:
         ("/api/conversations/{conversation_id:int}/runs", create_run, ["POST"]),
         ("/api/conversations/{conversation_id:int}/steer", steer_run, ["POST"]),
         ("/api/runs/{run_id:int}", get_run_detail, ["GET"]),
+        ("/api/runs/{run_id:int}/browse-files", browse_run_files, ["GET"]),
         ("/api/runs/{run_id:int}/stream", stream_run, ["GET"]),
         ("/api/runs/{run_id:int}/dismiss", dismiss_run, ["POST"]),
     ]

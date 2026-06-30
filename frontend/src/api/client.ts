@@ -1,6 +1,7 @@
 import type {
   Agent,
   Conversation,
+  LocalContext,
   RelaySettings,
   Run,
   RunDetail,
@@ -8,6 +9,7 @@ import type {
   TokenRef,
   Workspace,
   WorkspaceDirectoryBrowseResult,
+  WorkspaceFileBrowseResult,
 } from './types'
 
 // This dashboard is a local/admin surface. localStorage keeps setup simple, but it is not
@@ -178,6 +180,20 @@ export async function browseWorkspaceDirectories(
   return api(`/api/workspaces/browse-directories${query}`)
 }
 
+export async function browseWorkspaceFiles(
+  workspaceId: number,
+  path?: string | null,
+): Promise<WorkspaceFileBrowseResult> {
+  return api(`/api/workspaces/${workspaceId}/browse-files${fileBrowseQuery(path)}`)
+}
+
+export async function browseRunFiles(
+  runId: number,
+  path?: string | null,
+): Promise<WorkspaceFileBrowseResult> {
+  return api(`/api/runs/${runId}/browse-files${fileBrowseQuery(path)}`)
+}
+
 export async function updateWorkspace(
   workspaceId: number,
   body: {
@@ -221,11 +237,12 @@ export type CreateRunResponse = {
 export async function createRun(
   conversationId: number,
   input_markdown: string,
+  localContext?: LocalContext,
 ): Promise<CreateRunResponse> {
   const response = await fetch(`/api/conversations/${conversationId}/runs`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ input_markdown }),
+    body: JSON.stringify(runRequestBody(input_markdown, localContext)),
   })
   const text = await response.text()
   let body: unknown = null
@@ -252,11 +269,15 @@ export async function steerConversation(
   conversationId: number,
   input_markdown: string,
   runId?: number | null,
+  localContext?: LocalContext,
 ): Promise<CreateRunResponse> {
   const response = await fetch(`/api/conversations/${conversationId}/steer`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ input_markdown, ...(runId ? { run_id: runId } : {}) }),
+    body: JSON.stringify({
+      ...runRequestBody(input_markdown, localContext),
+      ...(runId ? { run_id: runId } : {}),
+    }),
   })
   const text = await response.text()
   let body: unknown = null
@@ -267,7 +288,7 @@ export async function steerConversation(
   }
 
   if (response.status === 409) {
-    return createRun(conversationId, input_markdown)
+    return createRun(conversationId, input_markdown, localContext)
   }
 
   if (response.ok && body && typeof body === 'object' && 'id' in body) {
@@ -275,6 +296,22 @@ export async function steerConversation(
   }
 
   throw new Error(formatApiError(text))
+}
+
+function fileBrowseQuery(path?: string | null): string {
+  const trimmed = path?.trim()
+  return trimmed ? `?${new URLSearchParams({ path: trimmed })}` : ''
+}
+
+function runRequestBody(input_markdown: string, localContext?: LocalContext): {
+  input_markdown: string
+  local_context?: LocalContext
+} {
+  const selectedFiles = localContext?.selected_files?.filter((file) => file.path.trim()) ?? []
+  return {
+    input_markdown,
+    ...(selectedFiles.length > 0 ? { local_context: { selected_files: selectedFiles } } : {}),
+  }
 }
 
 export function streamRun(

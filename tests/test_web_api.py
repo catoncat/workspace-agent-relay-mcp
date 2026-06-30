@@ -345,6 +345,191 @@ def test_api_browse_workspace_directories_defaults_to_server_cwd(
     assert body["entries"] == [{"name": "repo", "path": str((browse_root / "repo").resolve())}]
 
 
+def test_api_browse_workspace_files_lists_metadata_and_rejects_escape(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    workspace_dir.mkdir()
+    (workspace_dir / "pkg").mkdir()
+    app_file = workspace_dir / "app.py"
+    app_file.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with client:
+        workspace = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(workspace_dir)},
+        ).json()
+        response = client.get(
+            f"/api/workspaces/{workspace['id']}/browse-files",
+            params={"path": str(workspace_dir)},
+        )
+        escape_response = client.get(
+            f"/api/workspaces/{workspace['id']}/browse-files",
+            params={"path": str(outside)},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["root"] == str(workspace_dir.resolve())
+    assert body["entries"] == [
+        {
+            "name": "pkg",
+            "path": str((workspace_dir / "pkg").resolve()),
+            "workspace_relative_path": "pkg",
+            "kind": "directory",
+        },
+        {
+            "name": "app.py",
+            "path": str(app_file.resolve()),
+            "workspace_relative_path": "app.py",
+            "kind": "file",
+        },
+    ]
+    assert "SECRET_FILE_CONTENT" not in str(body)
+    assert escape_response.status_code == 403
+
+
+def test_api_create_run_accepts_selected_files_and_omits_contents(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    workspace_dir.mkdir()
+    selected = workspace_dir / "app.py"
+    selected.write_text("SECRET_FILE_CONTENT", encoding="utf-8")
+
+    with client:
+        _seed_conversation(client)
+        workspace = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(workspace_dir)},
+        ).json()
+        client.patch("/api/settings", json={"current_workspace_id": workspace["id"]})
+        conversation = client.post(
+            "/api/conversations",
+            json={"name": "Repo thread", "conversation_key": "repo:selected"},
+        ).json()
+        response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={
+                "input_markdown": "Inspect this file",
+                "local_context": {
+                    "selected_files": [
+                        {
+                            "path": str(selected),
+                            "workspace_relative_path": "ignored.py",
+                            "content": "SECRET_FILE_CONTENT",
+                        }
+                    ]
+                },
+            },
+        )
+        run_browse_response = client.get(
+            f"/api/runs/{response.json()['id']}/browse-files",
+            params={"path": str(workspace_dir)},
+        )
+
+    assert response.status_code == 200
+    run = response.json()
+    assert run["local_context"]["selected_files"][0] == {
+        "path": str(selected.resolve()),
+        "workspace_relative_path": "app.py",
+        "reason": "user_selected",
+    }
+    input_text = trigger_client.calls[0]["input_text"]
+    assert "selected_files:" in input_text
+    assert "content: not_included" in input_text
+    assert str(selected.resolve()) in input_text
+    assert "SECRET_FILE_CONTENT" not in input_text
+    assert run_browse_response.status_code == 200
+    assert run_browse_response.json()["root"] == str(workspace_dir.resolve())
+
+
+def test_api_injects_project_skills_only_on_first_conversation_run(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    skill_dir = workspace_dir / ".agents" / "skills" / "project-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: project-skill",
+                "description: Project skill description",
+                "---",
+                "SECRET_SKILL_BODY",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with client:
+        _seed_conversation(client)
+        workspace = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(workspace_dir)},
+        ).json()
+        client.patch("/api/settings", json={"current_workspace_id": workspace["id"]})
+        conversation = client.post(
+            "/api/conversations",
+            json={"name": "Repo thread", "conversation_key": "repo:skills"},
+        ).json()
+        first = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "First"},
+        )
+        second = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Second"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "available_skills:" in trigger_client.calls[0]["input_text"]
+    assert "name: project-skill" in trigger_client.calls[0]["input_text"]
+    assert "Project skill description" in trigger_client.calls[0]["input_text"]
+    assert "SECRET_SKILL_BODY" not in trigger_client.calls[0]["input_text"]
+    assert "available_skills:" not in trigger_client.calls[1]["input_text"]
+
+
+def test_api_create_run_rejects_invalid_selected_files(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    outside_dir = tmp_path / "outside"
+    workspace_dir.mkdir()
+    outside_dir.mkdir()
+    outside_file = outside_dir / "outside.py"
+    outside_file.write_text("outside", encoding="utf-8")
+
+    with client:
+        _seed_conversation(client)
+        workspace = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(workspace_dir)},
+        ).json()
+        client.patch("/api/settings", json={"current_workspace_id": workspace["id"]})
+        conversation = client.post(
+            "/api/conversations",
+            json={"name": "Repo thread", "conversation_key": "repo:invalid-selected"},
+        ).json()
+        relative_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "x", "local_context": {"selected_files": [{"path": "relative.py"}]}},
+        )
+        directory_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "x", "local_context": {"selected_files": [{"path": str(workspace_dir)}]}},
+        )
+        outside_response = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "x", "local_context": {"selected_files": [{"path": str(outside_file)}]}},
+        )
+
+    assert relative_response.status_code == 400
+    assert directory_response.status_code == 400
+    assert outside_response.status_code == 400
+    assert trigger_client.calls == []
+
+
 def test_api_can_rename_and_delete_conversation(tmp_path: Path) -> None:
     client, _ = _client(tmp_path)
 
@@ -779,6 +964,46 @@ def test_api_steer_uses_run_working_directory_snapshot(tmp_path: Path) -> None:
     assert "working_directory: " + str(first_dir) in trigger_client.calls[0]["input_text"]
     assert "working_directory: " + str(first_dir) in trigger_client.calls[1]["input_text"]
     assert "working_directory: " + str(second_dir) not in trigger_client.calls[1]["input_text"]
+
+
+def test_api_steer_accepts_selected_files_for_same_turn(tmp_path: Path) -> None:
+    client, trigger_client = _client(tmp_path)
+    workspace_dir = tmp_path / "repo"
+    workspace_dir.mkdir()
+    selected = workspace_dir / "steer.py"
+    selected.write_text("SECRET_STEER_CONTENT", encoding="utf-8")
+
+    with client:
+        _seed_conversation(client)
+        workspace = client.post(
+            "/api/workspaces",
+            json={"name": "Repo", "working_directory": str(workspace_dir)},
+        ).json()
+        client.patch("/api/settings", json={"current_workspace_id": workspace["id"]})
+        conversation = client.post(
+            "/api/conversations",
+            json={"name": "Repo thread", "conversation_key": "repo:steer-file"},
+        ).json()
+        run = client.post(
+            f"/api/conversations/{conversation['id']}/runs",
+            json={"input_markdown": "Start"},
+        ).json()
+        steer_response = client.post(
+            f"/api/conversations/{conversation['id']}/steer",
+            json={
+                "input_markdown": "Use this file too",
+                "local_context": {"selected_files": [{"path": str(selected)}]},
+            },
+        )
+
+    assert steer_response.status_code == 200
+    assert steer_response.json()["id"] == run["id"]
+    steer_input = trigger_client.calls[-1]["input_text"]
+    assert "turn_mode: steer" in steer_input
+    assert "selected_files:" in steer_input
+    assert str(selected.resolve()) in steer_input
+    assert "content: not_included" in steer_input
+    assert "SECRET_STEER_CONTENT" not in steer_input
 
 
 def test_api_steer_route_can_target_selected_active_run(tmp_path: Path) -> None:

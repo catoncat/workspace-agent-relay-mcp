@@ -1,9 +1,14 @@
+import type { LocalContext, SelectedFileContext } from '@/api/types'
+
 export type QueuedComposerMessage = {
   id: string
   text: string
+  localContext?: LocalContext
 }
 
 export type QueuedMessageBuckets = Record<string, QueuedComposerMessage[]>
+
+const MAX_SELECTED_FILES = 20
 
 export function getQueuedMessagesForConversation(
   buckets: QueuedMessageBuckets,
@@ -32,10 +37,19 @@ export function appendQueuedMessage(
   queue: QueuedComposerMessage[],
   text: string,
   createId: () => string,
+  localContext?: LocalContext,
 ): QueuedComposerMessage[] {
   const trimmed = text.trim()
   if (!trimmed) return queue
-  return [...queue, { id: createId(), text: trimmed }]
+  const normalizedContext = normalizeLocalContext(localContext)
+  return [
+    ...queue,
+    {
+      id: createId(),
+      text: trimmed,
+      ...(normalizedContext ? { localContext: normalizedContext } : {}),
+    },
+  ]
 }
 
 export function editQueuedMessage(
@@ -69,4 +83,29 @@ export function takeQueuedMessage(
 
 export function mergeQueuedMessages(queue: QueuedComposerMessage[]): string {
   return queue.map((message) => message.text.trim()).filter(Boolean).join('\n\n')
+}
+
+export function mergeQueuedLocalContext(queue: QueuedComposerMessage[]): LocalContext | undefined {
+  return normalizeLocalContext({
+    selected_files: queue.flatMap((message) => message.localContext?.selected_files ?? []),
+  })
+}
+
+export function normalizeLocalContext(localContext?: LocalContext | null): LocalContext | undefined {
+  const selectedFiles = localContext?.selected_files ?? []
+  const normalizedFiles: SelectedFileContext[] = []
+  const seenPaths = new Set<string>()
+
+  for (const file of selectedFiles) {
+    const path = file.path.trim()
+    if (!path || seenPaths.has(path)) continue
+    seenPaths.add(path)
+    const relativePath = file.workspace_relative_path?.trim()
+    normalizedFiles.push(
+      relativePath ? { path, workspace_relative_path: relativePath } : { path },
+    )
+    if (normalizedFiles.length >= MAX_SELECTED_FILES) break
+  }
+
+  return normalizedFiles.length > 0 ? { selected_files: normalizedFiles } : undefined
 }

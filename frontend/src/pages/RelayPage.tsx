@@ -7,7 +7,16 @@ import { SettingsSheet } from '@/components/SettingsSheet'
 import { ThreadView } from '@/components/ThreadView'
 import { WorkspaceCommandMenu } from '@/components/WorkspaceCommandMenu'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
-import type { Agent, Conversation, RelaySettings, Run, Workspace } from '@/api/types'
+import { browseRunFiles, browseWorkspaceFiles } from '@/api/client'
+import type {
+  Agent,
+  Conversation,
+  LocalContext,
+  RelaySettings,
+  Run,
+  Workspace,
+  WorkspaceFileBrowseResult,
+} from '@/api/types'
 import { ThreadComposer, resolveComposerMode } from '@/features/relay/components/ThreadComposer'
 import { ThreadHeader } from '@/features/relay/components/ThreadHeader'
 import {
@@ -238,7 +247,7 @@ export function RelayPage() {
   }, [activeConversationId, navigate, runDetails, selectedRunId])
 
   const handleSend = useCallback(
-    async (text: string, intent: SendIntent = 'queue') => {
+    async (text: string, intent: SendIntent = 'queue', localContext?: LocalContext) => {
       const trimmed = text.trim()
       if (!trimmed) return
 
@@ -263,6 +272,7 @@ export function RelayPage() {
           const detail = await createRunMutation.mutateAsync({
             input: trimmed,
             conversationId: createdConversationId,
+            localContext,
           })
           clearOptimisticMessage(createdConversationId, optimisticMessageId)
           navigate({
@@ -294,13 +304,14 @@ export function RelayPage() {
         sending,
         localDispatchPending: dispatchingConversationIdsRef.current.has(conversationId),
         steerTargetRunId: steerTargetRun?.id,
+        localContext,
       })
 
       if (plan.action === 'ignore') return
       if (plan.action === 'queue') {
         setQueuedMessagesByConversation((current) =>
           updateQueuedMessagesForConversation(current, plan.conversationId, (queue) =>
-            appendQueuedMessage(queue, plan.text, nanoid),
+            appendQueuedMessage(queue, plan.text, nanoid, plan.localContext),
           ),
         )
         return
@@ -310,11 +321,19 @@ export function RelayPage() {
       let detail: Awaited<ReturnType<typeof createRunMutation.mutateAsync>>
       try {
         detail = plan.action === 'steer'
-          ? await steerMutation.mutateAsync({ input: plan.text, runId: plan.runId })
+          ? await steerMutation.mutateAsync({
+              input: plan.text,
+              localContext: plan.localContext,
+              runId: plan.runId,
+            })
           : await (async () => {
               dispatchingConversationIdsRef.current.add(plan.conversationId)
               try {
-                return await createRunMutation.mutateAsync(plan.text)
+                return await createRunMutation.mutateAsync({
+                  input: plan.text,
+                  conversationId: plan.conversationId,
+                  localContext: plan.localContext,
+                })
               } catch (error) {
                 dispatchingConversationIdsRef.current.delete(plan.conversationId)
                 throw error
@@ -378,7 +397,7 @@ export function RelayPage() {
         updateQueuedMessagesForConversation(current, conversationId, () => result.queue),
       )
       try {
-        await handleSend(result.message.text, 'steer')
+        await handleSend(result.message.text, 'steer', result.message.localContext)
       } catch {
         setQueuedMessagesByConversation((current) =>
           updateQueuedMessagesForConversation(current, conversationId, (queue) => [result.message!, ...queue]),
@@ -421,7 +440,11 @@ export function RelayPage() {
     setFlushQueuedConversationId(null)
 
     const optimisticMessageId = appendOptimisticMessage(conversationId, plan.text)
-    void createRunMutation.mutateAsync(plan.text)
+    void createRunMutation.mutateAsync({
+      input: plan.text,
+      conversationId,
+      localContext: plan.localContext,
+    })
       .then((detail) => {
         clearOptimisticMessage(conversationId, optimisticMessageId)
         navigate({
@@ -449,6 +472,17 @@ export function RelayPage() {
     queuedMessages,
     sending,
   ])
+
+  const browseComposerFiles = useCallback(
+    (path?: string | null): Promise<WorkspaceFileBrowseResult> => {
+      if (steerTargetRun?.id) return browseRunFiles(steerTargetRun.id, path)
+      if (currentWorkspaceId != null) return browseWorkspaceFiles(currentWorkspaceId, path)
+      return Promise.reject(new Error('Select a workspace with a working directory before using @file.'))
+    },
+    [currentWorkspaceId, steerTargetRun?.id],
+  )
+
+  const canBrowseFiles = Boolean(steerTargetRun?.id || currentWorkspaceId != null)
 
   const handleStartDraftConversation = useCallback(() => {
     setDraftActive(true)
@@ -586,8 +620,10 @@ export function RelayPage() {
           canSteer={Boolean(steerTargetRun)}
           queuedMessages={queuedMessages}
           queueFlushPending={queueFlushPending}
+          canBrowseFiles={canBrowseFiles}
           onDismiss={handleDismiss}
           onSend={handleSend}
+          onBrowseFiles={browseComposerFiles}
           onQueuedMessageDelete={handleDeleteQueuedMessage}
           onQueuedMessageEdit={handleEditQueuedMessage}
           onQueuedMessageSteer={handleSteerQueuedMessage}

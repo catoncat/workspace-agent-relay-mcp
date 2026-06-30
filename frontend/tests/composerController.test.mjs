@@ -35,6 +35,53 @@ test('rapid normal sends use local dispatch pending to queue the second message'
   )
 })
 
+test('send plan preserves selected file context for create run and steer', () => {
+  const localContext = {
+    selected_files: [
+      { path: '/repo/src/app.py', workspace_relative_path: 'src/app.py' },
+    ],
+  }
+
+  assert.deepEqual(
+    planComposerSend({
+      text: ' inspect this ',
+      intent: 'queue',
+      conversationId: 101,
+      agentWorking: false,
+      sending: false,
+      localDispatchPending: false,
+      steerTargetRunId: null,
+      localContext,
+    }),
+    {
+      action: 'create_run',
+      text: 'inspect this',
+      conversationId: 101,
+      localContext,
+    },
+  )
+
+  assert.deepEqual(
+    planComposerSend({
+      text: ' use this context ',
+      intent: 'steer',
+      conversationId: 101,
+      agentWorking: true,
+      sending: false,
+      localDispatchPending: false,
+      steerTargetRunId: 55,
+      localContext,
+    }),
+    {
+      action: 'steer',
+      text: 'use this context',
+      conversationId: 101,
+      runId: 55,
+      localContext,
+    },
+  )
+})
+
 test('queue flush waits while busy then dispatches merged FIFO text when idle', () => {
   const queuedMessages = [
     { id: 'q1', text: 'first' },
@@ -66,6 +113,55 @@ test('queue flush waits while busy then dispatches merged FIFO text when idle', 
       action: 'flush',
       conversationId: 101,
       text: 'first\n\nsecond',
+      messages: queuedMessages,
+    },
+  )
+})
+
+test('queue flush merges selected file context in FIFO order without duplicates', () => {
+  const queuedMessages = [
+    {
+      id: 'q1',
+      text: 'first',
+      localContext: {
+        selected_files: [
+          { path: '/repo/a.py', workspace_relative_path: 'a.py' },
+          { path: '/repo/shared.py', workspace_relative_path: 'shared.py' },
+        ],
+      },
+    },
+    {
+      id: 'q2',
+      text: 'second',
+      localContext: {
+        selected_files: [
+          { path: '/repo/shared.py', workspace_relative_path: 'shared.py' },
+          { path: '/repo/b.py', workspace_relative_path: 'b.py' },
+        ],
+      },
+    },
+  ]
+
+  assert.deepEqual(
+    planQueueFlush({
+      flushConversationId: 101,
+      activeConversationId: 101,
+      agentWorking: false,
+      sending: false,
+      localDispatchPending: false,
+      queuedMessages,
+    }),
+    {
+      action: 'flush',
+      conversationId: 101,
+      text: 'first\n\nsecond',
+      localContext: {
+        selected_files: [
+          { path: '/repo/a.py', workspace_relative_path: 'a.py' },
+          { path: '/repo/shared.py', workspace_relative_path: 'shared.py' },
+          { path: '/repo/b.py', workspace_relative_path: 'b.py' },
+        ],
+      },
       messages: queuedMessages,
     },
   )

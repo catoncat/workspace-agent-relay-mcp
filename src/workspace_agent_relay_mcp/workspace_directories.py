@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 MAX_DIRECTORY_BROWSE_ENTRIES = 500
+MAX_FILE_BROWSE_ENTRIES = 500
 
 
 def normalize_picked_directory(value: str) -> str:
@@ -56,6 +57,84 @@ def browse_directory(value: Any = None) -> dict[str, Any]:
         "home": home_path,
         "entries": entries[:MAX_DIRECTORY_BROWSE_ENTRIES],
         "truncated": len(entries) > MAX_DIRECTORY_BROWSE_ENTRIES,
+    }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _normalize_workspace_file_root(value: Any) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("workspace has no working_directory")
+    root = Path(text).expanduser()
+    if not root.is_absolute():
+        raise ValueError("workspace working_directory must be absolute")
+    resolved = root.resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"workspace working_directory is not a directory: {resolved}")
+    return resolved
+
+
+def normalize_workspace_file_browse_path(*, root: Any, path: Any = None) -> tuple[Path, Path]:
+    resolved_root = _normalize_workspace_file_root(root)
+    text = str(path or "").strip()
+    candidate = resolved_root if not text else Path(text).expanduser()
+    if not candidate.is_absolute():
+        raise ValueError("path must be an absolute path")
+    resolved_path = candidate.resolve()
+    if not _is_relative_to(resolved_path, resolved_root):
+        raise PermissionError("path is outside the workspace root")
+    if not resolved_path.is_dir():
+        raise ValueError(f"path is not a directory: {resolved_path}")
+    return resolved_root, resolved_path
+
+
+def _workspace_relative_path(path: Path, root: Path) -> str:
+    return "" if path == root else path.relative_to(root).as_posix()
+
+
+def browse_workspace_files(*, root: Any, path: Any = None) -> dict[str, Any]:
+    resolved_root, resolved_path = normalize_workspace_file_browse_path(root=root, path=path)
+    entries: list[dict[str, str]] = []
+    for child in resolved_path.iterdir():
+        try:
+            resolved_child = child.resolve()
+            if not _is_relative_to(resolved_child, resolved_root):
+                continue
+            if resolved_child.is_dir():
+                kind = "directory"
+            elif resolved_child.is_file():
+                kind = "file"
+            else:
+                continue
+        except OSError:
+            continue
+        entries.append(
+            {
+                "name": child.name,
+                "path": str(resolved_child),
+                "workspace_relative_path": _workspace_relative_path(resolved_child, resolved_root),
+                "kind": kind,
+            }
+        )
+    entries.sort(key=lambda item: (0 if item["kind"] == "directory" else 1, item["name"].casefold(), item["name"]))
+    parent = None
+    if resolved_path != resolved_root:
+        candidate_parent = resolved_path.parent.resolve()
+        if _is_relative_to(candidate_parent, resolved_root):
+            parent = str(candidate_parent)
+    return {
+        "root": str(resolved_root),
+        "path": str(resolved_path),
+        "parent": parent,
+        "entries": entries[:MAX_FILE_BROWSE_ENTRIES],
+        "truncated": len(entries) > MAX_FILE_BROWSE_ENTRIES,
     }
 
 

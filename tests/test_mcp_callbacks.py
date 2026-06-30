@@ -81,11 +81,119 @@ def test_server_info_lists_relay_tools(tmp_path: Path, monkeypatch) -> None:
         "update_conversation_title",
         "ask_user",
         "get_run_context",
+        "list_local_conversations",
+        "create_local_conversation",
+        "read_local_conversation",
     }
     rendered = str(result)
     assert "auth_token" not in rendered
     assert "default_agent_token" not in rendered
     assert "callback_token" not in rendered
+
+
+def test_local_conversation_tools_create_list_and_read_bounded_context(tmp_path: Path, monkeypatch) -> None:
+    from workspace_agent_relay_mcp import server
+
+    store = RelayStore(tmp_path / "relay.sqlite")
+    agent = store.create_agent(
+        name="default",
+        trigger_url="https://api.chatgpt.com/v1/workspace_agents/agtch_test/trigger",
+        access_token="at-secret",
+    )
+    monkeypatch.setattr(server, "store", store)
+
+    created = _call(
+        server.create_local_conversation,
+        name="Local Thread",
+        conversation_key="local:thread",
+        agent_id=agent["id"],
+        workspace_id=None,
+    )
+    conversation = created["conversation"]
+    run = store.create_run(
+        agent_id=agent["id"],
+        conversation_id=conversation["id"],
+        conversation_key=conversation["conversation_key"],
+        input_markdown="task",
+        idempotency_key="run_1",
+        request_id="run_1",
+    )
+    store.record_plan(
+        request_id="run_1",
+        conversation_key="local:thread",
+        steps=[{"id": "s1", "title": "Do work"}],
+    )
+    store.record_progress(
+        request_id="run_1",
+        conversation_key="local:thread",
+        message="Progress",
+        payload={"echo": "metadata"},
+    )
+    store.record_result(
+        request_id="run_1",
+        conversation_key="local:thread",
+        status="done",
+        title="Done",
+        markdown="Final",
+        artifacts=[
+            {
+                "name": "secret.txt",
+                "mime_type": "text/plain",
+                "content": "artifact-secret",
+                "metadata": {"kind": "note"},
+            }
+        ],
+    )
+
+    listed = _call(server.list_local_conversations, limit=10)
+    read = _call(
+        server.read_local_conversation,
+        conversation_key="local:thread",
+        run_limit=1,
+        event_limit_per_run=2,
+        include_artifacts=False,
+    )
+
+    assert created["success"] is True
+    assert listed["success"] is True
+    assert [item["conversation_key"] for item in listed["conversations"]] == ["local:thread"]
+    assert listed["conversations"][0]["latest_run"]["id"] == run["id"]
+    assert read["success"] is True
+    assert read["conversation"]["conversation_key"] == "local:thread"
+    assert len(read["runs"]) == 1
+    assert len(read["runs"][0]["events"]) == 2
+    assert read["runs"][0]["artifacts"][0]["name"] == "secret.txt"
+    rendered = str(read)
+    assert "agent_secrets" not in rendered
+    assert "token_ref" not in rendered
+    assert "at-secret" not in rendered
+    assert "artifact-secret" not in rendered
+
+
+def test_read_local_conversation_can_include_bounded_artifact_content(tmp_path: Path, monkeypatch) -> None:
+    from workspace_agent_relay_mcp import server
+
+    store = RelayStore(tmp_path / "relay.sqlite")
+    _seed_run(store)
+    monkeypatch.setattr(server, "store", store)
+    store.record_result(
+        request_id="run_1",
+        conversation_key="research:sherlog",
+        status="done",
+        title="Done",
+        markdown="Final",
+        artifacts=[{"name": "artifact.txt", "mime_type": "text/plain", "content": "x" * 5000}],
+    )
+
+    read = _call(
+        server.read_local_conversation,
+        conversation_key="research:sherlog",
+        include_artifacts=True,
+    )
+
+    artifact = read["runs"][0]["artifacts"][0]
+    assert len(artifact["content_excerpt"]) == 4000
+    assert artifact["content_truncated"] is True
 
 
 def test_update_conversation_title_tool_updates_current_conversation(tmp_path: Path, monkeypatch) -> None:
